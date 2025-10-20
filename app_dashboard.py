@@ -5,30 +5,42 @@ import time
 import os
 from dotenv import load_dotenv
 
-# --- CONFIGURAZIONE SICURA ---
-load_dotenv() # Carica le variabili da .env
-API_URL = "http://127.0.0.1:8000"
-API_KEY = os.getenv("API_KEY") # Legge la chiave segreta
+# --- CONFIGURAZIONE UNIVERSALE E SICURA ---
+load_dotenv()
+
+# Cerca l'URL del backend nelle variabili d'ambiente (per Render).
+# Se non lo trova, usa l'URL pubblico come fallback (per il tuo Mac).
+API_URL = os.getenv("API_URL", "https://mitragliere-ai.onrender.com")
+
+API_KEY = os.getenv("API_KEY") 
 REFRESH_INTERVAL_SECONDS = 15
+
+# Controlla che le configurazioni essenziali siano presenti
+if not API_KEY:
+    st.error("ERRORE CRITICO: La variabile d'ambiente 'API_KEY' non è stata trovata. Controlla il tuo file .env o le impostazioni su Render.")
+    st.stop()
+if not API_URL:
+    st.error("ERRORE CRITICO: L'indirizzo del backend (API_URL) non è stato trovato.")
+    st.stop()
 
 # Prepara l'header di autenticazione
 AUTH_HEADER = {"x-api-key": API_KEY}
 
+# Il resto dello script è identico...
 st.set_page_config(
-    page_title="Mitragliere A.I. - Pannello di Controllo V2",
-    page_icon="🛡️",
+    page_title="Mitragliere A.I. - Pannello Cloud",
+    page_icon="☁️",
     layout="wide"
 )
 
-# --- FUNZIONI DI COMUNICAZIONE CON L'API (con autenticazione) ---
 def fetch_proposals():
     try:
         response = requests.get(f"{API_URL}/proposals", headers=AUTH_HEADER)
         response.raise_for_status()
         data = response.json()
-        return data.get("trades", []) # La nuova API restituisce 'trades' direttamente
+        return data.get("trades", [])
     except requests.exceptions.RequestException as e:
-        st.toast(f"⚠️ Errore di connessione: {e}", icon="🔥")
+        st.toast(f"⚠️ Errore di connessione al Cloud: {e}", icon="🔥")
         return []
 
 def execute_trade(symbol: str):
@@ -41,7 +53,6 @@ def execute_trade(symbol: str):
         st.error(f"Errore durante l'invio dell'ordine: {e}")
         return None
 
-# Il resto dello script rimane quasi identico...
 if 'last_refresh' not in st.session_state:
     st.session_state.last_refresh = time.time()
 
@@ -51,8 +62,8 @@ def refresh_page():
 
 col1, col2 = st.columns([4, 1])
 with col1:
-    st.title("🛡️ Mitragliere A.I. - Pannello V2")
-    st.caption("Comunicazione sicura con il backend LIVE.")
+    st.title("☁️ Mitragliere A.I. - Pannello di Controllo Cloud")
+    st.caption(f"Connesso a: {API_URL}")
 with col2:
     if st.button("🔄 Aggiorna Ora", use_container_width=True):
         refresh_page()
@@ -61,7 +72,7 @@ status_placeholder = st.empty()
 proposals = fetch_proposals()
 
 if not proposals:
-    st.info("Nessuna proposta di trade al momento. Il sistema sta analizzando il mercato...")
+    st.info("Nessuna proposta di trade dal Cloud. Il sistema sta analizzando il mercato...")
 else:
     st.subheader(f"Trovate {len(proposals)} proposte di trade:")
     df = pd.DataFrame(proposals)
@@ -78,10 +89,10 @@ else:
         symbol = proposal['symbol']
         with cols[i]:
             if st.button(f"Esegui {symbol}", key=symbol, use_container_width=True, type="primary"):
-                with st.spinner(f"Invio ordine per {symbol}..."):
+                with st.spinner(f"Invio ordine al Cloud per {symbol}..."):
                     result = execute_trade(symbol)
                     if result:
-                        status_placeholder.success(f"✅ Comando di esecuzione per {symbol} inviato con successo!")
+                        status_placeholder.success(f"✅ Comando per {symbol} inviato con successo al Cloud!")
                     else:
                         status_placeholder.error(f"❌ Fallimento invio comando per {symbol}.")
                 time.sleep(2)
@@ -92,4 +103,4 @@ if time.time() - st.session_state.last_refresh > REFRESH_INTERVAL_SECONDS:
 
 time_since_refresh = int(time.time() - st.session_state.last_refresh)
 st.markdown("---")
-st.markdown(f"<small>Ultimo aggiornamento: {time_since_refresh}s fa. Prossimo aggiornamento automatico tra {max(0, REFRESH_INTERVAL_SECONDS - time_since_refresh)}s.</small>", unsafe_allow_html=True)
+st.markdown(f"<small>Ultimo aggiornamento dal Cloud: {time_since_refresh}s fa. Prossimo aggiornamento automatico tra {max(0, REFRESH_INTERVAL_SECONDS - time_since_refresh)}s.</small>", unsafe_allow_html=True)
