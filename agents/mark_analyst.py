@@ -1,5 +1,6 @@
 # ===============================================================
-# MarkAnalyst v7.0 - The Render-Proof Final Version
+# MarkAnalyst v8.0 - The Self-Contained Final Version
+# La Hall of Fame è incorporata per eliminare i FileNotFoundError
 # ===============================================================
 
 import pandas as pd
@@ -7,24 +8,55 @@ import pandas_ta as ta
 import json, logging, time, os
 from datetime import datetime, timedelta
 
-# Importa i tuoi moduli locali
 from core.exchange_router import ExchangeRouter
 from agents.sara_trader import SaraTrader
 from agents.db_handler import DBHandler
 
-# --- FUNZIONI HELPER ---
-def _normalize_symbol_for_bybit(sym: str) -> str:
-    s = sym.strip().upper().replace(":", "/").replace("//", "/")
-    if ":USDT" in s: return s
-    if s.endswith("USDT") and "/" not in s:
-        base = s[:-4]
-        return f"{base}/USDT:USDT"
-    if s.endswith("/USDT"):
-        return s + ":USDT"
-    return s
+# --- HALL OF FAME INCORPORATA NEL CODICE ---
+# Questo elimina la necessità di leggere un file .json esterno.
+HALL_OF_FAME_DATA = {
+    "XRP/USDT:USDT": {
+        "strategy": "MEANREV",
+        "params": { "bb_len": 30, "bb_mult": 2.0, "rsi_len": 21, "rsi_oversold": 25, "rsi_overbought": 75 }
+    },
+    "ADA/USDT:USDT": {
+        "strategy": "MEANREV",
+        "params": { "bb_len": 30, "bb_mult": 2.0, "rsi_len": 21, "rsi_oversold": 25, "rsi_overbought": 75 }
+    },
+    "AVAX/USDT:USDT": {
+        "strategy": "PULLBACK",
+        "params": { "ema_fast": 30, "ema_slow": 200, "rr": 3.0 }
+    },
+    "DOT/USDT:USDT": {
+        "strategy": "PULLBACK",
+        "params": { "ema_fast": 30, "ema_slow": 200, "rr": 1.5 }
+    },
+    "SOL/USDT:USDT": {
+        "strategy": "PULLBACK",
+        "params": { "ema_fast": 30, "ema_slow": 50, "rr": 3.0 }
+    },
+    "DOGE/USDT:USDT": {
+        "strategy": "PULLBACK",
+        "params": { "ema_fast": 10, "ema_slow": 200, "rr": 3.0 }
+    },
+    "BTC/USDT:USDT": {
+        "strategy": "PULLBACK",
+        "params": { "ema_fast": 20, "ema_slow": 100, "rr": 2.0 }
+    },
+    "LINK/USDT:USDT": {
+        "strategy": "PULLBACK",
+        "params": { "ema_fast": 30, "ema_slow": 50, "rr": 1.5 }
+    },
+    "SPX/USDT:USDT": {
+        "strategy": "PULLBACK",
+        "params": { "ema_fast": 10, "ema_slow": 50, "rr": 2.0 }
+    },
+    "ETH/USDT:USDT": {
+        "strategy": "PULLBACK",
+        "params": { "ema_fast": 10, "ema_slow": 50, "rr": 1.5 }
+    }
+}
 
-def _col_exists(df: pd.DataFrame, col: str) -> bool:
-    return col in df.columns
 
 class MarkAnalyst:
     def __init__(self, exchange_router: ExchangeRouter, sara: SaraTrader, db: DBHandler):
@@ -33,25 +65,16 @@ class MarkAnalyst:
         self.db = db
         self.exchange = self.router.get("bybit")
 
-        # --- PERCORSO A PROVA DI DEPLOY ---
-        # Costruisce un percorso che parte dalla directory dello script corrente
-        # e risale per trovare la cartella 'config'.
-        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        config_path = os.path.join(base_dir, 'config', 'hall_of_fame.json')
-        
+        # Carica la configurazione direttamente dal dizionario Python
         try:
-            with open(config_path, "r") as f:
-                raw = json.load(f)
-            self.hall_of_fame = {}
-            for k, v in raw.items():
-                norm = _normalize_symbol_for_bybit(k)
-                self.hall_of_fame[norm] = v
-            logging.info(f"✅ Hall of Fame caricata con successo da: {config_path}")
-        except FileNotFoundError:
-            logging.error(f"‼️ ERRORE FATALE: File di configurazione non trovato in '{config_path}'.")
-            raise SystemExit(f"Impossibile trovare {config_path}. Deploy fallito.")
+            self.hall_of_fame = HALL_OF_FAME_DATA
+            if not self.hall_of_fame:
+                raise ValueError("Il dizionario HALL_OF_FAME_DATA è vuoto.")
+            logging.info(f"✅ Hall of Fame caricata con successo dal codice. {len(self.hall_of_fame)} strategie pronte.")
+        except Exception as e:
+            logging.error(f"‼️ ERRORE FATALE: Impossibile caricare la Hall of Fame incorporata: {e}")
+            raise SystemExit("Errore critico: la configurazione interna è corrotta.")
 
-        # Il resto del codice rimane invariato...
         self.assets = list(self.hall_of_fame.keys())
         self.timeframe = "1h"
         self.dedupe_minutes = 30
@@ -62,7 +85,7 @@ class MarkAnalyst:
         except Exception as e:
             logging.warning("Impossibile caricare i mercati su Bybit: %s", e)
 
-    # ... (TUTTO IL RESTO DEL FILE DA QUI IN POI È IDENTICO E CORRETTO) ...
+    # ... (Tutto il resto del file rimane identico) ...
 
     def _needed_lookback(self, params: dict) -> int:
         candidates = [int(params.get(k, 0)) for k in ["ema_fast", "ema_slow", "rsi_len", "bb_len"]]
@@ -106,13 +129,13 @@ class MarkAnalyst:
         side, entry, sl, tp = None, None, None, None
         rr = float(params.get('rr', 1.6))
         if strategy_name.upper() == "PULLBACK":
-            if not (_col_exists(p, 'EMA_F') and _col_exists(p, 'EMA_S')): return None
+            if not ('EMA_F' in p and 'EMA_S' in p): return None
             if (p['close'] > p['EMA_S']) and (p['low'] <= p['EMA_F']) and (c['close'] > c['open']):
                 side = "LONG"; entry = float(c['close']); sl = float(p['low']); tp = entry + rr * (entry - sl)
             elif (p['close'] < p['EMA_S']) and (p['high'] >= p['EMA_F']) and (c['close'] < c['open']):
                 side = "SHORT"; entry = float(c['close']); sl = float(p['high']); tp = entry - rr * (sl - entry)
         elif strategy_name.upper() == "MEANREV":
-            if not all(_col_exists(p, x) for x in ['BBL','BBM','BBU','RSI']): return None
+            if not all(x in p for x in ['BBL','BBM','BBU','RSI']): return None
             rsi_oversold = float(params.get('rsi_oversold', 30)); rsi_overbought = float(params.get('rsi_overbought', 70))
             if (p['close'] <= p['BBL']) and (p['RSI'] <= rsi_oversold):
                 side = "LONG"; entry = float(c['close']); sl = min(entry - (p['BBM']-p['BBL']), float(p['low'])); tp = float(p['BBM'])
