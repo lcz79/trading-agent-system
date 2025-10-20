@@ -1,0 +1,14 @@
+# Ambiente virtuale
+venv/
+
+# File di cache di Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Cartella dei dati generati dal bot
+data/
+
+# File di sistema di macOS
+.DS_Store

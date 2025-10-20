@@ -1,0 +1,12 @@
+{
+  "binance": {
+    "type": "binanceusdm",
+    "testnet": false,
+    "rate_limit": true
+  },
+  "bybit": {
+    "type": "bybit",
+    "testnet": false,
+    "rate_limit": true
+  }
+}

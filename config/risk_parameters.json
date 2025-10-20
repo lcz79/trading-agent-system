@@ -1,0 +1,4 @@
+{
+  "account_equity": 10000, "risk_frac_per_trade": 0.01, "max_concurrent_symbols": 4,
+  "max_risk_per_symbol_frac": 0.015, "min_qty": 1, "slippage_bps": 3, "fee_bps_per_side": 5
+}
