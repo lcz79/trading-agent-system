@@ -1,46 +1,34 @@
 {
-  "assets": [
-    "BTC/USDT",
-    "ETH/USDT",
-    "SOL/USDT",
-    "XRP/USDT",
-    "DOGE/USDT",
-    "ADA/USDT",
-    "AVAX/USDT",
-    "LINK/USDT",
-    "MATIC/USDT",
-    "DOT/USDT",
-    "TON/USDT",
-    "TRX/USDT",
-    "LTC/USDT",
-    "BCH/USDT",
-    "OP/USDT",
-    "ARB/USDT",
-    "ATOM/USDT",
-    "NEAR/USDT",
-    "APT/USDT",
-    "SUI/USDT",
-    "AAVE/USDT",
-    "UNI/USDT",
-    "XLM/USDT",
-    "FTM/USDT"
-  ],
-  "timeframe": "1h",
-  "dedupe_minutes": 30,
-  "indicators": {
-    "bb_len": 20, "bb_mult": 2.2, "rsi_len": 14,
-    "ema_fast": 10, "ema_slow": 30, "atr_len": 14,
-    "adx_len": 14, "kc_len": 20, "kc_mult": 1.5
-  },
-  "filters": {
-    "atr_min_pct": 0.5, "atr_max_pct": 5.0, "min_adx": 20
-  },
-  "logic": {
-    "rr": 1.5, "rsi_buy_level": 45, "rsi_sell_level": 55,
-    "rsi_oversold": 30, "rsi_overbought": 70
-  },
-  "news": {
-    "feeds": ["https://cointelegraph.com/rss"],
-    "max_items_per_feed": 5
-  }
+    "assets": [
+        "BTC/USDT", "ETH/USDT", "SOL/USDT", "XRP/USDT", "DOGE/USDT", 
+        
+        "EURUSD", "GBPUSD", "USDJPY", "AUDUSD", "USDCAD",
+        "EURJPY", "GBPJPY", "USDCNH", "EURGBP", "AUDJPY",
+        
+        "SPX500USD", "NAS100USD", "US30USD", "DE40USD", "UK100USD",
+        "JP225USD", "HK50USD", "EU50USD", "AU200USD", "US2000USD",
+        
+        "XAUUSD", "XAGUSD", "COPPERUSD",
+        
+        "WTIUSD", "BRENTUSD", "NATGASUSD"
+    ],
+    "timeframe": "1h",
+    "dedupe_minutes": 30,
+    "indicators": {
+        "rsi_len": 14, "rsi_buy_level": 50, "rsi_sell_level": 50,
+        "rsi_overbought": 70, "rsi_oversold": 30,
+        "bb_len": 20, "bb_mult": 2.0,
+        "ema_fast": 9, "ema_slow": 21,
+        "atr_len": 14,
+        "adx_len": 14,
+        "kc_len": 20, "kc_mult": 1.5
+    },
+    "filters": {
+        "min_adx": 20,
+        "atr_min_pct": 0.5,
+        "atr_max_pct": 10.0
+    },
+    "logic": {
+        "rr": 1.5
+    }
 }
