@@ -1,47 +1,46 @@
 {
-  "timeframe": "15m",
   "assets": [
-
-  "BTC/USDT:USDT",
-  "ETH/USDT:USDT",
-  "SOL/USDT:USDT",
-  "XRP/USDT:USDT",
-  "DOGE/USDT:USDT",
-  "ADA/USDT:USDT",
-  "AVAX/USDT:USDT",
-  "LINK/USDT:USDT",
-  "MATIC/USDT:USDT",
-  "DOT/USDT:USDT",
-  "TON/USDT:USDT",
-  "TRX/USDT:USDT",
-  "LTC/USDT:USDT",
-  "BCH/USDT:USDT",
-  "OP/USDT:USDT",
-  "ARB/USDT:USDT",
-  "ATOM/USDT:USDT",
-  "NEAR/USDT:USDT",
-  "APT/USDT:USDT",
-  "SUI/USDT:USDT",
-  "AAVE/USDT:USDT",
-  "UNI/USDT:USDT",
-  "XLM/USDT:USDT",
-  "FTM/USDT:USDT"
-],
-
+    "BTC/USDT",
+    "ETH/USDT",
+    "SOL/USDT",
+    "XRP/USDT",
+    "DOGE/USDT",
+    "ADA/USDT",
+    "AVAX/USDT",
+    "LINK/USDT",
+    "MATIC/USDT",
+    "DOT/USDT",
+    "TON/USDT",
+    "TRX/USDT",
+    "LTC/USDT",
+    "BCH/USDT",
+    "OP/USDT",
+    "ARB/USDT",
+    "ATOM/USDT",
+    "NEAR/USDT",
+    "APT/USDT",
+    "SUI/USDT",
+    "AAVE/USDT",
+    "UNI/USDT",
+    "XLM/USDT",
+    "FTM/USDT"
+  ],
+  "timeframe": "1h",
+  "dedupe_minutes": 30,
   "indicators": {
-    "bb_len": 20, "bb_mult": 2.0, "rsi_len": 14, "ema_fast": 50, "ema_slow": 200,
-    "atr_len": 14, "adx_len": 14, "kc_len": 20, "kc_mult": 1.5
+    "bb_len": 20, "bb_mult": 2.2, "rsi_len": 14,
+    "ema_fast": 10, "ema_slow": 30, "atr_len": 14,
+    "adx_len": 14, "kc_len": 20, "kc_mult": 1.5
   },
-  "filters": { "atr_min_pct": 0.002, "atr_max_pct": 0.030, "min_adx": 15 },
-  "logic": { "rr": 1.8, "rsi_buy_level": 45, "rsi_sell_level": 55, "rsi_oversold": 30, "rsi_overbought": 70 },
+  "filters": {
+    "atr_min_pct": 0.5, "atr_max_pct": 5.0, "min_adx": 20
+  },
+  "logic": {
+    "rr": 1.5, "rsi_buy_level": 45, "rsi_sell_level": 55,
+    "rsi_oversold": 30, "rsi_overbought": 70
+  },
   "news": {
-    "feeds": [
-      "https://cointelegraph.com/rss",
-      "https://www.reutersagency.com/feed/?best-topics=markets",
-      "https://www.investing.com/rss/news_25.rss"
-    ],
+    "feeds": ["https://cointelegraph.com/rss"],
     "max_items_per_feed": 5
-  },
-  "live_trading": true,
-  "dedupe_minutes": 30
+  }
 }

@@ -38,7 +38,7 @@ class WebbyExecutor:
         symbol = trade_details["symbol"]
         side = trade_details["side"].lower()
         qty = trade_details["qty_est"]
-        ex_name = "bybit" # --- MODIFICA QUI ---
+        ex_name = "bybit"
         exchange = self.router.get(ex_name)
 
         if not exchange:
@@ -74,19 +74,26 @@ class WebbyExecutor:
         equity = float(self.risk.cfg["account_equity"])
         trade_proposals = []
 
-        for symbol, decision_pack in sara.items():
+        # --- LA CORREZIONE È QUI ---
+        # Prima: for symbol, decision_pack in sara.items():
+        # Ora: Iteriamo sulla lista di asset puliti per garantire coerenza
+        for clean_symbol in self.assets:
+            decision_pack = sara.get(clean_symbol)
+            if not decision_pack:
+                continue
+
             decision = decision_pack.get("data", {})
             bias = decision.get("bias")
             
-            if bias not in ("LONG", "SHORT") or not self._should_fire(symbol):
+            if bias not in ("LONG", "SHORT") or not self._should_fire(clean_symbol):
                 continue
 
             mark_signal = decision.get("src", {}).get("mark", {})
             if mark_signal.get("signal") not in ("LONG", "SHORT"):
                 continue
 
-            ex_name = "bybit" # --- MODIFICA QUI ---
-            specs = self.router.market_specs(ex_name, symbol)
+            ex_name = "bybit"
+            specs = self.router.market_specs(ex_name, clean_symbol)
             entry, sl, tp = float(mark_signal["entry"]), float(mark_signal["sl"]), float(mark_signal["tp"])
             qty_est = self.risk.position_size(equity, entry, sl)
             
@@ -96,12 +103,13 @@ class WebbyExecutor:
 
             if qty_est <= specs.get('min_qty', 0): continue
 
+            # Usiamo 'clean_symbol' per creare la proposta
             proposal = {
-                "symbol": symbol, "side": bias, "entry": entry, "sl": sl, "tp": tp,
+                "symbol": clean_symbol, "side": bias, "entry": entry, "sl": sl, "tp": tp,
                 "qty_est": qty_est, "score": decision.get("score", 0), "logic": mark_signal.get("logic", "N/A")
             }
             trade_proposals.append(proposal)
-            self._record_fire(symbol)
+            self._record_fire(clean_symbol)
 
         if trade_proposals:
             logging.info(f"[WEBBY] Generate {len(trade_proposals)} nuove proposte di trade.")
