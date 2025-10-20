@@ -1,106 +1,135 @@
-import logging
-from typing import List, Dict, Any, Optional
+# ===============================================================
+# MarkAnalyst v5 - Master Strategist
+# Agente di analisi che utilizza la Hall of Fame per decisioni
+# basate su backtest a lungo termine.
+# ===============================================================
+
 import pandas as pd
 import pandas_ta as ta
-from core.memory_hub import publish
+import json, logging, time
+from datetime import datetime, timedelta
+
+from core.exchange_router import ExchangeRouter
+from agents.sara_trader import SaraTrader
+from agents.db_handler import DBHandler
 
 class MarkAnalyst:
-    def __init__(self, exchange, assets: List[str], timeframe: str, ind_cfg: Dict[str, Any], filt_cfg: Dict[str, Any], logic_cfg: Dict[str, Any]):
-        self.ex = exchange
-        self.assets = assets
-        self.tf = timeframe
-        self.ind = ind_cfg
-        self.filt = filt_cfg
-        self.logic = logic_cfg
-
-    def fetch_df(self, symbol: str, limit: int = 300) -> Optional[pd.DataFrame]:
-        try:
-            data = None
-            # --- CORREZIONE DEFINITIVA PER BYBIT ---
-            # Bybit per i derivati usa il formato 'BTCUSDT'.
-            # Tentiamo prima questo formato.
-            unified_symbol = symbol.replace("/", "")
-            
-            if unified_symbol in self.ex.markets:
-                data = self.ex.fetch_ohlcv(unified_symbol, timeframe=self.tf, limit=limit)
-            elif symbol in self.ex.markets: # Tentativo di fallback con il simbolo originale
-                data = self.ex.fetch_ohlcv(symbol, timeframe=self.tf, limit=limit)
-            # ------------------------------------
-            
-            if data is None:
-                # Se non troviamo dati, registriamo un avviso invece di un errore che blocca tutto.
-                logging.warning(f"[MARK] fetch {symbol}: Nessuna variante del simbolo trovata sull'exchange o dati non disponibili.")
-                return None
-
-            if not data: return None
-            df = pd.DataFrame(data, columns=["time","open","high","low","close","volume"])
-            df["timestamp"] = pd.to_datetime(df["time"], unit="ms")
-            for c in ["open","high","low","close","volume"]:
-                df[c] = pd.to_numeric(df[c], errors="coerce")
-            return df.dropna().reset_index(drop=True)
-        except Exception as e:
-            # Gestisce altri errori imprevisti durante il fetch.
-            logging.error(f"[MARK] Eccezione imprevista in fetch_df per {symbol}: {e}")
-            return None
-
-    def add_indicators(self, df: pd.DataFrame) -> pd.DataFrame:
-        p = self.ind
+    def __init__(self, exchange_router: ExchangeRouter, sara: SaraTrader, db: DBHandler):
+        self.router = exchange_router
+        self.sara = sara
+        self.db = db
+        self.exchange = self.router.get("bybit")
         
-        bb = ta.bbands(df["close"], length=p["bb_len"], std=p["bb_mult"])
-        if bb is not None and not bb.empty:
-            df["BBL"] = bb.iloc[:, 0]
-            df["BBM"] = bb.iloc[:, 1]
-            df["BBU"] = bb.iloc[:, 2]
+        # --- MODIFICA CHIAVE: CARICA LA HALL OF FAME ---
+        try:
+            with open("config/hall_of_fame.json", "r") as f:
+                self.hall_of_fame = json.load(f)
+            logging.info(f"✅ Hall of Fame caricata. {len(self.hall_of_fame)} strategie vincenti pronte.")
+        except FileNotFoundError:
+            logging.error("‼️ File 'config/hall_of_fame.json' non trovato. L'agente non può operare.")
+            self.hall_of_fame = {}
+
+        # Gli asset da analizzare sono solo quelli nella Hall of Fame
+        self.assets = list(self.hall_of_fame.keys())
+        self.timeframe = "1h"
+        self.dedupe_minutes = 30 # Non inviare lo stesso segnale per 30 minuti
+
+    def get_data_and_indicators(self, symbol, timeframe, params):
+        """Recupera i dati e calcola solo gli indicatori necessari per la strategia."""
+        try:
+            ohlcv = self.exchange.fetch_ohlcv(symbol, timeframe, limit=250)
+            df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
             
-        df["RSI"] = ta.rsi(df["close"], length=p["rsi_len"])
-        df["EMA_FAST"] = ta.ema(df["close"], length=p["ema_fast"])
-        df["EMA_SLOW"] = ta.ema(df["close"], length=p["ema_slow"])
-        df["ATR"] = ta.atr(df["high"], df["low"], df["close"], length=p["atr_len"])
-        adx_df = ta.adx(df["high"], df["low"], df["close"], length=p["adx_len"])
-        if adx_df is not None and not adx_df.empty: df["ADX"] = adx_df.iloc[:,0]
-        kc = ta.kc(df["high"], df["low"], df["close"], length=p["kc_len"], scalar=p["kc_mult"])
-        if kc is not None and not kc.empty:
-            df["KCL"] = kc.iloc[:, 0]
-            df["KCU"] = kc.iloc[:, 2]
-        if "BBU" in df and "KCU" in df:
-            df["SQUEEZE_ON"] = (df["BBU"] < df["KCU"]) & (df["BBL"] > df["KCL"])
-        return df.fillna(0)
+            # Calcolo dinamico degli indicatori in base ai parametri richiesti
+            if 'ema_fast' in params: df['EMA_F'] = ta.ema(df['close'], length=params['ema_fast'])
+            if 'ema_slow' in params: df['EMA_S'] = ta.ema(df['close'], length=params['ema_slow'])
+            if 'rsi_len' in params: df['RSI'] = ta.rsi(df['close'], length=params['rsi_len'])
+            if 'bb_len' in params:
+                bb = ta.bbands(df['close'], length=params['bb_len'], std=params.get('bb_mult', 2.0))
+                if bb is not None and not bb.empty:
+                    df['BBL'], df['BBM'], df['BBU'] = bb.iloc[:,0], bb.iloc[:,1], bb.iloc[:,2]
+            
+            return df.dropna()
+        except Exception as e:
+            logging.error(f"Errore nel recupero dati/indicatori per {symbol}: {e}")
+            return pd.DataFrame()
 
-    def regime_ok(self, row: pd.Series) -> bool:
-        if not all(k in row for k in ["ATR", "ADX", "close"]) or row["close"] <= 0 or row["ATR"] <= 0: return False
-        atr_pct = row["ATR"] / row["close"]
-        return self.filt["atr_min_pct"] <= atr_pct <= self.filt["atr_max_pct"] and row["ADX"] >= self.filt["min_adx"]
+    def check_signals(self, df, strategy_name, params):
+        """Controlla i segnali di trading in base alla strategia specifica."""
+        if df.empty or len(df) < 2: return None
+        
+        c = df.iloc[-1] # Candela corrente
+        p = df.iloc[-2] # Candela precedente
+        
+        side, entry, sl, tp = None, None, None, None
 
-    def logic_signals(self, df: pd.DataFrame) -> Dict[str, Any]:
-        required_cols = ["EMA_FAST", "BBM", "RSI", "BBL", "BBU", "SQUEEZE_ON", "ATR", "ADX"]
-        if len(df) < 4 or not all(c in df.columns for c in required_cols):
-            return {"signal": "NEUTRAL", "reason": "Dati indicatori insufficienti"}
-        prev, now, prev2 = df.iloc[-2], df.iloc[-1], df.iloc[-3]
-        if not self.regime_ok(prev): return {"signal": "NEUTRAL", "reason": "Filtro di regime"}
-        rr, atr = self.logic["rr"], float(prev["ATR"])
-        if atr == 0: return {"signal": "NEUTRAL", "reason": "ATR è zero"}
-        entry = float(now["close"])
-        if (prev["close"] > prev["EMA_FAST"]) and (prev["RSI"] < self.logic["rsi_buy_level"]) and (prev["low"] <= prev["BBM"]):
-            sl, tp = entry - 2 * atr, entry + rr * (2 * atr); return {"signal":"LONG","logic":"TrendPullback","entry":entry,"sl":sl,"tp":tp}
-        if (prev["close"] < prev["EMA_FAST"]) and (prev["RSI"] > self.logic["rsi_sell_level"]) and (prev["high"] >= prev["BBM"]):
-            sl, tp = entry + 2 * atr, entry - rr * (2 * atr); return {"signal":"SHORT","logic":"TrendPullback","entry":entry,"sl":sl,"tp":tp}
-        if (prev["low"] <= prev["BBL"]) and (prev["RSI"] <= self.logic["rsi_oversold"]):
-            if float(prev["BBM"]) > entry: sl, tp = entry - 2 * atr, float(prev["BBM"]); return {"signal":"LONG","logic":"MeanReversion","entry":entry,"sl":sl,"tp":tp}
-        if (prev["high"] >= prev["BBU"]) and (prev["RSI"] >= self.logic["rsi_overbought"]):
-            if float(prev["BBM"]) < entry: sl, tp = entry + 2 * atr, float(prev["BBM"]); return {"signal":"SHORT","logic":"MeanReversion","entry":entry,"sl":sl,"tp":tp}
-        if bool(prev2["SQUEEZE_ON"]) and (prev["close"] > prev["BBU"]):
-            sl, tp = entry - 2 * atr, entry + rr * (2 * atr); return {"signal":"LONG","logic":"Breakout","entry":entry,"sl":sl,"tp":tp}
-        if bool(prev2.get("SQUEEZE_ON", False)) and (prev["close"] < prev["BBL"]): # Aggiunto .get per sicurezza
-            sl, tp = entry + 2 * atr, entry - rr * (2 * atr); return {"signal":"SHORT","logic":"Breakout","entry":entry,"sl":sl,"tp":tp}
-        return {"signal": "NEUTRAL", "reason": "Nessuna logica corrisponde"}
+        if strategy_name == "PULLBACK":
+            if p['close'] > p['EMA_S'] and p['low'] <= p['EMA_F'] and c['close'] > c['open']:
+                side = "LONG"
+                entry, sl = c['close'], p['low']
+                tp = entry + (entry - sl) * params.get('rr', 1.5)
+            elif p['close'] < p['EMA_S'] and p['high'] >= p['EMA_F'] and c['close'] < c['open']:
+                side = "SHORT"
+                entry, sl = c['close'], p['high']
+                tp = entry - (sl - entry) * params.get('rr', 1.5)
 
-    def run(self):
-        logging.info("[MARK] Avvio analisi su %d assets...", len(self.assets))
-        for s in self.assets:
-            df = self.fetch_df(s)
-            if df is None or df.empty: continue
-            df_with_indicators = self.add_indicators(df)
-            sig = self.logic_signals(df_with_indicators)
-            publish("MARK", s, sig)
-            if sig.get("signal") != "NEUTRAL":
-                logging.info(f"[MARK] {s} -> {sig['signal']} ({sig.get('logic', 'N/A')})")
+        elif strategy_name == "MEANREV":
+            if p['close'] < p['BBL'] and p['RSI'] < params['rsi_oversold']:
+                side = "LONG"
+                entry, sl, tp = c['close'], p['low'], p['BBM']
+            elif p['close'] > p['BBU'] and p['RSI'] > params['rsi_overbought']:
+                side = "SHORT"
+                entry, sl, tp = c['close'], p['high'], p['BBM']
+
+        if side:
+            return {
+                "asset": c['symbol'], "timeframe": self.timeframe, "side": side,
+                "entry": entry, "sl": sl, "tp": tp,
+                "strategy": strategy_name, "params": json.dumps(params)
+            }
+        return None
+
+    def run_analysis(self):
+        """Ciclo principale di analisi: usa la strategia giusta per ogni asset."""
+        if not self.hall_of_fame:
+            logging.warning("Nessuna strategia nella Hall of Fame. L'analisi è sospesa.")
+            return
+
+        logging.info(f"Avvio ciclo di analisi su {len(self.assets)} asset dalla Hall of Fame.")
+        
+        for asset_symbol in self.assets:
+            try:
+                # Recupera la strategia e i parametri specifici per l'asset
+                strategy_info = self.hall_of_fame[asset_symbol]
+                strategy_name = strategy_info['strategy']
+                params = strategy_info['params']
+
+                logging.info(f"Analizzo {asset_symbol} con strategia '{strategy_name}'...")
+                
+                df = self.get_data_and_indicators(asset_symbol, self.timeframe, params)
+                if df.empty: continue
+                df['symbol'] = asset_symbol
+
+                # Controlla se abbiamo già inviato un segnale recente per questo asset
+                last_signal_time = self.db.get_last_signal_time(asset_symbol)
+                if last_signal_time and (datetime.utcnow() - last_signal_time) < timedelta(minutes=self.dedupe_minutes):
+                    logging.info(f"Segnale recente per {asset_symbol}, attendo.")
+                    continue
+
+                signal = self.check_signals(df, strategy_name, params)
+
+                if signal:
+                    logging.warning(f"🔥 SEGNALE TROVATO! {signal}")
+                    self.db.save_signal(signal)
+                    self.sara.propose_trade(signal)
+                
+                time.sleep(self.exchange.rateLimit / 1000) # Rispetta i rate limit
+
+            except Exception as e:
+                logging.error(f"Errore critico durante l'analisi di {asset_symbol}: {e}")
+
+    def start(self):
+        while True:
+            self.run_analysis()
+            logging.info("Ciclo di analisi completato. In attesa di 15 minuti...")
+            time.sleep(60 * 15)

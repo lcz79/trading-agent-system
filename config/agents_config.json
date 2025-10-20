@@ -1,16 +1,17 @@
 {
     "assets": [
-        "BTC/USDT", "ETH/USDT", "SOL/USDT", "XRP/USDT", "DOGE/USDT", 
-        
-        "EURUSD", "GBPUSD", "USDJPY", "AUDUSD", "USDCAD",
-        "EURJPY", "GBPJPY", "USDCNH", "EURGBP", "AUDJPY",
-        
-        "SPX500USD", "NAS100USD", "US30USD", "DE40USD", "UK100USD",
-        "JP225USD", "HK50USD", "EU50USD", "AU200USD", "US2000USD",
-        
-        "XAUUSD", "XAGUSD", "COPPERUSD",
-        
-        "WTIUSD", "BRENTUSD", "NATGASUSD"
+        "BTC/USDT", 
+        "ETH/USDT", 
+        "SOL/USDT", 
+        "XRP/USDT", 
+        "DOGE/USDT", 
+        "ADA/USDT",
+        "AVAX/USDT",
+        "LINK/USDT",
+        "DOT/USDT",
+        "MATIC/USDT",
+
+        "SPX/USDT"
     ],
     "timeframe": "1h",
     "dedupe_minutes": 30,
