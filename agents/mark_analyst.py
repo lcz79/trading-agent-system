@@ -1,5 +1,6 @@
 # ===============================================================
-# MarkAnalyst v5.2 - Master Strategist (HOF-driven, Bybit-ready, Robust Path)
+# MarkAnalyst v6.0 - The Final Version
+# Percorso corretto per l'ambiente di Render
 # ===============================================================
 
 import pandas as pd
@@ -32,9 +33,10 @@ class MarkAnalyst:
         self.db = db
         self.exchange = self.router.get("bybit")
 
-        # --- MODIFICA CHIAVE: Percorso a prova di bomba ---
-        script_dir = os.path.dirname(os.path.abspath(__file__))
-        config_path = os.path.join(script_dir, '..', 'config', 'hall_of_fame.json')
+        # --- PERCORSO CORRETTO E DEFINITIVO ---
+        # Poiché il programma è avviato da app_backend.py nella root,
+        # il percorso relativo deve partire da lì.
+        config_path = "config/hall_of_fame.json"
         
         try:
             with open(config_path, "r") as f:
@@ -43,10 +45,12 @@ class MarkAnalyst:
             for k, v in raw.items():
                 norm = _normalize_symbol_for_bybit(k)
                 self.hall_of_fame[norm] = v
-            logging.info(f"✅ Hall of Fame caricata da '{config_path}'. {len(self.hall_of_fame)} strategie pronte.")
+            logging.info(f"✅ Hall of Fame caricata. {len(self.hall_of_fame)} strategie pronte.")
         except FileNotFoundError:
-            logging.error(f"‼️ File 'hall_of_fame.json' non trovato nel percorso atteso: {config_path}. L'agente non può operare.")
+            logging.error(f"‼️ ERRORE FATALE: File '{config_path}' non trovato. L'agente non può operare. Assicurati che il file esista e sia stato caricato su GitHub.")
             self.hall_of_fame = {}
+            # Esci se non puoi caricare la configurazione, per evitare di girare a vuoto
+            raise SystemExit(f"Errore critico: impossibile trovare {config_path}")
 
         self.assets = list(self.hall_of_fame.keys())
         self.timeframe = "1h"
@@ -62,7 +66,6 @@ class MarkAnalyst:
         candidates = []
         if "ema_fast" in params: candidates.append(int(params["ema_fast"]))
         if "ema_slow" in params: candidates.append(int(params["ema_slow"]))
-        if "ema_trend_len" in params: candidates.append(int(params["ema_trend_len"]))
         if "rsi_len" in params: candidates.append(int(params["rsi_len"]))
         if "bb_len" in params: candidates.append(int(params["bb_len"]))
         if not candidates: return 200
@@ -70,15 +73,14 @@ class MarkAnalyst:
 
     def get_data_and_indicators(self, symbol: str, timeframe: str, params: dict) -> pd.DataFrame:
         try:
-            if hasattr(self.exchange, "symbols") and symbol not in self.exchange.symbols:
+            if hasattr(self.exchange, "symbols") and self.exchange.symbols and symbol not in self.exchange.symbols:
                 logging.error("❌ Simbolo %s non presente su %s. Skip.", symbol, self.exchange.id)
                 return pd.DataFrame()
 
             limit = self._needed_lookback(params)
             ohlcv = self.exchange.fetch_ohlcv(symbol, timeframe=timeframe, limit=limit)
-            if not ohlcv:
-                logging.warning("Nessun dato OHLCV per %s.", symbol)
-                return pd.DataFrame()
+            if not ohlcv: return pd.DataFrame()
+            
             df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
             for c in ['open','high','low','close','volume']:
                 df[c] = pd.to_numeric(df[c], errors="coerce")
@@ -87,14 +89,13 @@ class MarkAnalyst:
 
             if 'ema_fast' in params: df['EMA_F'] = ta.ema(df['close'], length=int(params['ema_fast']))
             if 'ema_slow' in params: df['EMA_S'] = ta.ema(df['close'], length=int(params['ema_slow']))
-            if 'ema_trend_len' in params and not _col_exists(df, 'EMA_S'):
-                df['EMA_S'] = ta.ema(df['close'], length=int(params['ema_trend_len']))
             if 'rsi_len' in params: df['RSI'] = ta.rsi(df['close'], length=int(params['rsi_len']))
             if 'bb_len' in params:
                 bb_mult = float(params.get('bb_mult', 2.0))
                 bb = ta.bbands(df['close'], length=int(params['bb_len']), std=bb_mult)
                 if bb is not None and not bb.empty:
                     df['BBL'], df['BBM'], df['BBU'] = bb.iloc[:,0], bb.iloc[:,1], bb.iloc[:,2]
+            
             df.dropna(inplace=True)
             return df
         except Exception as e:
@@ -127,18 +128,12 @@ class MarkAnalyst:
             elif (p['close'] >= p['BBU']) and (p['RSI'] >= rsi_overbought):
                 side = "SHORT"; entry = float(c['close']); sl = max(entry + (p['BBU']-p['BBM']), float(p['high'])); tp = float(p['BBM'])
         
-        else:
-            logging.warning("Strategia '%s' non riconosciuta per %s. Skip.", strategy_name, symbol)
-            return None
-
         if side and self._sanity_sl_tp(side, entry, sl, tp):
             return {"asset": symbol, "timeframe": self.timeframe, "side": side, "entry": float(entry), "sl": float(sl), "tp": float(tp), "strategy": strategy_name.upper(), "params": json.dumps(params)}
         return None
 
     def run_analysis(self):
-        if not self.hall_of_fame:
-            logging.warning("Nessuna strategia nella Hall of Fame. Analisi sospesa.")
-            return
+        if not self.hall_of_fame: return
         logging.info(f"Avvio ciclo di analisi su {len(self.assets)} asset dalla Hall of Fame (tf={self.timeframe}).")
 
         for asset_symbol in self.assets:
@@ -153,7 +148,6 @@ class MarkAnalyst:
 
                 last_signal_time = self.db.get_last_signal_time(asset_symbol, strategy_name)
                 if last_signal_time and (datetime.utcnow() - last_signal_time) < timedelta(minutes=self.dedupe_minutes):
-                    logging.info("Segnale recente %s [%s], attendo.", asset_symbol, strategy_name)
                     time.sleep(self._rate_sleep)
                     continue
 
