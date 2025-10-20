@@ -12,23 +12,25 @@ from agents.webby_executor import WebbyExecutor
 logging.basicConfig(level=logging.INFO, format='[%(asctime)s][%(levelname)s][%(threadName)s] %(message)s', datefmt='%H:%M:%S')
 
 def run_mark(cfg):
-    """Funzione di avvio per l'agente Mark, con gestione della connessione."""
+    """Funzione di avvio per l'agente Mark, ora configurato per Bybit."""
     logging.info("[MARK] Inizializzazione connessione exchange...")
     router = ExchangeRouter()
-    # Diamo tempo alla libreria di caricare tutti i mercati in background
-    time.sleep(10) # PAUSA STRATEGICA DI 10 SECONDI
+    time.sleep(10) # Pausa strategica per caricamento mercati
     
-    exchange = router.get("binance")
+    # --- MODIFICA CHIAVE ---
+    exchange = router.get("bybit") # Usa Bybit invece di Binance
+    # -------------------------
+
     if exchange and exchange.markets:
-        logging.info(f"[MARK] Connessione stabilita. Trovati {len(exchange.markets)} mercati.")
+        logging.info(f"[MARK] Connessione a BYBIT stabilita. Trovati {len(exchange.markets)} mercati.")
         MarkAnalyst(exchange, cfg["assets"], cfg["timeframe"], cfg["indicators"], cfg["filters"], cfg["logic"]).run()
     else:
-        logging.error("[MARK] Impossibile avviare: exchange 'binance' non trovato o mercati non caricati.")
+        logging.error("[MARK] Impossibile avviare: exchange 'bybit' non trovato o mercati non caricati.")
 
 def run_vittoria(cfg): VittoriaNews(cfg["news"]["feeds"], cfg["news"]["max_items_per_feed"]).run()
 def run_finn(): FinnFundamental().run()
 def run_sara(cfg): SaraStrategist(cfg["assets"]).run()
-def run_webby(): WebbyExecutor().run_once()
+def run_webby(): WebbyExecutor().run_once() # Webby crea le sue risorse internamente
 
 if __name__ == "__main__":
     logging.info("MITRAGLIERE A.I. COLLECTIVE v3 - Avvio sistema...")

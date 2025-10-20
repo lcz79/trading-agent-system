@@ -12,3 +12,7 @@ data/
 
 # File di sistema di macOS
 .DS_Store
+# ... (tutte le altre righe) ...
+
+# Ignora il file delle variabili d'ambiente
+.env

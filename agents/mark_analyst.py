@@ -16,24 +16,25 @@ class MarkAnalyst:
     def fetch_df(self, symbol: str, limit: int = 300) -> Optional[pd.DataFrame]:
         """
         Funzione migliorata per recuperare i dati.
-        Tenta diverse varianti del simbolo per massima compatibilità.
+        Pulisce il simbolo e tenta diverse varianti per massima compatibilità.
         """
         try:
+            # --- LOGICA DI PULIZIA DEL SIMBOLO ---
+            clean_symbol = symbol.split(':')[0]
+            # ------------------------------------
+            
             data = None
-            # Tentativo 1: Simbolo unificato (es. "BTCUSDT")
-            unified_symbol = symbol.replace("/", "")
+            unified_symbol = clean_symbol.replace("/", "")
+            
             if unified_symbol in self.ex.markets:
                 data = self.ex.fetch_ohlcv(unified_symbol, timeframe=self.tf, limit=limit)
-            # Tentativo 2: Simbolo originale (es. "BTC/USDT")
-            elif symbol in self.ex.markets:
-                data = self.ex.fetch_ohlcv(symbol, timeframe=self.tf, limit=limit)
-            # Tentativo 3: Simbolo con suffisso ".P" (es. "MATICUSDT.P")
+            elif clean_symbol in self.ex.markets:
+                data = self.ex.fetch_ohlcv(clean_symbol, timeframe=self.tf, limit=limit)
             elif f"{unified_symbol}.P" in self.ex.markets:
                 data = self.ex.fetch_ohlcv(f"{unified_symbol}.P", timeframe=self.tf, limit=limit)
             
             if data is None:
-                # Nessun simbolo valido trovato
-                raise ValueError(f"Nessuna variante del simbolo '{symbol}' trovata sull'exchange.")
+                raise ValueError(f"Nessuna variante del simbolo '{clean_symbol}' trovata sull'exchange.")
 
             if not data: return None
             df = pd.DataFrame(data, columns=["time","open","high","low","close","volume"])
@@ -42,6 +43,7 @@ class MarkAnalyst:
                 df[c] = pd.to_numeric(df[c], errors="coerce")
             return df.dropna().reset_index(drop=True)
         except Exception as e:
+            # Usiamo 'symbol' originale nel log per capire da dove viene l'errore
             logging.error(f"[MARK] fetch {symbol}: {e}")
             return None
 
@@ -121,6 +123,10 @@ class MarkAnalyst:
             if df is None: continue
             df_with_indicators = self.add_indicators(df)
             sig = self.logic_signals(df_with_indicators)
-            publish("MARK", s, sig)
+            
+            # Pubblichiamo usando il nome pulito del simbolo
+            clean_symbol = s.split(':')[0]
+            publish("MARK", clean_symbol, sig)
+            
             if sig.get("signal") != "NEUTRAL":
-                logging.info(f"[MARK] {s} -> {sig['signal']} ({sig.get('logic', 'N/A')})")
+                logging.info(f"[MARK] {clean_symbol} -> {sig['signal']} ({sig.get('logic', 'N/A')})")
