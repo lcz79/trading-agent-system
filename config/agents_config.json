@@ -1,35 +1,9 @@
 {
-    "assets": [
-        "BTC/USDT", 
-        "ETH/USDT", 
-        "SOL/USDT", 
-        "XRP/USDT", 
-        "DOGE/USDT", 
-        "ADA/USDT",
-        "AVAX/USDT",
-        "LINK/USDT",
-        "DOT/USDT",
-        "MATIC/USDT",
-
-        "SPX/USDT"
-    ],
-    "timeframe": "1h",
-    "dedupe_minutes": 30,
-    "indicators": {
-        "rsi_len": 14, "rsi_buy_level": 50, "rsi_sell_level": 50,
-        "rsi_overbought": 70, "rsi_oversold": 30,
-        "bb_len": 20, "bb_mult": 2.0,
-        "ema_fast": 9, "ema_slow": 21,
-        "atr_len": 14,
-        "adx_len": 14,
-        "kc_len": 20, "kc_mult": 1.5
-    },
-    "filters": {
-        "min_adx": 20,
-        "atr_min_pct": 0.5,
-        "atr_max_pct": 10.0
-    },
-    "logic": {
-        "rr": 1.5
+    "agents": {
+        "Mark": { "enabled": true },
+        "Vittoria": { "enabled": false },
+        "Finn": { "enabled": false },
+        "Sara": { "enabled": true },
+        "Webby": { "enabled": true }
     }
 }
