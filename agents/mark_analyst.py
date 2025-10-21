@@ -164,8 +164,8 @@ class MarkAnalyst:
             except Exception as e:
                 logging.error(f"Errore critico durante l'analisi di {asset_symbol}: {e}", exc_info=True)
 
-    def start(self):
+        def start(self):
         while True:
             self.run_analysis()
-            logging.info("Ciclo di analisi completato. In attesa di 15 minuti...")
-            time.sleep(60 * 5)
+            logging.info("Ciclo di analisi completato. In attesa di 5 minuti...")
+            time.sleep(60 * 5) # Pausa di 5 minuti, inferiore al timeout di Render
