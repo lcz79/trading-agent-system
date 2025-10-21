@@ -1,82 +1,90 @@
 import sqlite3
-from datetime import datetime
+import pandas as pd
 import logging
+from datetime import datetime
 
 class DBHandler:
     def __init__(self, db_name="trading_signals.db"):
         self.db_name = db_name
         self.conn = None
         try:
+            # check_same_thread=False è fondamentale per usarlo con FastAPI e i thread
             self.conn = sqlite3.connect(self.db_name, check_same_thread=False)
-            self.create_tables()
             logging.info("✅ Connessione al database stabilita.")
-        except sqlite3.Error as e:
-            logging.error(f"Errore di connessione al database: {e}")
+            self.create_table()
+        except Exception as e:
+            logging.error(f"❌ Errore di connessione al database: {e}")
 
-    def create_tables(self):
-        """Crea le tabelle se non esistono già."""
+    def create_table(self):
+        """Crea la tabella dei segnali se non esiste già."""
         try:
             cursor = self.conn.cursor()
-            # --- MODIFICA CHIAVE: Aggiunta colonna 'strategy' ---
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS signals (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     asset TEXT NOT NULL,
-                    strategy TEXT NOT NULL, 
+                    timeframe TEXT,
                     side TEXT NOT NULL,
-                    entry REAL,
-                    sl REAL,
-                    tp REAL,
+                    entry REAL NOT NULL,
+                    sl REAL NOT NULL,
+                    tp REAL NOT NULL,
+                    strategy TEXT,
                     params TEXT,
-                    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
-                )
+                    timestamp DATETIME NOT NULL
+                );
             """)
             self.conn.commit()
-        except sqlite3.Error as e:
-            logging.error(f"Errore nella creazione delle tabelle: {e}")
+        except Exception as e:
+            logging.error(f"Errore durante la creazione della tabella 'signals': {e}")
 
-    def save_signal(self, signal_data: dict):
-        """Salva un nuovo segnale nel database."""
+    def save_signal(self, signal: dict):
+        """Salva un nuovo segnale di trade nel database."""
         try:
             cursor = self.conn.cursor()
-            cursor.execute("""
-                INSERT INTO signals (asset, strategy, side, entry, sl, tp, params, timestamp)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                signal_data.get('asset'),
-                signal_data.get('strategy'), # Nuovo campo
-                signal_data.get('side'),
-                signal_data.get('entry'),
-                signal_data.get('sl'),
-                signal_data.get('tp'),
-                signal_data.get('params'),
+            query = """
+                INSERT INTO signals (asset, timeframe, side, entry, sl, tp, strategy, params, timestamp)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """
+            cursor.execute(query, (
+                signal.get('asset'),
+                signal.get('timeframe'),
+                signal.get('side'),
+                signal.get('entry'),
+                signal.get('sl'),
+                signal.get('tp'),
+                signal.get('strategy'),
+                signal.get('params'),
                 datetime.utcnow()
             ))
             self.conn.commit()
-            logging.info(f"Segnale per {signal_data.get('asset')} [{signal_data.get('strategy')}] salvato nel DB.")
-        except sqlite3.Error as e:
-            logging.error(f"Errore nel salvataggio del segnale: {e}")
+            logging.info(f"Segnale per {signal.get('asset')} salvato nel database.")
+        except Exception as e:
+            logging.error(f"Errore durante il salvataggio del segnale: {e}")
 
-    def get_last_signal_time(self, asset: str, strategy: str) -> datetime or None:
-        """
-        Recupera il timestamp dell'ultimo segnale per un dato asset E strategia.
-        """
+    def get_last_signal_time(self, asset: str, strategy: str) -> datetime | None:
+        """Recupera il timestamp dell'ultimo segnale per un dato asset e strategia."""
         try:
             cursor = self.conn.cursor()
-            cursor.execute("""
-                SELECT timestamp FROM signals 
-                WHERE asset = ? AND strategy = ?
-                ORDER BY timestamp DESC 
-                LIMIT 1
-            """, (asset, strategy))
-            result = cursor.fetchone()
+            query = "SELECT MAX(timestamp) FROM signals WHERE asset = ? AND strategy = ?"
+            result = cursor.execute(query, (asset, strategy)).fetchone()[0]
             if result:
-                return datetime.strptime(result[0], '%Y-%m-%d %H:%M:%S.%f')
+                return datetime.fromisoformat(result)
             return None
-        except sqlite3.Error as e:
-            logging.error(f"Errore nel recupero dell'ultimo segnale: {e}")
+        except Exception:
             return None
 
-    def __del__(self):
-        if self.conn:
-            self.conn.close()
+    # --- FUNZIONE MANCANTE AGGIUNTA QUI ---
+    def get_all_signals_as_df(self) -> pd.DataFrame:
+        """
+        Recupera tutti i segnali dal database e li restituisce come DataFrame pandas.
+        """
+        try:
+            if not self.conn:
+                raise ConnectionError("Connessione al database non disponibile.")
+                
+            query = "SELECT * FROM signals ORDER BY timestamp DESC"
+            df = pd.read_sql_query(query, self.conn)
+            return df
+        except Exception as e:
+            logging.error(f"Errore nel recuperare tutti i segnali: {e}")
+            return pd.DataFrame() # Restituisce un DataFrame vuoto in caso di errore
