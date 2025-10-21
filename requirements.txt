@@ -4,7 +4,7 @@ pandas
 pandas-ta
 ccxt
 python-dotenv
-tqdm
 requests
 aiohttp
 streamlit
+psycopg2-binary  # <-- AGGIUNGI QUESTA RIGA
