@@ -1,6 +1,5 @@
 # ===============================================================
-# MarkAnalyst v8.0 - The Self-Contained Final Version
-# La Hall of Fame è incorporata per eliminare i FileNotFoundError
+# MarkAnalyst v9.0 - THE FINAL, INDENTATION-FIXED VERSION
 # ===============================================================
 
 import pandas as pd
@@ -13,50 +12,18 @@ from agents.sara_trader import SaraTrader
 from agents.db_handler import DBHandler
 
 # --- HALL OF FAME INCORPORATA NEL CODICE ---
-# Questo elimina la necessità di leggere un file .json esterno.
 HALL_OF_FAME_DATA = {
-    "XRP/USDT:USDT": {
-        "strategy": "MEANREV",
-        "params": { "bb_len": 30, "bb_mult": 2.0, "rsi_len": 21, "rsi_oversold": 25, "rsi_overbought": 75 }
-    },
-    "ADA/USDT:USDT": {
-        "strategy": "MEANREV",
-        "params": { "bb_len": 30, "bb_mult": 2.0, "rsi_len": 21, "rsi_oversold": 25, "rsi_overbought": 75 }
-    },
-    "AVAX/USDT:USDT": {
-        "strategy": "PULLBACK",
-        "params": { "ema_fast": 30, "ema_slow": 200, "rr": 3.0 }
-    },
-    "DOT/USDT:USDT": {
-        "strategy": "PULLBACK",
-        "params": { "ema_fast": 30, "ema_slow": 200, "rr": 1.5 }
-    },
-    "SOL/USDT:USDT": {
-        "strategy": "PULLBACK",
-        "params": { "ema_fast": 30, "ema_slow": 50, "rr": 3.0 }
-    },
-    "DOGE/USDT:USDT": {
-        "strategy": "PULLBACK",
-        "params": { "ema_fast": 10, "ema_slow": 200, "rr": 3.0 }
-    },
-    "BTC/USDT:USDT": {
-        "strategy": "PULLBACK",
-        "params": { "ema_fast": 20, "ema_slow": 100, "rr": 2.0 }
-    },
-    "LINK/USDT:USDT": {
-        "strategy": "PULLBACK",
-        "params": { "ema_fast": 30, "ema_slow": 50, "rr": 1.5 }
-    },
-    "SPX/USDT:USDT": {
-        "strategy": "PULLBACK",
-        "params": { "ema_fast": 10, "ema_slow": 50, "rr": 2.0 }
-    },
-    "ETH/USDT:USDT": {
-        "strategy": "PULLBACK",
-        "params": { "ema_fast": 10, "ema_slow": 50, "rr": 1.5 }
-    }
+    "XRP/USDT:USDT": { "strategy": "MEANREV", "params": { "bb_len": 30, "bb_mult": 2.0, "rsi_len": 21, "rsi_oversold": 25, "rsi_overbought": 75 }},
+    "ADA/USDT:USDT": { "strategy": "MEANREV", "params": { "bb_len": 30, "bb_mult": 2.0, "rsi_len": 21, "rsi_oversold": 25, "rsi_overbought": 75 }},
+    "AVAX/USDT:USDT": { "strategy": "PULLBACK", "params": { "ema_fast": 30, "ema_slow": 200, "rr": 3.0 }},
+    "DOT/USDT:USDT": { "strategy": "PULLBACK", "params": { "ema_fast": 30, "ema_slow": 200, "rr": 1.5 }},
+    "SOL/USDT:USDT": { "strategy": "PULLBACK", "params": { "ema_fast": 30, "ema_slow": 50, "rr": 3.0 }},
+    "DOGE/USDT:USDT": { "strategy": "PULLBACK", "params": { "ema_fast": 10, "ema_slow": 200, "rr": 3.0 }},
+    "BTC/USDT:USDT": { "strategy": "PULLBACK", "params": { "ema_fast": 20, "ema_slow": 100, "rr": 2.0 }},
+    "LINK/USDT:USDT": { "strategy": "PULLBACK", "params": { "ema_fast": 30, "ema_slow": 50, "rr": 1.5 }},
+    "SPX/USDT:USDT": { "strategy": "PULLBACK", "params": { "ema_fast": 10, "ema_slow": 50, "rr": 2.0 }},
+    "ETH/USDT:USDT": { "strategy": "PULLBACK", "params": { "ema_fast": 10, "ema_slow": 50, "rr": 1.5 }}
 }
-
 
 class MarkAnalyst:
     def __init__(self, exchange_router: ExchangeRouter, sara: SaraTrader, db: DBHandler):
@@ -64,28 +31,21 @@ class MarkAnalyst:
         self.sara = sara
         self.db = db
         self.exchange = self.router.get("bybit")
-
-        # Carica la configurazione direttamente dal dizionario Python
         try:
             self.hall_of_fame = HALL_OF_FAME_DATA
-            if not self.hall_of_fame:
-                raise ValueError("Il dizionario HALL_OF_FAME_DATA è vuoto.")
+            if not self.hall_of_fame: raise ValueError("HALL_OF_FAME_DATA è vuoto.")
             logging.info(f"✅ Hall of Fame caricata con successo dal codice. {len(self.hall_of_fame)} strategie pronte.")
         except Exception as e:
-            logging.error(f"‼️ ERRORE FATALE: Impossibile caricare la Hall of Fame incorporata: {e}")
+            logging.error(f"‼️ ERRORE FATALE: Impossibile caricare la Hall of Fame: {e}")
             raise SystemExit("Errore critico: la configurazione interna è corrotta.")
-
         self.assets = list(self.hall_of_fame.keys())
         self.timeframe = "1h"
         self.dedupe_minutes = 30
         self._rate_sleep = max(0.3, (getattr(self.exchange, "rateLimit", 300) or 300) / 1000.0)
-
         try:
             self.exchange.load_markets()
         except Exception as e:
             logging.warning("Impossibile caricare i mercati su Bybit: %s", e)
-
-    # ... (Tutto il resto del file rimane identico) ...
 
     def _needed_lookback(self, params: dict) -> int:
         candidates = [int(params.get(k, 0)) for k in ["ema_fast", "ema_slow", "rsi_len", "bb_len"]]
@@ -147,7 +107,7 @@ class MarkAnalyst:
 
     def run_analysis(self):
         if not self.hall_of_fame: return
-        logging.info(f"Avvio ciclo di analisi su {len(self.assets)} asset dalla Hall of Fame.")
+        logging.info(f"Avvio ciclo di analisi su {len(self.assets)} asset.")
         for asset_symbol in self.assets:
             try:
                 info = self.hall_of_fame[asset_symbol]; strategy_name = info['strategy']; params = info['params']
@@ -162,10 +122,11 @@ class MarkAnalyst:
                     self.db.save_signal(signal); self.sara.propose_trade(signal)
                 time.sleep(self._rate_sleep)
             except Exception as e:
-                logging.error(f"Errore critico durante l'analisi di {asset_symbol}: {e}", exc_info=True)
+                logging.error(f"Errore analisi di {asset_symbol}: {e}", exc_info=True)
 
-        def start(self):
+    def start(self):
+        # QUESTO È IL BLOCCO CORRETTO
         while True:
             self.run_analysis()
             logging.info("Ciclo di analisi completato. In attesa di 5 minuti...")
-            time.sleep(60 * 5) # Pausa di 5 minuti, inferiore al timeout di Render
+            time.sleep(60 * 5) # Pausa di 5 minuti
