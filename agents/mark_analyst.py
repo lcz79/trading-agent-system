@@ -168,4 +168,4 @@ class MarkAnalyst:
         while True:
             self.run_analysis()
             logging.info("Ciclo di analisi completato. In attesa di 15 minuti...")
-            time.sleep(60 * 15)
+            time.sleep(60 * 5)

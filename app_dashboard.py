@@ -4,9 +4,8 @@ import requests
 import time
 
 # --- CONFIGURAZIONE ---
-# Inserisci qui l'URL del tuo servizio API (quello appena creato)
-# Lo trovi nella dashboard di Render del servizio 'mitragliere-ai'
-API_BASE_URL = "https://mitragliere-ai.onrender.com" # <--- CAMBIA QUESTO!
+# Inserito l'URL corretto preso dai tuoi log di Render
+API_BASE_URL = "https://mitragliere-ai-2.onrender.com" # <--- CORRETTO!
 
 st.set_page_config(
     page_title="Mitragliere A.I. - Dashboard",
@@ -22,19 +21,18 @@ data_placeholder = st.empty()
 def fetch_data():
     """Recupera le proposte di trade dall'API del backend."""
     try:
-        # L'endpoint che hai definito nel tuo piano
         response = requests.get(f"{API_BASE_URL}/proposals")
-        response.raise_for_status() # Lancia un errore se la richiesta fallisce
+        response.raise_for_status()
         
-        # Il tuo piano restituisce i dati sotto la chiave "proposals"
         data = response.json()
-        proposals = data.get("proposals", {}).get("data", {}).get("trades", [])
+        proposals = data.get("proposals", []) # L'API ora restituisce direttamente una lista
         
         if proposals:
             df = pd.DataFrame(proposals)
             # Seleziona e ordina le colonne per una migliore visualizzazione
             cols = ['asset', 'side', 'entry', 'sl', 'tp', 'strategy', 'timestamp']
-            df = df[[c for c in cols if c in df.columns]]
+            df['timestamp'] = pd.to_datetime(df['timestamp']) # Converte in formato data leggibile
+            df = df[[c for c in cols if c in df.columns]].sort_values(by="timestamp", ascending=False)
             return df
         else:
             return pd.DataFrame()
@@ -57,4 +55,4 @@ while True:
         else:
             st.info("Nessuna proposta di trade dal Cloud. Il sistema sta analizzando il mercato...")
 
-    time.sleep(30) # Aggiorna ogni 30 secondi
+    time.sleep(30)
