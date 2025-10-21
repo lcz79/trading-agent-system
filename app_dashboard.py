@@ -4,55 +4,87 @@ import requests
 import time
 
 # --- CONFIGURAZIONE ---
-# Inserito l'URL corretto preso dai tuoi log di Render
-API_BASE_URL = "https://mitragliere-ai-2.onrender.com" # <--- CORRETTO!
+API_BASE_URL = "https://mitragliere-ai-2.onrender.com"
 
 st.set_page_config(
-    page_title="Mitragliere A.I. - Dashboard",
+    page_title="Mitragliere A.I. - Dashboard Esecutiva",
     page_icon="🔫",
     layout="wide"
 )
 
-st.title("🔫 Mitragliere A.I. Dashboard")
+st.title("🔫 Mitragliere A.I. - Dashboard Esecutiva")
 
-# Placeholder per i dati
+# Placeholder per i dati e per i messaggi di stato
 data_placeholder = st.empty()
+status_placeholder = st.empty()
 
 def fetch_data():
-    """Recupera le proposte di trade dall'API del backend."""
+    """Recupera le proposte di trade dall'API."""
     try:
         response = requests.get(f"{API_BASE_URL}/proposals")
         response.raise_for_status()
-        
-        data = response.json()
-        proposals = data.get("proposals", []) # L'API ora restituisce direttamente una lista
-        
-        if proposals:
-            df = pd.DataFrame(proposals)
-            # Seleziona e ordina le colonne per una migliore visualizzazione
-            cols = ['asset', 'side', 'entry', 'sl', 'tp', 'strategy', 'timestamp']
-            df['timestamp'] = pd.to_datetime(df['timestamp']) # Converte in formato data leggibile
-            df = df[[c for c in cols if c in df.columns]].sort_values(by="timestamp", ascending=False)
-            return df
-        else:
-            return pd.DataFrame()
-            
-    except requests.exceptions.RequestException as e:
-        st.error(f"Errore di connessione all'API: {e}")
+        data = response.json().get("proposals", [])
+        if data:
+            df = pd.DataFrame(data)
+            if 'id' not in df.columns:
+                st.error("Dati dei segnali incompleti dal DB: manca la colonna 'id'.")
+                return pd.DataFrame()
+            df['timestamp'] = pd.to_datetime(df['timestamp'])
+            return df.sort_values(by="timestamp", ascending=False)
         return pd.DataFrame()
     except Exception as e:
-        st.error(f"Errore nell'elaborazione dei dati: {e}")
+        status_placeholder.error(f"Errore di connessione all'API (GET /proposals): {e}")
         return pd.DataFrame()
 
+def execute_trade_api(trade_id):
+    """Chiama l'API per eseguire un trade specifico."""
+    try:
+        status_placeholder.warning(f"Invio comando di esecuzione per trade ID: {trade_id}...")
+        response = requests.post(f"{API_BASE_URL}/execute/{trade_id}")
+        response.raise_for_status()
+        result = response.json()
+        if result.get("status") == "success":
+            status_placeholder.success(f"Trade ID {trade_id} eseguito! Dettagli: {result.get('message')}")
+        else:
+            status_placeholder.error(f"Errore dall'API durante l'esecuzione: {result.get('message')}")
+        time.sleep(5)
+        return True
+    except Exception as e:
+        status_placeholder.error(f"Fallimento critico chiamata API (POST /execute): {e}")
+        time.sleep(5)
+        return False
+
+# --- Loop principale della dashboard ---
 while True:
     df = fetch_data()
     
     with data_placeholder.container():
-        st.subheader("Proposte di Trade Attuali")
+        st.subheader("Proposte di Trade Pronte per l'Esecuzione")
         
         if not df.empty:
-            st.dataframe(df, use_container_width=True)
+            df_display = df.copy()
+            df_display['esegui'] = False 
+            disabled_columns = [col for col in df.columns if col != 'esegui']
+            
+            edited_df = st.data_editor(
+                df_display,
+                column_config={
+                    "esegui": st.column_config.CheckboxColumn("Esegui?"),
+                    "id": st.column_config.NumberColumn("ID Trade", format="%d")
+                },
+                disabled=disabled_columns,
+                hide_index=True,
+                # --- FIX: Aggiornato al nuovo parametro 'width' ---
+                width='stretch',
+                key="trade_editor"
+            )
+            
+            trade_to_execute = edited_df[edited_df["esegui"]]
+            if not trade_to_execute.empty:
+                trade_id = trade_to_execute.iloc[0]["id"]
+                execute_trade_api(trade_id)
+                st.rerun()
         else:
-            st.info("Nessuna proposta di trade dal Cloud. Il sistema sta analizzando il mercato...")
+            status_placeholder.info("Nessuna proposta di trade dal Cloud. Il sistema sta analizzando il mercato...")
 
     time.sleep(30)
