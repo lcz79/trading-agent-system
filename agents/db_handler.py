@@ -8,11 +8,8 @@ class DBHandler:
     def __init__(self):
         self.conn = None
         try:
-            # Legge l'URL del database dalle variabili d'ambiente di Render
             db_url = os.environ.get("DATABASE_URL")
-            if not db_url:
-                raise ValueError("Variabile d'ambiente DATABASE_URL non trovata!")
-            
+            if not db_url: raise ValueError("Variabile d'ambiente DATABASE_URL non trovata!")
             self.conn = psycopg2.connect(db_url)
             logging.info("✅ Connessione al database PostgreSQL stabilita con successo.")
             self.create_table()
@@ -24,30 +21,21 @@ class DBHandler:
         if not self.conn: return
         try:
             with self.conn.cursor() as cursor:
-                # La sintassi è leggermente diversa per PostgreSQL
                 cursor.execute("""
                     CREATE TABLE IF NOT EXISTS signals (
-                        id SERIAL PRIMARY KEY,
-                        asset TEXT NOT NULL,
-                        timeframe TEXT,
-                        side TEXT NOT NULL,
-                        entry REAL NOT NULL,
-                        sl REAL NOT NULL,
-                        tp REAL NOT NULL,
-                        strategy TEXT,
-                        params TEXT,
-                        timestamp TIMESTAMPTZ NOT NULL
+                        id SERIAL PRIMARY KEY, asset TEXT NOT NULL, timeframe TEXT,
+                        side TEXT NOT NULL, entry REAL NOT NULL, sl REAL NOT NULL, tp REAL NOT NULL,
+                        strategy TEXT, params TEXT, timestamp TIMESTAMPTZ NOT NULL
                     );
                 """)
             self.conn.commit()
         except Exception as e:
-            logging.error(f"Errore durante la creazione della tabella 'signals': {e}")
+            logging.error(f"Errore creazione tabella 'signals': {e}")
 
     def save_signal(self, signal: dict):
         if not self.conn: return
         try:
             with self.conn.cursor() as cursor:
-                # La sintassi per i parametri è %s invece di ?
                 query = """
                     INSERT INTO signals (asset, timeframe, side, entry, sl, tp, strategy, params, timestamp)
                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
@@ -60,7 +48,7 @@ class DBHandler:
             self.conn.commit()
             logging.info(f"Segnale per {signal.get('asset')} salvato su PostgreSQL.")
         except Exception as e:
-            logging.error(f"Errore durante il salvataggio del segnale su PostgreSQL: {e}")
+            logging.error(f"Errore salvataggio segnale su PostgreSQL: {e}")
 
     def get_last_signal_time(self, asset: str, strategy: str) -> datetime | None:
         if not self.conn: return None
@@ -80,5 +68,21 @@ class DBHandler:
             df = pd.read_sql_query(query, self.conn)
             return df
         except Exception as e:
-            logging.error(f"Errore nel recuperare tutti i segnali da PostgreSQL: {e}")
+            logging.error(f"Errore recupero segnali da PostgreSQL: {e}")
             return pd.DataFrame()
+
+    # --- NUOVA FUNZIONE AGGIUNTA QUI ---
+    def get_signal_by_id(self, trade_id: int) -> dict | None:
+        """Recupera un singolo segnale dal database usando il suo ID."""
+        if not self.conn: return None
+        try:
+            query = "SELECT * FROM signals WHERE id = %s"
+            # Usiamo pandas per comodità, ci restituisce un DataFrame
+            df = pd.read_sql_query(query, self.conn, params=(trade_id,))
+            if not df.empty:
+                # Convertiamo la prima (e unica) riga in un dizionario
+                return df.iloc[0].to_dict()
+            return None
+        except Exception as e:
+            logging.error(f"Errore nel recuperare il trade ID {trade_id}: {e}")
+            return None
