@@ -14,9 +14,9 @@ st.set_page_config(
 
 st.title("🔫 Mitragliere A.I. - Dashboard Esecutiva")
 
-# Placeholder per i dati e per i messaggi di stato
-data_placeholder = st.empty()
+# Placeholders per messaggi e dati
 status_placeholder = st.empty()
+data_placeholder = st.empty()
 
 def fetch_data():
     """Recupera le proposte di trade dall'API."""
@@ -27,7 +27,7 @@ def fetch_data():
         if data:
             df = pd.DataFrame(data)
             if 'id' not in df.columns:
-                st.error("Dati dei segnali incompleti dal DB: manca la colonna 'id'.")
+                status_placeholder.error("Dati dei segnali incompleti: manca la colonna 'id'.")
                 return pd.DataFrame()
             df['timestamp'] = pd.to_datetime(df['timestamp'])
             return df.sort_values(by="timestamp", ascending=False)
@@ -54,37 +54,42 @@ def execute_trade_api(trade_id):
         time.sleep(5)
         return False
 
-# --- Loop principale della dashboard ---
-while True:
-    df = fetch_data()
-    
-    with data_placeholder.container():
-        st.subheader("Proposte di Trade Pronte per l'Esecuzione")
-        
-        if not df.empty:
-            df_display = df.copy()
-            df_display['esegui'] = False 
-            disabled_columns = [col for col in df.columns if col != 'esegui']
-            
-            edited_df = st.data_editor(
-                df_display,
-                column_config={
-                    "esegui": st.column_config.CheckboxColumn("Esegui?"),
-                    "id": st.column_config.NumberColumn("ID Trade", format="%d")
-                },
-                disabled=disabled_columns,
-                hide_index=True,
-                # --- FIX: Aggiornato al nuovo parametro 'width' ---
-                width='stretch',
-                key="trade_editor"
-            )
-            
-            trade_to_execute = edited_df[edited_df["esegui"]]
-            if not trade_to_execute.empty:
-                trade_id = trade_to_execute.iloc[0]["id"]
-                execute_trade_api(trade_id)
-                st.rerun()
-        else:
-            status_placeholder.info("Nessuna proposta di trade dal Cloud. Il sistema sta analizzando il mercato...")
+# --- LOGICA PRINCIPALE (SENZA 'while True') ---
 
-    time.sleep(30)
+df = fetch_data()
+
+with data_placeholder.container():
+    st.subheader("Proposte di Trade Pronte per l'Esecuzione")
+    
+    if not df.empty:
+        df_display = df.copy()
+        df_display['esegui'] = False 
+        disabled_columns = [col for col in df.columns if col != 'esegui']
+        
+        # Usiamo una chiave dinamica basata sul timestamp per evitare conflitti
+        # Ma la soluzione migliore è il rerun(), quindi la chiave statica va bene
+        edited_df = st.data_editor(
+            df_display,
+            column_config={
+                "esegui": st.column_config.CheckboxColumn("Esegui?"),
+                "id": st.column_config.NumberColumn("ID Trade", format="%d")
+            },
+            disabled=disabled_columns,
+            hide_index=True,
+            width='stretch',
+            key="trade_editor" # Questa chiave ora è sicura perché il rerun pulisce tutto
+        )
+        
+        trade_to_execute = edited_df[edited_df["esegui"]]
+        if not trade_to_execute.empty:
+            trade_id = trade_to_execute.iloc[0]["id"]
+            execute_trade_api(trade_id)
+            # Forza un refresh completo della pagina per resettare lo stato
+            st.rerun()
+    else:
+        status_placeholder.info("Nessuna proposta di trade dal Cloud. Il sistema sta analizzando il mercato...")
+
+# --- MECCANISMO DI AUTO-AGGIORNAMENTO CORRETTO ---
+# Attende 30 secondi e poi dice a Streamlit di rieseguire l'intero script da capo.
+time.sleep(30)
+st.rerun()
