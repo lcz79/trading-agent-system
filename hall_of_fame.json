@@ -1,42 +1,71 @@
 {
-    "XRPUSDT": {
+    "ADA/USDT:USDT": {
         "strategy": "MEANREV",
-        "params": { "bb_len": 30, "bb_mult": 2.0, "rsi_len": 21, "rsi_oversold": 25, "rsi_overbought": 75 }
+        "params": {
+            "bb_len": 30,
+            "bb_mult": 2,
+            "rsi_len": 21,
+            "rsi_oversold": 25,
+            "rsi_overbought": 75
+        }
     },
-    "ADAUSDT": {
+    "AVAX/USDT:USDT": {
+        "strategy": "PULLBACK",
+        "params": {
+            "ema_fast": 30,
+            "ema_slow": 200
+        }
+    },
+    "BTC/USDT:USDT": {
+        "strategy": "PULLBACK",
+        "params": {
+            "ema_fast": 20,
+            "ema_slow": 100
+        }
+    },
+    "DOGE/USDT:USDT": {
+        "strategy": "PULLBACK",
+        "params": {
+            "ema_fast": 10,
+            "ema_slow": 200
+        }
+    },
+    "DOT/USDT:USDT": {
+        "strategy": "PULLBACK",
+        "params": {
+            "ema_fast": 30,
+            "ema_slow": 200
+        }
+    },
+    "ETH/USDT:USDT": {
+        "strategy": "PULLBACK",
+        "params": {
+            "ema_fast": 10,
+            "ema_slow": 50
+        }
+    },
+    "LINK/USDT:USDT": {
+        "strategy": "PULLBACK",
+        "params": {
+            "ema_fast": 30,
+            "ema_slow": 50
+        }
+    },
+    "SOL/USDT:USDT": {
+        "strategy": "PULLBACK",
+        "params": {
+            "ema_fast": 30,
+            "ema_slow": 50
+        }
+    },
+    "XRP/USDT:USDT": {
         "strategy": "MEANREV",
-        "params": { "bb_len": 30, "bb_mult": 2.0, "rsi_len": 21, "rsi_oversold": 25, "rsi_overbought": 75 }
-    },
-    "AVAXUSDT": {
-        "strategy": "PULLBACK",
-        "params": { "ema_fast": 30, "ema_slow": 200, "rr": 3.0 }
-    },
-    "DOTUSDT": {
-        "strategy": "PULLBACK",
-        "params": { "ema_fast": 30, "ema_slow": 200, "rr": 1.5 }
-    },
-    "SOLUSDT": {
-        "strategy": "PULLBACK",
-        "params": { "ema_fast": 30, "ema_slow": 50, "rr": 3.0 }
-    },
-    "DOGEUSDT": {
-        "strategy": "PULLBACK",
-        "params": { "ema_fast": 10, "ema_slow": 200, "rr": 3.0 }
-    },
-    "BTCUSDT": {
-        "strategy": "PULLBACK",
-        "params": { "ema_fast": 20, "ema_slow": 100, "rr": 2.0 }
-    },
-    "LINKUSDT": {
-        "strategy": "PULLBACK",
-        "params": { "ema_fast": 30, "ema_slow": 50, "rr": 1.5 }
-    },
-    "SPXUSDT": {
-        "strategy": "PULLBACK",
-        "params": { "ema_fast": 10, "ema_slow": 50, "rr": 2.0 }
-    },
-    "ETHUSDT": {
-        "strategy": "PULLBACK",
-        "params": { "ema_fast": 10, "ema_slow": 50, "rr": 1.5 }
+        "params": {
+            "bb_len": 30,
+            "bb_mult": 2,
+            "rsi_len": 21,
+            "rsi_oversold": 25,
+            "rsi_overbought": 75
+        }
     }
 }
