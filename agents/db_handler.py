@@ -6,18 +6,36 @@ from datetime import datetime
 
 class DBHandler:
     def __init__(self):
+        self.db_url = os.environ.get("DATABASE_URL")
+        if not self.db_url:
+            raise ValueError("Variabile d'ambiente DATABASE_URL non trovata!")
         self.conn = None
+        self._connect() # Tenta la connessione iniziale
+
+    def _connect(self):
+        """Stabilisce una nuova connessione al database."""
         try:
-            db_url = os.environ.get("DATABASE_URL")
-            if not db_url: raise ValueError("Variabile d'ambiente DATABASE_URL non trovata!")
-            self.conn = psycopg2.connect(db_url)
-            logging.info("✅ Connessione al database PostgreSQL stabilita con successo.")
+            self.conn = psycopg2.connect(self.db_url)
+            logging.info("✅ Nuova connessione al database PostgreSQL stabilita.")
+            # È buona norma creare la tabella qui se la connessione viene ristabilita
             self.create_table()
         except Exception as e:
-            logging.error(f"❌ Errore di connessione a PostgreSQL: {e}")
+            logging.error(f"❌ Fallimento tentativo di connessione a PostgreSQL: {e}")
             self.conn = None
 
+    def _ensure_connection(self):
+        """Assicura che la connessione sia attiva, altrimenti si ricollega."""
+        try:
+            # self.conn.closed è 0 se attiva, non-zero se chiusa.
+            if self.conn is None or self.conn.closed != 0:
+                logging.warning("🔌 Connessione al DB persa. Tento la riconnessione...")
+                self._connect()
+        except Exception as e:
+            logging.error(f"Errore controllo connessione: {e}. Tento la riconnessione...")
+            self._connect()
+
     def create_table(self):
+        self._ensure_connection()
         if not self.conn: return
         try:
             with self.conn.cursor() as cursor:
@@ -30,9 +48,10 @@ class DBHandler:
                 """)
             self.conn.commit()
         except Exception as e:
-            logging.error(f"Errore creazione tabella 'signals': {e}")
+            logging.error(f"Errore durante la creazione della tabella 'signals': {e}")
 
     def save_signal(self, signal: dict):
+        self._ensure_connection()
         if not self.conn: return
         try:
             with self.conn.cursor() as cursor:
@@ -51,6 +70,7 @@ class DBHandler:
             logging.error(f"Errore salvataggio segnale su PostgreSQL: {e}")
 
     def get_last_signal_time(self, asset: str, strategy: str) -> datetime | None:
+        self._ensure_connection()
         if not self.conn: return None
         try:
             with self.conn.cursor() as cursor:
@@ -62,25 +82,24 @@ class DBHandler:
             return None
 
     def get_all_signals_as_df(self) -> pd.DataFrame:
+        self._ensure_connection()
         if not self.conn: return pd.DataFrame()
         try:
             query = "SELECT * FROM signals ORDER BY timestamp DESC"
+            # Ignoriamo il warning di pandas, è solo un avviso
             df = pd.read_sql_query(query, self.conn)
             return df
         except Exception as e:
             logging.error(f"Errore recupero segnali da PostgreSQL: {e}")
             return pd.DataFrame()
 
-    # --- NUOVA FUNZIONE AGGIUNTA QUI ---
     def get_signal_by_id(self, trade_id: int) -> dict | None:
-        """Recupera un singolo segnale dal database usando il suo ID."""
+        self._ensure_connection()
         if not self.conn: return None
         try:
             query = "SELECT * FROM signals WHERE id = %s"
-            # Usiamo pandas per comodità, ci restituisce un DataFrame
             df = pd.read_sql_query(query, self.conn, params=(trade_id,))
             if not df.empty:
-                # Convertiamo la prima (e unica) riga in un dizionario
                 return df.iloc[0].to_dict()
             return None
         except Exception as e:
