@@ -1,0 +1,484 @@
+{
+    "ADA/USDT:USDT": [
+        {
+            "context_tf": "1d",
+            "params": {
+                "atr_len": 14,
+                "bb_len": 20,
+                "kc_len": 20,
+                "kc_mult": 2.0,
+                "rr": 1.5
+            },
+            "quality_test": {
+                "calmar": 8.313,
+                "expectancy": 0.001043,
+                "mdd": 0.0354,
+                "pf": 1.28,
+                "pnl_sum": 0.047968,
+                "score": 0.005,
+                "sharpe": 2.023,
+                "trades": 46,
+                "wr": 50.0
+            },
+            "signal_tf": "30m",
+            "strategy": "TTM_SQUEEZE",
+            "strategy_id": "TTM_SQUEEZE_1d_30m_0"
+        }
+    ],
+    "AIA/USDT:USDT": [
+        {
+            "context_tf": "4h",
+            "params": {
+                "atr_len": 14,
+                "ib_confirm": 1,
+                "rr": 1.4,
+                "vol_len": 20,
+                "vol_min_mult": 0.0
+            },
+            "quality_test": {
+                "calmar": 24.557,
+                "expectancy": 0.021824,
+                "mdd": 0.2188,
+                "pf": 2.23,
+                "pnl_sum": 0.742012,
+                "score": 0.235,
+                "sharpe": 4.531,
+                "trades": 34,
+                "wr": 67.65
+            },
+            "signal_tf": "15m",
+            "strategy": "INSIDEBAR",
+            "strategy_id": "INSIDEBAR_4h_15m_0"
+        },
+        {
+            "context_tf": "4h",
+            "params": {
+                "atr_len": 14,
+                "ib_confirm": 2,
+                "rr": 1.4,
+                "vol_len": 20,
+                "vol_min_mult": 0.0
+            },
+            "quality_test": {
+                "calmar": 24.557,
+                "expectancy": 0.021824,
+                "mdd": 0.2188,
+                "pf": 2.23,
+                "pnl_sum": 0.742012,
+                "score": 0.235,
+                "sharpe": 4.531,
+                "trades": 34,
+                "wr": 67.65
+            },
+            "signal_tf": "15m",
+            "strategy": "INSIDEBAR",
+            "strategy_id": "INSIDEBAR_4h_15m_1"
+        },
+        {
+            "context_tf": "4h",
+            "params": {
+                "atr_len": 14,
+                "ib_confirm": 1,
+                "rr": 1.5,
+                "vol_len": 20,
+                "vol_min_mult": 0.0
+            },
+            "quality_test": {
+                "calmar": 27.904,
+                "expectancy": 0.024729,
+                "mdd": 0.2188,
+                "pf": 2.4,
+                "pnl_sum": 0.840782,
+                "score": 0.285,
+                "sharpe": 4.893,
+                "trades": 34,
+                "wr": 67.65
+            },
+            "signal_tf": "15m",
+            "strategy": "INSIDEBAR",
+            "strategy_id": "INSIDEBAR_4h_15m_2"
+        }
+    ],
+    "ASTER/USDT:USDT": [
+        {
+            "context_tf": "4h",
+            "params": {
+                "atr_len": 14,
+                "ema_fast": 30,
+                "ema_slow": 50,
+                "rr": 1.6,
+                "sl_atr": 1.2
+            },
+            "quality_test": {
+                "calmar": 44.89,
+                "expectancy": 0.011317,
+                "mdd": 0.0668,
+                "pf": 2.54,
+                "pnl_sum": 0.701676,
+                "score": 0.146,
+                "sharpe": 7.509,
+                "trades": 62,
+                "wr": 61.29
+            },
+            "signal_tf": "15m",
+            "strategy": "PULLBACK",
+            "strategy_id": "PULLBACK_4h_15m_0"
+        },
+        {
+            "context_tf": "4h",
+            "params": {
+                "atr_len": 14,
+                "ema_fast": 30,
+                "ema_slow": 50,
+                "rr": 2.0,
+                "sl_atr": 1.2
+            },
+            "quality_test": {
+                "calmar": 38.225,
+                "expectancy": 0.014899,
+                "mdd": 0.1024,
+                "pf": 2.9,
+                "pnl_sum": 0.923724,
+                "score": 0.208,
+                "sharpe": 8.241,
+                "trades": 62,
+                "wr": 58.06
+            },
+            "signal_tf": "15m",
+            "strategy": "PULLBACK",
+            "strategy_id": "PULLBACK_4h_15m_1"
+        },
+        {
+            "context_tf": "4h",
+            "params": {
+                "atr_len": 14,
+                "ema_fast": 30,
+                "ema_slow": 50,
+                "rr": 1.8,
+                "sl_atr": 1.2
+            },
+            "quality_test": {
+                "calmar": 54.335,
+                "expectancy": 0.01378,
+                "mdd": 0.0668,
+                "pf": 2.87,
+                "pnl_sum": 0.854339,
+                "score": 0.201,
+                "sharpe": 8.378,
+                "trades": 62,
+                "wr": 61.29
+            },
+            "signal_tf": "15m",
+            "strategy": "PULLBACK",
+            "strategy_id": "PULLBACK_4h_15m_2"
+        },
+        {
+            "context_tf": "4h",
+            "params": {
+                "atr_len": 14,
+                "bb_len": 20,
+                "bb_std": 2.0,
+                "bbw_min": 0.04,
+                "rr": 1.5,
+                "vol_len": 20,
+                "vol_min_mult": 0.0
+            },
+            "quality_test": {
+                "calmar": 29.177,
+                "expectancy": 0.013823,
+                "mdd": 0.1155,
+                "pf": 2.93,
+                "pnl_sum": 0.539112,
+                "score": 0.253,
+                "sharpe": 7.602,
+                "trades": 39,
+                "wr": 84.62
+            },
+            "signal_tf": "15m",
+            "strategy": "BB_BREAK",
+            "strategy_id": "BB_BREAK_4h_15m_3"
+        },
+        {
+            "context_tf": "4h",
+            "params": {
+                "atr_len": 14,
+                "bb_len": 20,
+                "bb_std": 2.0,
+                "bbw_min": 0.04,
+                "rr": 1.5,
+                "vol_len": 20,
+                "vol_min_mult": 1.1
+            },
+            "quality_test": {
+                "calmar": 27.301,
+                "expectancy": 0.013063,
+                "mdd": 0.1155,
+                "pf": 2.7,
+                "pnl_sum": 0.457208,
+                "score": 0.217,
+                "sharpe": 6.918,
+                "trades": 35,
+                "wr": 85.71
+            },
+            "signal_tf": "15m",
+            "strategy": "BB_BREAK",
+            "strategy_id": "BB_BREAK_4h_15m_4"
+        },
+        {
+            "context_tf": "4h",
+            "params": {
+                "atr_len": 14,
+                "bb_len": 20,
+                "bb_std": 2.0,
+                "bbw_min": 0.04,
+                "rr": 1.6,
+                "vol_len": 20,
+                "vol_min_mult": 1.1
+            },
+            "quality_test": {
+                "calmar": 22.936,
+                "expectancy": 0.012186,
+                "mdd": 0.1268,
+                "pf": 2.29,
+                "pnl_sum": 0.426524,
+                "score": 0.166,
+                "sharpe": 5.721,
+                "trades": 35,
+                "wr": 82.86
+            },
+            "signal_tf": "15m",
+            "strategy": "BB_BREAK",
+            "strategy_id": "BB_BREAK_4h_15m_5"
+        }
+    ],
+    "DOGE/USDT:USDT": [
+        {
+            "context_tf": "1d",
+            "params": {
+                "atr_len": 14,
+                "bb_len": 20,
+                "kc_len": 20,
+                "kc_mult": 2.0,
+                "rr": 1.5
+            },
+            "quality_test": {
+                "calmar": 3.019,
+                "expectancy": 0.000335,
+                "mdd": 0.0133,
+                "pf": 1.2,
+                "pnl_sum": 0.007716,
+                "score": 0.001,
+                "sharpe": 0.656,
+                "trades": 23,
+                "wr": 52.17
+            },
+            "signal_tf": "1h",
+            "strategy": "TTM_SQUEEZE",
+            "strategy_id": "TTM_SQUEEZE_1d_1h_0"
+        },
+        {
+            "context_tf": "1d",
+            "params": {
+                "atr_len": 14,
+                "ib_confirm": 1,
+                "rr": 1.5,
+                "vol_len": 20,
+                "vol_min_mult": 1.2
+            },
+            "quality_test": {
+                "calmar": 1.385,
+                "expectancy": 0.000297,
+                "mdd": 0.0566,
+                "pf": 1.19,
+                "pnl_sum": 0.047551,
+                "score": 0.002,
+                "sharpe": 1.298,
+                "trades": 160,
+                "wr": 61.88
+            },
+            "signal_tf": "30m",
+            "strategy": "INSIDEBAR",
+            "strategy_id": "INSIDEBAR_1d_30m_1"
+        },
+        {
+            "context_tf": "1d",
+            "params": {
+                "atr_len": 14,
+                "bb_len": 20,
+                "kc_len": 20,
+                "kc_mult": 1.5,
+                "rr": 1.5
+            },
+            "quality_test": {
+                "calmar": 12.444,
+                "expectancy": 0.000395,
+                "mdd": 0.0085,
+                "pf": 1.42,
+                "pnl_sum": 0.020958,
+                "score": 0.002,
+                "sharpe": 2.656,
+                "trades": 53,
+                "wr": 52.83
+            },
+            "signal_tf": "30m",
+            "strategy": "TTM_SQUEEZE",
+            "strategy_id": "TTM_SQUEEZE_1d_30m_2"
+        },
+        {
+            "context_tf": "1d",
+            "params": {
+                "atr_len": 14,
+                "bb_len": 20,
+                "kc_len": 20,
+                "kc_mult": 1.5,
+                "rr": 1.5
+            },
+            "quality_test": {
+                "calmar": 2.043,
+                "expectancy": 0.000174,
+                "mdd": 0.0202,
+                "pf": 1.23,
+                "pnl_sum": 0.016397,
+                "score": 0.001,
+                "sharpe": 1.431,
+                "trades": 94,
+                "wr": 55.32
+            },
+            "signal_tf": "15m",
+            "strategy": "TTM_SQUEEZE",
+            "strategy_id": "TTM_SQUEEZE_1d_15m_3"
+        }
+    ],
+    "ENA/USDT:USDT": [
+        {
+            "context_tf": "1d",
+            "params": {
+                "atr_len": 14,
+                "bb_len": 30,
+                "bb_std": 2.0,
+                "bbw_min": 0.06,
+                "rr": 1.6,
+                "vol_len": 20,
+                "vol_min_mult": 1.1
+            },
+            "quality_test": {
+                "calmar": 3.203,
+                "expectancy": 0.002595,
+                "mdd": 0.1931,
+                "pf": 1.26,
+                "pnl_sum": 0.288088,
+                "score": 0.022,
+                "sharpe": 1.502,
+                "trades": 111,
+                "wr": 72.07
+            },
+            "signal_tf": "1h",
+            "strategy": "BB_BREAK",
+            "strategy_id": "BB_BREAK_1d_1h_0"
+        },
+        {
+            "context_tf": "1d",
+            "params": {
+                "atr_len": 14,
+                "bb_len": 30,
+                "bb_std": 2.0,
+                "bbw_min": 0.06,
+                "rr": 1.5,
+                "vol_len": 20,
+                "vol_min_mult": 1.1
+            },
+            "quality_test": {
+                "calmar": 4.579,
+                "expectancy": 0.00363,
+                "mdd": 0.1931,
+                "pf": 1.42,
+                "pnl_sum": 0.402908,
+                "score": 0.036,
+                "sharpe": 2.254,
+                "trades": 111,
+                "wr": 74.77
+            },
+            "signal_tf": "1h",
+            "strategy": "BB_BREAK",
+            "strategy_id": "BB_BREAK_1d_1h_1"
+        },
+        {
+            "context_tf": "1d",
+            "params": {
+                "atr_len": 14,
+                "bb_len": 30,
+                "bb_std": 2.0,
+                "bbw_min": 0.04,
+                "rr": 1.5,
+                "vol_len": 20,
+                "vol_min_mult": 1.1
+            },
+            "quality_test": {
+                "calmar": 1.334,
+                "expectancy": 0.001229,
+                "mdd": 0.2207,
+                "pf": 1.19,
+                "pnl_sum": 0.28632,
+                "score": 0.012,
+                "sharpe": 1.051,
+                "trades": 233,
+                "wr": 73.39
+            },
+            "signal_tf": "30m",
+            "strategy": "BB_BREAK",
+            "strategy_id": "BB_BREAK_1d_30m_2"
+        },
+        {
+            "context_tf": "1d",
+            "params": {
+                "atr_len": 14,
+                "bb_len": 30,
+                "bb_std": 2.0,
+                "bbw_min": 0.04,
+                "rr": 1.5,
+                "vol_len": 20,
+                "vol_min_mult": 0.0
+            },
+            "quality_test": {
+                "calmar": 1.632,
+                "expectancy": 0.001822,
+                "mdd": 0.2752,
+                "pf": 1.29,
+                "pnl_sum": 0.62311,
+                "score": 0.02,
+                "sharpe": 1.662,
+                "trades": 342,
+                "wr": 74.27
+            },
+            "signal_tf": "30m",
+            "strategy": "BB_BREAK",
+            "strategy_id": "BB_BREAK_1d_30m_3"
+        },
+        {
+            "context_tf": "1d",
+            "params": {
+                "atr_len": 14,
+                "bb_len": 30,
+                "bb_std": 2.0,
+                "bbw_min": 0.04,
+                "rr": 1.6,
+                "vol_len": 20,
+                "vol_min_mult": 0.0
+            },
+            "quality_test": {
+                "calmar": 1.324,
+                "expectancy": 0.001499,
+                "mdd": 0.2771,
+                "pf": 1.22,
+                "pnl_sum": 0.51263,
+                "score": 0.015,
+                "sharpe": 1.308,
+                "trades": 342,
+                "wr": 72.22
+            },
+            "signal_tf": "30m",
+            "strategy": "BB_BREAK",
+            "strategy_id": "BB_BREAK_1d_30m_4"
+        }
+    ]
+}

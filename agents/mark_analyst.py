@@ -1,93 +1,165 @@
 # ===============================================================
-# MARK ANALYST v8.0 — ESECUTORE PURO
+# MARK ANALYST v12.0 — Esecutore Adattivo PRO
 # ===============================================================
-# Semplificato: non fa più discovery.
-# Il suo unico compito è leggere la Hall of Fame (ottimizzata da Leo)
-# ed eseguire le strategie in tempo reale.
+# Logica:
+# 1. Carica lo "Strategy Book PRO" generato da Leo v4.5.
+# 2. Per ogni asset, determina il regime di mercato attuale (UP/DOWN/RANGE).
+# 3. Cerca nel libro la strategia più performante (score più alto)
+#    che sia adatta al regime corrente.
+# 4. Se la trova, propone il trade. Altrimenti, non fa nulla.
 # ===============================================================
 
 import pandas as pd
-import pandas_ta as ta
 import logging
 import time
 import json
+import os
 from datetime import datetime, timedelta, timezone
 
 from core.exchange_router import ExchangeRouter
 from agents.sara_trader_pro import SaraTrader
 from agents.db_handler import DBHandler
-from agents.strategies import STRATEGY_MAP
+
+# --- Importazione diretta dal motore di ricerca v4.5 PRO ---
+from tools.leo_optimizer_v4_5_pro import (
+    STRATEGY_GEN_MAP,
+    ensure_indicators,
+    classify_regime
+)
 
 class MarkAnalyst:
     def __init__(self, exchange_router: ExchangeRouter, sara: SaraTrader, db: DBHandler):
-        self.router = exchange_router; self.sara = sara; self.db = db
+        self.router = exchange_router
+        self.sara = sara
+        self.db = db
         self.exchange = self.router.get("bybit")
-        self.hall_of_fame_path = "config/hall_of_fame.json"
-        self.watchlist = {}
-        self.dedupe_minutes = 30
-        
-        if not self.exchange: raise ConnectionError("❌ Nessun exchange disponibile.")
-        
-        logging.info(f"✅ MarkAnalyst v8.0 'Esecutore Puro' inizializzato.")
-        self._load_watchlist_from_hof()
+        self.strategy_book_path = "config/strategy_book_pro.json"
+        self.strategy_book = {}
+        self.dedupe_minutes = 60  # Aumentato per evitare segnali troppo ravvicinati
 
-    def _load_watchlist_from_hof(self):
-        """Carica la watchlist direttamente dal file Hall of Fame JSON."""
+        if not self.exchange:
+            raise ConnectionError("❌ Nessun exchange disponibile.")
+        
+        logging.info("✅ MarkAnalyst v12.0 'Esecutore Adattivo PRO' inizializzato.")
+
+    def _load_strategy_book(self):
         try:
-            with open(self.hall_of_fame_path, 'r') as f:
-                self.watchlist = json.load(f)
-            logging.info(f"✅ Caricata Hall of Fame con {len(self.watchlist)} strategie ottimizzate.")
+            with open(self.strategy_book_path, 'r') as f:
+                self.strategy_book = json.load(f)
+            logging.info(f"✅ Caricato Strategy Book PRO con {len(self.strategy_book)} asset.")
         except (FileNotFoundError, json.JSONDecodeError):
-            logging.error(f"‼️ HALL OF FAME '{self.hall_of_fame_path}' non trovata o corrotta! Il bot non analizzerà nulla.")
-            self.watchlist = {}
+            logging.error(f"‼️ STRATEGY BOOK '{self.strategy_book_path}' non trovato o corrotto!")
+            self.strategy_book = {}
 
-    # ... (le funzioni di calcolo indicatori e fetch ohlcv rimangono le stesse) ...
-    def _calculate_indicators(self, df: pd.DataFrame, strategy: str, params: dict) -> pd.DataFrame:
-        if df.empty: return df
+    def _fetch_ohlcv(self, symbol: str, timeframe: str, limit: int = 400) -> pd.DataFrame:
         try:
-            df["ATR"] = ta.atr(df["high"], df["low"], df["close"], length=14)
-            if strategy == "PULLBACK":
-                df["EMA_F"] = ta.ema(df["close"], length=int(params["ema_fast"]))
-                df["EMA_S"] = ta.ema(df["close"], length=int(params["ema_slow"]))
-            elif strategy == "MEANREV":
-                df["RSI"] = ta.rsi(df["close"], length=int(params["rsi_len"]))
-                bb = ta.bbands(df["close"], length=int(params["bb_len"]), std=2.0)
-                df["BBL"], df["BBM"], df["BBU"] = bb.iloc[:, 0], bb.iloc[:, 1], bb.iloc[:, 2]
-            df.dropna(inplace=True); return df
-        except Exception as e: logging.error(f"Errore indicatori: {e}"); return pd.DataFrame()
-    def _fetch_ohlcv(self, symbol: str, timeframe: str, limit: int = 300) -> pd.DataFrame:
-        try: ohlcv = self.exchange.fetch_ohlcv(symbol, timeframe=timeframe, limit=limit); df = pd.DataFrame(ohlcv, columns=["timestamp", "open", "high", "low", "close", "volume"]); df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms", utc=True); return df.dropna()
-        except Exception: return pd.DataFrame()
+            ohlcv = self.exchange.fetch_ohlcv(symbol, timeframe=timeframe, limit=limit)
+            df = pd.DataFrame(ohlcv, columns=["timestamp", "open", "high", "low", "close", "volume"])
+            df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms", utc=True)
+            return df.dropna()
+        except Exception as e:
+            logging.error(f"Errore fetch OHLCV per {symbol} {timeframe}: {e}")
+            return pd.DataFrame()
+
+    def _find_best_strategy_for_regime(self, available_strategies: List[Dict], current_regime: str) -> Dict:
+        """
+        Cerca tra le strategie disponibili quella migliore per il regime attuale.
+        - PULLBACK & VOLBREAK -> UP/DOWN
+        - MEANREV & RSI_DIV -> RANGE
+        """
+        candidates = []
+        for strat in available_strategies:
+            strat_type = strat.get("strategy")
+            is_match = False
+            if current_regime in ["UP", "DOWN"] and strat_type in ["PULLBACK", "VOLBREAK"]:
+                is_match = True
+            elif current_regime == "RANGE" and strat_type in ["MEANREV", "RSI_DIV"]:
+                is_match = True
+            
+            if is_match:
+                candidates.append(strat)
+        
+        if not candidates:
+            return {}
+        
+        # Ritorna il candidato con lo score più alto
+        return max(candidates, key=lambda s: s.get("quality_test", {}).get("score", 0))
 
     def run_analysis(self):
-        self._load_watchlist_from_hof() # Ricarica ad ogni ciclo per recepire aggiornamenti
-        if not self.watchlist:
-            logging.warning("Watchlist vuota. Nessuna analisi da eseguire.")
+        self._load_strategy_book()
+        if not self.strategy_book:
+            logging.warning("Strategy Book vuoto. In attesa che Leo lo popoli.")
             return
             
-        logging.info(f"🔎 Avvio analisi sulla Hall of Fame di {len(self.watchlist)} asset...")
-        for symbol, strat_config in self.watchlist.items():
+        logging.info(f"🔎 Avvio analisi regime-aware su {len(self.strategy_book)} asset...")
+        
+        for symbol, available_strategies in self.strategy_book.items():
+            if not available_strategies:
+                continue
+
             try:
-                strategy_name = strat_config["strategy"]; params = strat_config["params"]
-                df = self._fetch_ohlcv(symbol, "1h", 250)
-                if df.empty: continue
-                df = self._calculate_indicators(df, strategy_name, params)
-                if df.empty: continue
+                # Per determinare il regime, usiamo il timeframe più comune o il più lungo (es. 1h)
+                # tra le strategie disponibili per quell'asset.
+                tf_for_regime = available_strategies[0].get("timeframe", "1h")
+                df_regime = self._fetch_ohlcv(symbol, tf_for_regime, limit=300)
+                if df_regime.empty:
+                    continue
                 
-                last_signal_time = self.db.get_last_signal_time(symbol, strategy_name)
-                if last_signal_time and (datetime.now(timezone.utc) - last_signal_time) < timedelta(minutes=self.dedupe_minutes): continue
+                # Calcola indicatori di regime e determina il regime attuale (ultima candela completa)
+                df_regime = ensure_indicators(df_regime, {}) # Calcola indicatori base
+                current_regime = classify_regime(df_regime.iloc[-2])
+                logging.info(f"🔍 {symbol} | Regime attuale ({tf_for_regime}): {current_regime}")
+
+                # Trova la migliore strategia per questo regime
+                best_strat = self._find_best_strategy_for_regime(available_strategies, current_regime)
                 
-                strategy_function = STRATEGY_MAP.get(strategy_name)
-                if not strategy_function: continue
+                if not best_strat:
+                    logging.info(f"  -> Nessuna strategia adatta al regime {current_regime} per {symbol}.")
+                    continue
+
+                # Ora abbiamo la strategia da usare. Verifichiamo se c'è un segnale.
+                strategy_name = best_strat["strategy"]
+                params = best_strat["params"]
+                timeframe = best_strat["timeframe"]
+                strategy_id = best_strat["strategy_id"]
+
+                last_signal_time = self.db.get_last_signal_time(symbol, strategy_id)
+                if last_signal_time and (datetime.now(timezone.utc) - last_signal_time) < timedelta(minutes=self.dedupe_minutes):
+                    continue
+
+                df_signal = self._fetch_ohlcv(symbol, timeframe, limit=400)
+                if df_signal.empty:
+                    continue
                 
-                signal = strategy_function(df, params)
-                if signal:
-                    signal['asset'] = symbol; signal['timeframe'] = "1h"
-                    logging.warning(f"🔥 Nuovo segnale: {signal['asset']} {signal['side']}")
-                    self.db.save_signal(signal); self.sara.propose_trade(signal)
+                df_signal = ensure_indicators(df_signal.copy(), params)
+                df_signal["REGIME"] = df_signal.apply(classify_regime, axis=1)
+
+                strategy_function = STRATEGY_GEN_MAP.get(strategy_name)
+                if not strategy_function:
+                    continue
+                
+                all_signals = strategy_function(df_signal, params)
+
+                if all_signals:
+                    last_signal_entry = all_signals[-1]
+                    if last_signal_entry[0] >= len(df_signal) - 2: # Segnale fresco
+                        _, side, entry, sl, tp = last_signal_entry
+                        
+                        signal = {
+                            "asset": symbol, "timeframe": timeframe, "side": side,
+                            "entry": entry, "sl": sl, "tp": tp,
+                            "strategy": strategy_id, # Usiamo l'ID univoco
+                            "params": json.dumps(params)
+                        }
+                        
+                        logging.warning(f"🔥 SEGNALE SCELTO: {signal['asset']} | {signal['strategy']} | {signal['side']}")
+                        self.db.save_signal(signal)
+                        self.sara.propose_trade(signal)
                 
                 time.sleep(self.exchange.rateLimit / 1000)
-            except Exception as e: logging.error(f"Errore analisi {symbol}: {e}")
+
+            except Exception as e:
+                logging.error(f"Errore fatale analisi {symbol}: {e}", exc_info=True)
 
     def start(self):
         while True:

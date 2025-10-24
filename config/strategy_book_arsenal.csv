@@ -1,0 +1,20 @@
+asset,strategy_id,strategy,context_tf,signal_tf,params,trades,wr,pf,expectancy,score,pnl_sum,mdd,sharpe,calmar
+ADA/USDT:USDT,TTM_SQUEEZE_1d_30m_0,TTM_SQUEEZE,1d,30m,"{""bb_len"": 20, ""kc_len"": 20, ""kc_mult"": 2.0, ""rr"": 1.5, ""atr_len"": 14}",46,50.0,1.28,0.001043,0.005,0.047968,0.0354,2.023,8.313
+AIA/USDT:USDT,INSIDEBAR_4h_15m_2,INSIDEBAR,4h,15m,"{""ib_confirm"": 1, ""rr"": 1.5, ""atr_len"": 14, ""vol_len"": 20, ""vol_min_mult"": 0.0}",34,67.65,2.4,0.024729,0.285,0.840782,0.2188,4.893,27.904
+AIA/USDT:USDT,INSIDEBAR_4h_15m_0,INSIDEBAR,4h,15m,"{""ib_confirm"": 1, ""rr"": 1.4, ""atr_len"": 14, ""vol_len"": 20, ""vol_min_mult"": 0.0}",34,67.65,2.23,0.021824,0.235,0.742012,0.2188,4.531,24.557
+AIA/USDT:USDT,INSIDEBAR_4h_15m_1,INSIDEBAR,4h,15m,"{""ib_confirm"": 2, ""rr"": 1.4, ""atr_len"": 14, ""vol_len"": 20, ""vol_min_mult"": 0.0}",34,67.65,2.23,0.021824,0.235,0.742012,0.2188,4.531,24.557
+ASTER/USDT:USDT,BB_BREAK_4h_15m_3,BB_BREAK,4h,15m,"{""bb_len"": 20, ""bb_std"": 2.0, ""rr"": 1.5, ""atr_len"": 14, ""vol_len"": 20, ""vol_min_mult"": 0.0, ""bbw_min"": 0.04}",39,84.62,2.93,0.013823,0.253,0.539112,0.1155,7.602,29.177
+ASTER/USDT:USDT,BB_BREAK_4h_15m_4,BB_BREAK,4h,15m,"{""bb_len"": 20, ""bb_std"": 2.0, ""rr"": 1.5, ""atr_len"": 14, ""vol_len"": 20, ""vol_min_mult"": 1.1, ""bbw_min"": 0.04}",35,85.71,2.7,0.013063,0.217,0.457208,0.1155,6.918,27.301
+ASTER/USDT:USDT,PULLBACK_4h_15m_1,PULLBACK,4h,15m,"{""ema_fast"": 30, ""ema_slow"": 50, ""rr"": 2.0, ""sl_atr"": 1.2, ""atr_len"": 14}",62,58.06,2.9,0.014899,0.208,0.923724,0.1024,8.241,38.225
+ASTER/USDT:USDT,PULLBACK_4h_15m_2,PULLBACK,4h,15m,"{""ema_fast"": 30, ""ema_slow"": 50, ""rr"": 1.8, ""sl_atr"": 1.2, ""atr_len"": 14}",62,61.29,2.87,0.01378,0.201,0.854339,0.0668,8.378,54.335
+ASTER/USDT:USDT,BB_BREAK_4h_15m_5,BB_BREAK,4h,15m,"{""bb_len"": 20, ""bb_std"": 2.0, ""rr"": 1.6, ""atr_len"": 14, ""vol_len"": 20, ""vol_min_mult"": 1.1, ""bbw_min"": 0.04}",35,82.86,2.29,0.012186,0.166,0.426524,0.1268,5.721,22.936
+ASTER/USDT:USDT,PULLBACK_4h_15m_0,PULLBACK,4h,15m,"{""ema_fast"": 30, ""ema_slow"": 50, ""rr"": 1.6, ""sl_atr"": 1.2, ""atr_len"": 14}",62,61.29,2.54,0.011317,0.146,0.701676,0.0668,7.509,44.89
+DOGE/USDT:USDT,TTM_SQUEEZE_1d_30m_2,TTM_SQUEEZE,1d,30m,"{""bb_len"": 20, ""kc_len"": 20, ""kc_mult"": 1.5, ""rr"": 1.5, ""atr_len"": 14}",53,52.83,1.42,0.000395,0.002,0.020958,0.0085,2.656,12.444
+DOGE/USDT:USDT,INSIDEBAR_1d_30m_1,INSIDEBAR,1d,30m,"{""ib_confirm"": 1, ""rr"": 1.5, ""atr_len"": 14, ""vol_len"": 20, ""vol_min_mult"": 1.2}",160,61.88,1.19,0.000297,0.002,0.047551,0.0566,1.298,1.385
+DOGE/USDT:USDT,TTM_SQUEEZE_1d_15m_3,TTM_SQUEEZE,1d,15m,"{""bb_len"": 20, ""kc_len"": 20, ""kc_mult"": 1.5, ""rr"": 1.5, ""atr_len"": 14}",94,55.32,1.23,0.000174,0.001,0.016397,0.0202,1.431,2.043
+DOGE/USDT:USDT,TTM_SQUEEZE_1d_1h_0,TTM_SQUEEZE,1d,1h,"{""bb_len"": 20, ""kc_len"": 20, ""kc_mult"": 2.0, ""rr"": 1.5, ""atr_len"": 14}",23,52.17,1.2,0.000335,0.001,0.007716,0.0133,0.656,3.019
+ENA/USDT:USDT,BB_BREAK_1d_1h_1,BB_BREAK,1d,1h,"{""bb_len"": 30, ""bb_std"": 2.0, ""rr"": 1.5, ""atr_len"": 14, ""vol_len"": 20, ""vol_min_mult"": 1.1, ""bbw_min"": 0.06}",111,74.77,1.42,0.00363,0.036,0.402908,0.1931,2.254,4.579
+ENA/USDT:USDT,BB_BREAK_1d_1h_0,BB_BREAK,1d,1h,"{""bb_len"": 30, ""bb_std"": 2.0, ""rr"": 1.6, ""atr_len"": 14, ""vol_len"": 20, ""vol_min_mult"": 1.1, ""bbw_min"": 0.06}",111,72.07,1.26,0.002595,0.022,0.288088,0.1931,1.502,3.203
+ENA/USDT:USDT,BB_BREAK_1d_30m_3,BB_BREAK,1d,30m,"{""bb_len"": 30, ""bb_std"": 2.0, ""rr"": 1.5, ""atr_len"": 14, ""vol_len"": 20, ""vol_min_mult"": 0.0, ""bbw_min"": 0.04}",342,74.27,1.29,0.001822,0.02,0.62311,0.2752,1.662,1.632
+ENA/USDT:USDT,BB_BREAK_1d_30m_4,BB_BREAK,1d,30m,"{""bb_len"": 30, ""bb_std"": 2.0, ""rr"": 1.6, ""atr_len"": 14, ""vol_len"": 20, ""vol_min_mult"": 0.0, ""bbw_min"": 0.04}",342,72.22,1.22,0.001499,0.015,0.51263,0.2771,1.308,1.324
+ENA/USDT:USDT,BB_BREAK_1d_30m_2,BB_BREAK,1d,30m,"{""bb_len"": 30, ""bb_std"": 2.0, ""rr"": 1.5, ""atr_len"": 14, ""vol_len"": 20, ""vol_min_mult"": 1.1, ""bbw_min"": 0.04}",233,73.39,1.19,0.001229,0.012,0.28632,0.2207,1.051,1.334

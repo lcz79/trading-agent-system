@@ -1,0 +1,78 @@
+{
+    "ADA/USDT:USDT|TTM_SQUEEZE|30m": {
+        "atr_len": 14,
+        "bb_len": 20,
+        "kc_len": 20,
+        "kc_mult": 2.0,
+        "rr": 1.5
+    },
+    "AIA/USDT:USDT|INSIDEBAR|15m": {
+        "atr_len": 14,
+        "ib_confirm": 1,
+        "rr": 1.5,
+        "vol_len": 20,
+        "vol_min_mult": 0.0
+    },
+    "ASTER/USDT:USDT|BB_BREAK|15m": {
+        "atr_len": 14,
+        "bb_len": 20,
+        "bb_std": 2.0,
+        "bbw_min": 0.04,
+        "rr": 1.6,
+        "vol_len": 20,
+        "vol_min_mult": 1.1
+    },
+    "ASTER/USDT:USDT|PULLBACK|15m": {
+        "atr_len": 14,
+        "ema_fast": 30,
+        "ema_slow": 50,
+        "rr": 1.8,
+        "sl_atr": 1.2
+    },
+    "DOGE/USDT:USDT|INSIDEBAR|30m": {
+        "atr_len": 14,
+        "ib_confirm": 1,
+        "rr": 1.5,
+        "vol_len": 20,
+        "vol_min_mult": 1.2
+    },
+    "DOGE/USDT:USDT|TTM_SQUEEZE|15m": {
+        "atr_len": 14,
+        "bb_len": 20,
+        "kc_len": 20,
+        "kc_mult": 1.5,
+        "rr": 1.5
+    },
+    "DOGE/USDT:USDT|TTM_SQUEEZE|1h": {
+        "atr_len": 14,
+        "bb_len": 20,
+        "kc_len": 20,
+        "kc_mult": 2.0,
+        "rr": 1.5
+    },
+    "DOGE/USDT:USDT|TTM_SQUEEZE|30m": {
+        "atr_len": 14,
+        "bb_len": 20,
+        "kc_len": 20,
+        "kc_mult": 1.5,
+        "rr": 1.5
+    },
+    "ENA/USDT:USDT|BB_BREAK|1h": {
+        "atr_len": 14,
+        "bb_len": 30,
+        "bb_std": 2.0,
+        "bbw_min": 0.06,
+        "rr": 1.5,
+        "vol_len": 20,
+        "vol_min_mult": 1.1
+    },
+    "ENA/USDT:USDT|BB_BREAK|30m": {
+        "atr_len": 14,
+        "bb_len": 30,
+        "bb_std": 2.0,
+        "bbw_min": 0.04,
+        "rr": 1.6,
+        "vol_len": 20,
+        "vol_min_mult": 0.0
+    }
+}
