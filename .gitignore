@@ -1,0 +1,85 @@
+# Byte-compiled / cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+venv/
+.venv/
+env/
+ENV/
+
+# Python environment settings
+.python-version
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# Type checkers / caches
+.mypy_cache/
+.pyre/
+__pypackages__/
+
+# Jupyter
+.ipynb_checkpoints
+
+# Logs and runtime files
+*.log
+logs/
+tmp/
+*.pid
+
+# Database files
+*.sqlite
+*.sqlite3
+*.db
+
+# Secrets and env files (do NOT commit .env)
+.env
+.env.* 
+secrets.json
+credentials.json
+*.pem
+*.key
+
+# n8n (if you run a local instance)
+.n8n/
+n8n.sqlite
+
+# Node / frontend
+node_modules/
+npm-debug.log*
+yarn-error.log
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE / editor
+.vscode/
+.idea/
+*.sublime-workspace
+*.sublime-project
+
+# Build artifacts
+dist/
+build/
+*.egg
+
+# Misc
+*.swp
+*~ 
+.cache/
