@@ -87,3 +87,9 @@ build/
 backup-*.tar.gz
 n8n.sqlite
 .env
+
+# Ignora l'ambiente virtuale e le sue librerie
+.venv/
+
+# Ignora i file di backup
+*.tar.gz
