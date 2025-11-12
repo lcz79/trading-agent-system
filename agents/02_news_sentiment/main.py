@@ -1,85 +1,61 @@
-# agents/02_news_sentiment/main.py
+# agents/02_news_sentiment/main.py (Versione Semplificata)
 
 import requests
-from transformers import pipeline
-import os
-
-# Inizializziamo il modello di sentiment analysis una sola volta.
-# La prima volta che esegui questo codice, scaricherà il modello (può richiedere tempo e spazio).
-# Usiamo un modello più piccolo e veloce, ottimo per il nostro scopo.
-print("Caricamento del modello di sentiment analysis...")
-sentiment_pipeline = pipeline('sentiment-analysis', model="distilbert-base-uncased-finetuned-sst-2-english")
-print("Modello caricato.")
+import random # Useremo il caso per simulare il sentiment
 
 def get_crypto_news(api_key: str):
-    """Recupera le notizie da CryptoPanic."""
-    if not api_key or api_key == "YOUR_CRYPTO_PANIC_API_KEY":
-        print("ERRORE: Chiave API di CryptoPanic non valida.")
-        return [] # Restituisce una lista vuota se la chiave non è impostata
+    """Recupera le notizie da NewsAPI.org."""
+    if not api_key or api_key == "YOUR_NEWSAPI_KEY":
+        print("ERRORE: Chiave API di NewsAPI.org non valida.")
+        return []
 
-    url = f"https://cryptopanic.com/api/v1/posts/?auth_token={api_key}&public=true"
+    query = "bitcoin OR ethereum OR crypto OR cryptocurrency"
+    url = f"https://newsapi.org/v2/everything?q={query}&sortBy=popularity&language=en&apiKey={api_key}"
     
     try:
         response = requests.get(url)
-        response.raise_for_status()  # Solleva un errore per risposte http non riuscite (4xx o 5xx)
+        response.raise_for_status()
         data = response.json()
-        # Estraiamo solo i titoli delle notizie
-        titles = [post['title'] for post in data['results']]
+        titles = [article['title'] for article in data['articles']]
         return titles
     except requests.exceptions.RequestException as e:
-        print(f"Errore durante la chiamata a CryptoPanic: {e}")
+        print(f"Errore durante la chiamata a NewsAPI: {e}")
+        return []
+    except KeyError:
+        print(f"Errore: La risposta da NewsAPI non ha il formato previsto. Risposta ricevuta: {data}")
         return []
 
 def analyze_news_sentiment(news_titles: list):
-    """Analizza il sentiment di una lista di titoli di notizie."""
+    """
+    ANALISI FINTA: Simula il sentiment senza usare l'intelligenza artificiale.
+    Questo serve solo per testare il flusso di dati.
+    """
     if not news_titles:
-        return {
-            "average_sentiment_score": 0,
-            "sentiment_label": "NEUTRAL",
-            "article_count": 0,
-            "analysis_details": []
-        }
+        return {"average_sentiment_score": 0, "sentiment_label": "NEUTRAL", "article_count": 0}
 
-    sentiments = sentiment_pipeline(news_titles)
-    
-    # Calcoliamo un punteggio medio. Convertiamo 'POSITIVE' in 1 e 'NEGATIVE' in -1.
-    score = 0
-    for i, sentiment in enumerate(sentiments):
-        # Aggiungiamo il titolo originale al risultato per chiarezza
-        sentiment['article_title'] = news_titles[i]
-        if sentiment['label'] == 'POSITIVE':
-            score += sentiment['score']
-        else:
-            score -= sentiment['score']
-    
-    average_score = score / len(news_titles)
-
-    if average_score > 0.1:
-        label = "POSITIVE"
-    elif average_score < -0.1:
-        label = "NEGATIVE"
-    else:
-        label = "NEUTRAL"
+    # Simuliamo un'analisi assegnando un sentiment a caso
+    labels = ["POSITIVE", "NEGATIVE", "NEUTRAL"]
+    random_label = random.choice(labels)
+    random_score = random.uniform(-1, 1)
 
     return {
-        "average_sentiment_score": round(average_score, 3),
-        "sentiment_label": label,
+        "average_sentiment_score": round(random_score, 3),
+        "sentiment_label": random_label,
         "article_count": len(news_titles),
-        "analysis_details": sentiments
+        "analysis_details": [{"article_title": title, "simulated_sentiment": random.choice(labels)} for title in news_titles]
     }
 
 def run_full_news_analysis(api_key: str):
-    """Funzione principale che orchestra il recupero e l'analisi delle notizie."""
+    """Funzione principale che orchestra il recupero e l'analisi FINTA."""
     print("Recupero delle notizie in corso...")
     news_titles = get_crypto_news(api_key)
     
     if not news_titles:
         print("Nessuna notizia trovata o errore API.")
-        # Restituisce comunque una struttura dati valida
         return analyze_news_sentiment([])
 
-    print(f"Trovate {len(news_titles)} notizie. Analisi del sentiment in corso...")
+    print(f"Trovate {len(news_titles)} notizie. Esecuzione dell'analisi FINTA in corso...")
     analysis_result = analyze_news_sentiment(news_titles)
-    print("Analisi completata.")
+    print("Analisi FINTA completata.")
     
     return analysis_result

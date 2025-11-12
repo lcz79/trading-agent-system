@@ -8,24 +8,25 @@ from .main import run_full_news_analysis
 
 app = FastAPI(
     title="News Sentiment Agent",
-    description="Un agente che recupera notizie crypto e ne analizza il sentiment.",
-    version="1.0.0",
+    description="Un agente che recupera notizie crypto da NewsAPI.org e ne analizza il sentiment.",
+    version="1.1.0",  # Abbiamo aggiornato la versione!
 )
 
-# Definiamo il modello di input: ci aspettiamo un JSON con una chiave api_key
+# Aggiorniamo il modello di input per usare una chiave API generica
 class NewsInput(BaseModel):
-    cryptopanic_api_key: str
+    news_api_key: str
 
 @app.post("/analyze_news/")
 async def get_sentiment(input_data: NewsInput):
     """
     Esegue l'analisi del sentiment sulle ultime notizie crypto.
-    Richiede una chiave API valida per CryptoPanic.
+    Richiede una chiave API valida per NewsAPI.org.
     """
-    if not input_data.cryptopanic_api_key or input_data.cryptopanic_api_key == "YOUR_CRYPTO_PANIC_API_KEY":
-        raise HTTPException(status_code=400, detail="Chiave API di CryptoPanic non fornita o non valida.")
+    if not input_data.news_api_key or input_data.news_api_key == "YOUR_NEWSAPI_KEY":
+        raise HTTPException(status_code=400, detail="Chiave API di NewsAPI.org non fornita o non valida.")
 
-    analysis_result = run_full_news_analysis(api_key=input_data.cryptopanic_api_key)
+    # Passiamo la chiave corretta alla nostra funzione aggiornata
+    analysis_result = run_full_news_analysis(api_key=input_data.news_api_key)
     
     return analysis_result
 
