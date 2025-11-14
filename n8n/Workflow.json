@@ -1,0 +1,135 @@
+{
+  "name": "My workflow 2",
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -16,
+        0
+      ],
+      "id": "1aa8981a-171a-4178-ac7d-b63e5d6a7364",
+      "name": "When clicking ‘Execute workflow’"
+    },
+    {
+      "parameters": {
+        "url": "http://host.docker.internal:5002/",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        192,
+        128
+      ],
+      "id": "e9c91a97-ce89-4023-9b37-0fb9bc3c4e2b",
+      "name": "1. Get Technical Analysis"
+    },
+    {
+      "parameters": {
+        "url": "http://host.docker.internal:5002/",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        192,
+        -80
+      ],
+      "id": "974d9201-9a00-4534-8111-9d7e8ee03d77",
+      "name": "2. Get News Sentiment"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:5001/decide",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"symbol\": \"{{ $item(0).$json.symbol }}\",\n  \"technical_analysis\": {{ $item(0).$json }},\n  \"sentiment_analysis\": {{ $item(1).$json }}\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        624,
+        32
+      ],
+      "id": "1622024a-5c59-429b-a03f-7103dab93eb2",
+      "name": "3. Make Decision"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        464,
+        32
+      ],
+      "id": "e48925d7-8e73-4b38-bb37-f248707a2a1b",
+      "name": "Merge"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "1. Get Technical Analysis",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "2. Get News Sentiment",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "1. Get Technical Analysis": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "2. Get News Sentiment": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge": {
+      "main": [
+        [
+          {
+            "node": "3. Make Decision",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "7e2fe4b1-52a5-44a4-ada5-9091617960ec",
+  "meta": {
+    "instanceId": "ab4979427a838981e09be722b4800b3304ceb4c18d723766a4cc37030f17f934"
+  },
+  "id": "7EdFgS8fU7zZKvWU",
+  "tags": []
+}
