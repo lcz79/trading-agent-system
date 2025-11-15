@@ -2,7 +2,7 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from typing import Dict, Any
 
-from .main import manage_trade
+from main import manage_trade
 
 app = FastAPI(
     title="Trade Guardian Agent",

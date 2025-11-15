@@ -1,0 +1,40 @@
+version: '3.8'
+
+services:
+  n8n:
+    image: n8nio/n8n:latest
+    ports:
+      - "5678:5678"
+    volumes:
+      - ./n8n_data:/home/node/.n8n
+    environment:
+      - GENERIC_TIMEZONE=Europe/Rome
+      # Aggiungi questa riga per disabilitare il controllo del cookie sicuro
+      - N8N_SECURE_COOKIE=false
+
+  technical-analyzer-agent:
+    build:
+      context: ./agents/01_technical_analyzer
+    ports:
+      - "8000:8000"
+
+  news-sentiment-agent:
+    build:
+      context: ./agents/02_news_sentiment
+    ports:
+      - "8001:8000"
+
+  trade-guardian-agent:
+    build:
+      context: ./agents/03_trade_guardian
+    ports:
+      - "8002:8000"
+
+  bybit-executor:
+    build:
+      context: ./agents/04_bybit_executor
+    ports:
+      - "8003:8000"
+    environment:
+      - BYBIT_API_KEY=jGsvbhKNSrgmhLfCid
+      - BYBIT_API_SECRET=ulNflLWjs56xis1dr3GmZ8DC9TuoqBdMpJtc

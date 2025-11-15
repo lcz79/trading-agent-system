@@ -2,7 +2,7 @@
 
 from flask import Flask, jsonify, request
 # Importiamo la nostra funzione per il saldo dal file main.py
-from .main import get_wallet_balance 
+from main import get_wallet_balance 
 import os
 
 app = Flask(__name__)

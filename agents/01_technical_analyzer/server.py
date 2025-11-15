@@ -6,7 +6,7 @@ import ccxt
 import pandas as pd
 
 # Importa la funzione CORRETTA dal tuo file main.py
-from .main import analyze as perform_technical_analysis
+from main import analyze as perform_technical_analysis
 
 app = FastAPI()
 

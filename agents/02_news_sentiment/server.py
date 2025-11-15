@@ -4,7 +4,7 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
 # Importiamo la logica principale
-from .main import run_full_news_analysis
+from main import run_full_news_analysis
 
 app = FastAPI(
     title="News Sentiment Agent",
