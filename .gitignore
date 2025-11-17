@@ -107,6 +107,4 @@ db_data/
 .DS_Store
 Thumbs.db
 
-# ---- NUOVA REGOLA ----
-# Ignora i file di backup compressi
-*.tar.gz.env
+.env
