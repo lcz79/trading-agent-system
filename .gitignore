@@ -109,4 +109,4 @@ Thumbs.db
 
 # ---- NUOVA REGOLA ----
 # Ignora i file di backup compressi
-*.tar.gz
+*.tar.gz.env

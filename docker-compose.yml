@@ -1,82 +1,107 @@
+version: '3.8'
+
 services:
   n8n:
     image: n8nio/n8n
-    container_name: n8n_workflow_engine
-    restart: always
+    container_name: n8n
+    restart: unless-stopped
     ports:
       - "5678:5678"
     environment:
+      - N8N_HOST=${SUBDOMAIN}.${DOMAIN_NAME}
+      - N8N_PROTOCOL=https
+      - NODE_ENV=production
+      - WEBHOOK_URL=https://${SUBDOMAIN}.${DOMAIN_NAME}/
       - GENERIC_TIMEZONE=Europe/Rome
     volumes:
-      - n8n_data:/home/node/.n8n
+      - ./n8n_data:/home/node/.n8n
     networks:
       - trading-network
 
   technical-analyzer-agent:
-    build: ./agents/01_technical_analyzer
+    build:
+      context: ./agents/01_technical_analyzer
     container_name: technical-analyzer-agent
-    restart: always
+    restart: unless-stopped
     ports:
       - "8001:8000"
     networks:
       - trading-network
 
   news-sentiment-agent:
-    build: ./agents/02_news_sentiment
+    build:
+      context: ./agents/02_news_sentiment
     container_name: news-sentiment-agent
-    restart: always
+    restart: unless-stopped
     ports:
       - "8002:8000"
     environment:
-      - CRYPTOPANIC_API_KEY="a34f666b065e5f719d95b2eae0bd6e7a99cba69f"
+      - CRYPTOPANIC_API_KEY=${CRYPTOPANIC_API_KEY}
     networks:
       - trading-network
 
   trade-guardian:
-    build: ./agents/03_trade_guardian
+    build:
+      context: ./agents/03_trade_guardian
     container_name: trade-guardian
-    restart: always
+    restart: unless-stopped
     ports:
       - "8003:8000"
     networks:
       - trading-network
 
   bybit-executor:
-    build: ./agents/04_bybit_executor
+    build:
+      context: ./agents/04_bybit_executor
     container_name: bybit-executor
-    restart: always
+    restart: unless-stopped
     ports:
       - "8004:8000"
+    environment:
+      - BYBIT_API_KEY=${BYBIT_API_KEY}
+      - BYBIT_API_SECRET=${BYBIT_API_SECRET}
     networks:
       - trading-network
-  
-  db:
-    image: postgres:13-alpine
-    container_name: trading_db
-    restart: always
-    environment:
-      - POSTGRES_USER=user
-      - POSTGRES_PASSWORD=password
-      - POSTGRES_DB=trading_db
+
+  master-agent:
+    build:
+      context: ./agents/05_master_agent
+    container_name: master-agent
+    restart: unless-stopped
     ports:
-      - "5433:5432"
+      - "8005:8000"
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+    networks:
+      - trading-network
+
+  trading_db:
+    image: postgres:13
+    container_name: trading_db
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB}
     volumes:
-      - db_data:/var/lib/postgresql/data
+      - ./pgdata:/var/lib/postgresql/data
+      - ./db_init:/docker-entrypoint-initdb.d
+    ports:
+      - "5432:5432"
     networks:
       - trading-network
 
   dashboard:
-    build: ./dashboard
-    container_name: dashboard_ui
-    restart: always
+    build:
+      context: ./dashboard
+    container_name: dashboard
+    restart: unless-stopped
     ports:
       - "8501:8501"
+    environment:
+      - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@trading_db:5432/${POSTGRES_DB}
     networks:
       - trading-network
-
-volumes:
-  n8n_data:
-  db_data:
 
 networks:
   trading-network:
