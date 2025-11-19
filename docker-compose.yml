@@ -1,72 +1,67 @@
 version: '3.8'
 
 services:
-  n8n:
-    image: n8nio/n8n:latest
-    container_name: n8n
-    restart: always
-    ports:
-      - "5678:5678"
-    environment:
-      - N8N_HOST=${SUBDOMAIN}.${DOMAIN_NAME}
-      - N8N_PROTOCOL=https
-      - NODE_ENV=production
-      - WEBHOOK_URL=https://${SUBDOMAIN}.${DOMAIN_NAME}/
-      - GENERIC_TIMEZONE=Europe/Rome
-      - DB_TYPE=postgresdb
-      - DB_POSTGRESDB_HOST=trading_db
-      - DB_POSTGRESDB_PORT=5432
-      - DB_POSTGRESDB_DATABASE=trading_data
-      - DB_POSTGRESDB_USER=trading_user
-      - DB_POSTGRESDB_PASSWORD=your_strong_password_here
-    volumes:
-      - n8n_data:/home/node/.n8n
-    depends_on:
-      - trading_db
-    networks:
-      - trading-network
-
+  # --------------------------------------------------------------------
+  # 1. DATABASE
+  #    Sarà nella stessa rete degli altri servizi
+  # --------------------------------------------------------------------
   trading_db:
     image: postgres:13
     container_name: trading_db
     restart: always
     environment:
-      - POSTGRES_USER=trading_user
-      - POSTGRES_PASSWORD=your_strong_password_here
-      - POSTGRES_DB=trading_data
-    ports:
-      - "5433:5432"
+      POSTGRES_DB: trading_data
+      POSTGRES_USER: luca
+      POSTGRES_PASSWORD: mysecretpassword
     volumes:
-      - postgres_data:/var/lib/postgresql/data
-    networks:
-      - trading-network
+      - db_data:/var/lib/postgresql/data
 
+  # --------------------------------------------------------------------
+  # 2. N8N (VERSIONE STABILE 1.45.1)
+  #    Questa è la versione che risolve il problema del crash silenzioso
+  # --------------------------------------------------------------------
+  n8n:
+    image: n8nio/n8n:1.45.1
+    restart: always
+    ports:
+      - "5678:5678"
+    depends_on:
+      - trading_db
+    environment:
+      DB_TYPE: postgresdb
+      DB_POSTGRESDB_HOST: trading_db  # Usa il nome del servizio per la connessione
+      DB_POSTGRESDB_PORT: 5432
+      DB_POSTGRESDB_DATABASE: trading_data
+      DB_POSTGRESDB_USER: luca
+      DB_POSTGRESDB_PASSWORD: mysecretpassword
+      GENERIC_TIMEZONE: "Europe/Rome"
+      N8N_EDITOR_BASE_URL: "http://207.154.212.99:5678"
+      WEBHOOK_URL: "http://207.154.212.99:5678"
+      N8N_SECURE_COOKIE: "false"
+    volumes:
+      - n8n_data:/home/node/.n8n
+
+  # --------------------------------------------------------------------
+  # 3. AGENTI PYTHON
+  # --------------------------------------------------------------------
   technical-analyzer-agent:
-    build: ./agents/01_technical_analyzer
-    container_name: technical-analyzer-agent
+    build:
+      context: ./agents/01_technical_analyzer
     command: uvicorn main:app --host 0.0.0.0 --port 8000
-    networks:
-      - trading-network
+    restart: always
+
+  fibonacci-cyclical-agent:
+    build:
+      context: ./agents/03_fibonacci_cyclical_agent
+    command: uvicorn main:app --host 0.0.0.0 --port 8000
+    restart: always
 
   news-sentiment-agent:
-    build: ./agents/02_news_sentiment
-    container_name: news-sentiment-agent
+    build:
+      context: ./agents/02_news_sentiment
     command: uvicorn main:app --host 0.0.0.0 --port 8000
-    networks:
-      - trading-network
-
-  # --- NUOVO AGENTE AGGIUNTO QUI ---
-  fibonacci-cyclical-agent:
-    build: ./agents/03_fibonacci_cyclical_agent
-    container_name: fibonacci-cyclical-agent
-    command: uvicorn main:app --host 0.0.0.0 --port 8000
-    networks:
-      - trading-network
+    restart: always
 
 volumes:
+  db_data:
   n8n_data:
-  postgres_data:
-
-networks:
-  trading-network:
-    driver: bridge
