@@ -116,9 +116,6 @@
     {
       "parameters": {
         "mode": "combine",
-        "mergeByFields": {
-          "values": []
-        },
         "options": {}
       },
       "id": "merge-analyses",

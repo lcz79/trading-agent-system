@@ -235,9 +235,18 @@ Il sistema è configurato per operare in modalità **mainnet** (soldi reali). L'
 - Verifica il saldo del tuo account OpenAI
 
 ### Order Executor Agent non esegue ordini
-- Verifica di essere in modalità `testnet` nel docker-compose.yml
+- Verifica di essere in modalità `mainnet` nel docker-compose.yml (ora configurato per soldi reali)
 - Controlla che `EXCHANGE_API_KEY` e `EXCHANGE_API_SECRET` siano configurati
 - Verifica i log: `docker-compose logs order-executor-agent`
+
+### Il nodo "Merge All Analyses" restituisce output vuoto
+- **Causa**: Configurazione errata del merge node in alcune versioni
+- **Soluzione**: Il merge node deve essere in modalità "combine" senza campi specifici da matchare
+- **Verifica**: Nel workflow, il nodo "Merge All Analyses" deve avere:
+  - Mode: `combine`
+  - Nessun campo "mergeByFields" configurato
+- **Nota**: Gli agenti restituiscono strutture dati diverse (RSI, trend, current_level, id) che vengono identificati e combinati dal nodo "Prepare Data" successivo
+- Se il problema persiste, re-importa il workflow aggiornato dal file `n8n_complete_workflow.json`
 
 ## 📊 Monitoraggio
 
