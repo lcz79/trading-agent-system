@@ -83,7 +83,7 @@ services:
     environment:
       - EXCHANGE_API_KEY=${EXCHANGE_API_KEY}
       - EXCHANGE_API_SECRET=${EXCHANGE_API_SECRET}
-      - ENVIRONMENT=testnet
+      - ENVIRONMENT=mainnet
     networks:
       - trading_network
 

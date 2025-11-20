@@ -137,10 +137,13 @@ portfolio_state: {
 
 ## 🛡️ Sicurezza
 
-- ⚠️ **IMPORTANTE:** Il workflow è configurato per operare in **modalità testnet** (sicura)
-- Prima di usare soldi veri, testa estensivamente in testnet
+- ⚠️ **IMPORTANTE:** Il workflow è configurato per operare in **modalità MAINNET** (soldi reali!)
+- ⚠️ **ATTENZIONE BYBIT:** Assicurati che le credenziali API siano corrette e abbiano i permessi necessari
+- Verifica le API key nel file `.env` prima di attivare
+- Testa estensivamente il workflow manualmente prima dell'attivazione automatica
 - Non committare mai le API keys nel repository
-- Inizia con capitali piccoli
+- Inizia con capitali ridotti e monitora costantemente
+- Il workflow usa n8n v1.45.1 con merge node typeVersion 2.1
 
 ## 📚 Documentazione Completa
 

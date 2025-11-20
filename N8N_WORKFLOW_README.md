@@ -191,6 +191,12 @@ La logica di decisione è gestita dal Master AI Agent (GPT-4). Per modificarla:
 
 ### Note Tecniche
 
+**Compatibilità N8N v1.45.1:**
+Il workflow è stato ottimizzato per n8n v1.45.1 e utilizza:
+- Merge node typeVersion 2.1 (compatibile con questa versione)
+- HTTP Request nodes typeVersion 4.2
+- Code nodes typeVersion 2
+
 **Identificazione dei Dati:**
 Il nodo "Prepare Data" identifica i tipi di analisi attraverso la presenza di campi specifici:
 - Technical: presenza di campo `RSI`
@@ -200,8 +206,12 @@ Il nodo "Prepare Data" identifica i tipi di analisi attraverso la presenza di ca
 
 Se modifichi la struttura delle risposte degli agenti, aggiorna anche questo nodo.
 
-**Compatibilità N8N:**
-Il workflow usa versioni diverse di nodi (4.2, 4.3) che sono tutte compatibili con N8N. Questo è intenzionale e supportato dalla piattaforma.
+**Modalità Mainnet:**
+Il sistema è configurato per operare in modalità **mainnet** (soldi reali). L'Order Executor Agent si connetterà direttamente al tuo account Bybit reale. Assicurati di:
+- Avere le API key corrette nel file `.env`
+- Verificare i permessi delle API key su Bybit
+- Monitorare costantemente le esecuzioni
+- Iniziare con capitale limitato
 
 ## 🐛 Troubleshooting
 
@@ -250,13 +260,15 @@ docker-compose logs -f order-executor-agent
 
 ## ⚠️ Sicurezza
 
-1. **IMPORTANTE**: Il workflow è configurato di default per operare in modalità **testnet**
-2. Prima di passare al mainnet:
-   - Testa estensivamente in testnet
-   - Verifica tutti gli ordini e le logiche
-   - Inizia con capitale ridotto
+1. **IMPORTANTE**: Il workflow è configurato per operare con **soldi reali** (mainnet)
+2. **ATTENZIONE**: Assicurati di:
+   - Testare estensivamente il workflow prima di attivarlo
+   - Verificare tutti gli ordini e le logiche
+   - Iniziare con capitale ridotto
+   - Monitorare costantemente le esecuzioni
 3. Non committare mai le API keys nel repository
 4. Usa sempre file `.env` per le variabili sensibili
+5. Verifica che le credenziali Bybit siano corrette e abbiano i permessi necessari
 
 ## 📞 Supporto
 

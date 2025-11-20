@@ -139,11 +139,12 @@ For complete documentation, see: **`N8N_WORKFLOW_README.md`**
 
 ## ⚠️ Important Notes
 
-1. **Default Mode:** The workflow operates in **testnet mode** (safe for testing)
-2. **Real Money:** Before using real money, test extensively in testnet
+1. **Default Mode:** The workflow operates in **mainnet mode** (REAL MONEY!)
+2. **Bybit Integration:** Ensure your Bybit API credentials are correctly configured
 3. **API Costs:** CoinGecko and OpenAI APIs may incur costs - monitor usage
-4. **Risk Management:** Start with small position sizes
+4. **Risk Management:** Start with small position sizes and monitor constantly
 5. **Never commit API keys** to the repository
+6. **N8N Compatibility:** This workflow is optimized for n8n v1.45.1 with merge node typeVersion 2.1
 
 ## 🎯 What Happens After Activation
 

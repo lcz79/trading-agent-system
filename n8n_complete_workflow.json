@@ -116,13 +116,15 @@
     {
       "parameters": {
         "mode": "combine",
-        "combineBy": "combineAll",
+        "mergeByFields": {
+          "values": []
+        },
         "options": {}
       },
       "id": "merge-analyses",
       "name": "Merge All Analyses",
       "type": "n8n-nodes-base.merge",
-      "typeVersion": 3,
+      "typeVersion": 2.1,
       "position": [
         840,
         300
