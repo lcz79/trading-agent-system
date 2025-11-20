@@ -1,4 +1,3 @@
 fastapi
 uvicorn
-pybit
-pydantic
+requests
