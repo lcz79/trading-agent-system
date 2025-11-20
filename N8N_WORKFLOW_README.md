@@ -189,6 +189,20 @@ La logica di decisione è gestita dal Master AI Agent (GPT-4). Per modificarla:
    docker-compose up -d master-ai-agent
    ```
 
+### Note Tecniche
+
+**Identificazione dei Dati:**
+Il nodo "Prepare Data" identifica i tipi di analisi attraverso la presenza di campi specifici:
+- Technical: presenza di campo `RSI`
+- Fibonacci: presenza di campo `current_level`
+- Gann: presenza di campo `trend`
+- CoinGecko: presenza di campo `id`
+
+Se modifichi la struttura delle risposte degli agenti, aggiorna anche questo nodo.
+
+**Compatibilità N8N:**
+Il workflow usa versioni diverse di nodi (4.2, 4.3) che sono tutte compatibili con N8N. Questo è intenzionale e supportato dalla piattaforma.
+
 ## 🐛 Troubleshooting
 
 ### Il workflow non si attiva
