@@ -1,5 +1,5 @@
 fastapi
 uvicorn
-pybit
 pandas
-numpy
+pandas-ta
+pybit

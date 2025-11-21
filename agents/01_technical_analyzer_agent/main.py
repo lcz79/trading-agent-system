@@ -1,188 +1,143 @@
 import os
 import pandas as pd
+import pandas_ta as ta
 import numpy as np
-from typing import List, Dict, Optional
+from typing import List, Dict, Any
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from pybit.unified_trading import HTTP
 
-app = FastAPI(title="Multi-Timeframe Technical Analysis Agent")
+app = FastAPI(title="Technical Analyzer Agent (Pandas TA)")
 
-# --- CONFIGURAZIONE BYBIT ---
-api_key = os.getenv("BYBIT_API_KEY")
-api_secret = os.getenv("BYBIT_API_SECRET")
+# --- ABILITAZIONE CORS (Per la Dashboard) ---
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-session = HTTP(testnet=False, api_key=api_key, api_secret=api_secret)
-
-# --- MODELLI DI OUTPUT ---
-
-class IndicatorValue(BaseModel):
-    """
-    Restituisce valore attuale e precedente per permettere
-    all'agente decisionale di calcolare pendenze e incroci.
-    """
-    current: float
-    previous: float
-
-class TechnicalState(BaseModel):
-    """Lo stato tecnico di un singolo timeframe"""
-    close_price: float
-    volume: float
-    
-    # Trend
-    sma_50: IndicatorValue
-    sma_200: IndicatorValue
-    ema_9: IndicatorValue  # Utile per trend breve
-    
-    # Momentum
-    rsi_14: IndicatorValue
-    
-    # MACD
-    macd_line: IndicatorValue
-    macd_signal: IndicatorValue
-    macd_hist: IndicatorValue
-    
-    # Volatilità
-    bb_upper: float # Bollinger Upper
-    bb_lower: float # Bollinger Lower
-    bb_width: float # (Upper - Lower) / Middle -> Importante per Squeeze
-    atr_14: float   # Average True Range
+# --- CONFIGURAZIONE ---
+session = HTTP(testnet=False, api_key=os.getenv("BYBIT_API_KEY"), api_secret=os.getenv("BYBIT_API_SECRET"))
 
 class AnalysisRequest(BaseModel):
     symbol: str
-    timeframes: List[str] = ["15", "60", "240", "D"] 
-    # Bybit format: 15=15m, 60=1h, 240=4h, D=1Day
+    timeframes: List[str] = ["15", "60", "240"]
 
-class MultiFrameResponse(BaseModel):
+class AnalysisResponse(BaseModel):
     symbol: str
-    # Un dizionario dove la chiave è il timeframe (es. "60") e il valore è lo stato tecnico
-    data: Dict[str, TechnicalState]
+    data: Dict[str, Any]
 
-# --- CALCOLI MATEMATICI (Core) ---
-
-def calculate_indicators(df: pd.DataFrame) -> pd.DataFrame:
-    """Aggiunge colonne tecniche al DataFrame."""
-    if df.empty: return df
-
-    # 1. RSI
-    delta = df['close'].diff()
-    gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
-    loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
-    rs = gain / loss
-    df['rsi'] = 100 - (100 / (1 + rs))
-
-    # 2. MACD (12, 26, 9)
-    ema12 = df['close'].ewm(span=12, adjust=False).mean()
-    ema26 = df['close'].ewm(span=26, adjust=False).mean()
-    df['macd_line'] = ema12 - ema26
-    df['macd_signal'] = df['macd_line'].ewm(span=9, adjust=False).mean()
-    df['macd_hist'] = df['macd_line'] - df['macd_signal']
-
-    # 3. Medie Mobili
-    df['sma_50'] = df['close'].rolling(window=50).mean()
-    df['sma_200'] = df['close'].rolling(window=200).mean()
-    df['ema_9'] = df['close'].ewm(span=9, adjust=False).mean()
-
-    # 4. Bande di Bollinger (20, 2)
-    df['bb_mid'] = df['close'].rolling(window=20).mean()
-    df['bb_std'] = df['close'].rolling(window=20).std()
-    df['bb_upper'] = df['bb_mid'] + (df['bb_std'] * 2)
-    df['bb_lower'] = df['bb_mid'] - (df['bb_std'] * 2)
-    # Larghezza bande (utile per rilevare bassa volatilità prima di esplosioni)
-    df['bb_width'] = (df['bb_upper'] - df['bb_lower']) / df['bb_mid']
-
-    # 5. ATR (14)
-    df['prev_close'] = df['close'].shift(1)
-    df['tr1'] = df['high'] - df['low']
-    df['tr2'] = (df['high'] - df['prev_close']).abs()
-    df['tr3'] = (df['low'] - df['prev_close']).abs()
-    df['tr'] = df[['tr1', 'tr2', 'tr3']].max(axis=1)
-    df['atr'] = df['tr'].rolling(window=14).mean()
-
-    return df
-
-def fetch_data_for_timeframe(symbol: str, interval: str) -> Optional[TechnicalState]:
-    """Scarica dati per un singolo timeframe e calcola indicatori."""
+def get_kline_data(symbol: str, interval: str, limit: int = 300) -> pd.DataFrame:
+    """Scarica le candele. Limit aumentato a 300 per supportare SMA200."""
     try:
-        # Scarichiamo abbastanza candele per la SMA 200
-        response = session.get_kline(
-            category="linear",
-            symbol=symbol,
-            interval=interval,
-            limit=250 
-        )
-        
-        if response['retCode'] != 0 or not response['result']['list']:
-            print(f"No data for {symbol} interval {interval}")
-            return None
-
-        # Parsing
-        cols = ['startTime', 'open', 'high', 'low', 'close', 'vol', 'to']
-        df = pd.DataFrame(response['result']['list'], columns=cols)
-        
-        # Ordina cronologicamente (Bybit da il più recente per primo -> reverse)
-        df = df.iloc[::-1].reset_index(drop=True)
-        
-        # Casting a float
-        for c in ['open', 'high', 'low', 'close', 'vol']:
-            df[c] = df[c].astype(float)
-
-        # Calcoli
-        df = calculate_indicators(df)
-
-        # Estrazione dati per l'agente decisionale.
-        # NOTA: Prendiamo il penultimo valore (iloc[-2]) come "current" (ultima candela CHIUSA)
-        # e il terzultimo (iloc[-3]) come "previous".
-        # Usare la candela in corso (iloc[-1]) è rischioso perché i valori cambiano fino alla chiusura.
-        
-        if len(df) < 3: return None
-        
-        curr = df.iloc[-2] # Ultima candela completata
-        prev = df.iloc[-3] # Penultima candela completata
-
-        return TechnicalState(
-            close_price=curr['close'],
-            volume=curr['vol'],
+        response = session.get_kline(category="linear", symbol=symbol, interval=interval, limit=limit)
+        if response['retCode'] == 0 and response['result']['list']:
+            # Bybit restituisce: [time, open, high, low, close, vol, turnover]
+            # I dati sono dal più recente al più vecchio.
+            df = pd.DataFrame(response['result']['list'], columns=['time', 'open', 'high', 'low', 'close', 'volume', 'turnover'])
             
-            sma_50=IndicatorValue(current=curr['sma_50'], previous=prev['sma_50']),
-            sma_200=IndicatorValue(current=curr['sma_200'], previous=prev['sma_200']),
-            ema_9=IndicatorValue(current=curr['ema_9'], previous=prev['ema_9']),
+            # Invertiamo per avere l'ordine cronologico corretto per Pandas TA
+            df = df.iloc[::-1].reset_index(drop=True)
             
-            rsi_14=IndicatorValue(current=curr['rsi'], previous=prev['rsi']),
-            
-            macd_line=IndicatorValue(current=curr['macd_line'], previous=prev['macd_line']),
-            macd_signal=IndicatorValue(current=curr['macd_signal'], previous=prev['macd_signal']),
-            macd_hist=IndicatorValue(current=curr['macd_hist'], previous=prev['macd_hist']),
-            
-            bb_upper=curr['bb_upper'],
-            bb_lower=curr['bb_lower'],
-            bb_width=curr['bb_width'],
-            atr_14=curr['atr']
-        )
-
+            # Convertiamo in numeri
+            for col in ['open', 'high', 'low', 'close', 'volume']:
+                df[col] = df[col].astype(float)
+                
+            return df
     except Exception as e:
-        print(f"Error processing {interval}: {e}")
-        return None
+        print(f"Error fetching {symbol} {interval}: {e}")
+    
+    return pd.DataFrame()
 
-# --- ENDPOINT ---
-
-@app.post("/analyze_multi_tf", response_model=MultiFrameResponse)
-def analyze_multi_timeframe(request: AnalysisRequest):
-    """
-    Analizza il simbolo su tutti i timeframe richiesti.
-    Restituisce un report tecnico dettagliato, SENZA giudizi di trading.
-    """
+@app.post("/analyze_multi_tf", response_model=AnalysisResponse)
+def analyze_multi_tf(req: AnalysisRequest):
     results = {}
     
-    for tf in request.timeframes:
-        tech_state = fetch_data_for_timeframe(request.symbol, tf)
-        if tech_state:
-            results[tf] = tech_state
-            
-    if not results:
-        raise HTTPException(status_code=404, detail="Impossibile ottenere dati per i timeframe richiesti")
+    for tf in req.timeframes:
+        df = get_kline_data(req.symbol, tf)
+        if df.empty or len(df) < 200:
+            continue
 
-    return MultiFrameResponse(
-        symbol=request.symbol,
-        data=results
-    )
+        # --- CALCOLO INDICATORI CON PANDAS TA ---
+        
+        # 1. RSI (14)
+        df.ta.rsi(length=14, append=True) # Crea colonna RSI_14
+        
+        # 2. MACD (12, 26, 9)
+        df.ta.macd(fast=12, slow=26, signal=9, append=True) 
+        # Crea MACD_12_26_9 (Linea), MACDs_12_26_9 (Signal), MACDh_12_26_9 (Istogramma)
+        
+        # 3. Bollinger Bands (20, 2)
+        df.ta.bbands(length=20, std=2, append=True)
+        # Crea BBL_20_2.0 (Lower), BBM_20_2.0 (Mid), BBU_20_2.0 (Upper)
+        
+        # 4. Medie Mobili (SMA 50 e 200)
+        df.ta.sma(length=50, append=True)
+        df.ta.sma(length=200, append=True)
+        
+        # 5. ATR (Volatilità)
+        df.ta.atr(length=14, append=True)
+
+        # --- ESTRAZIONE DATI SICURI (Ultima candela CHIUSA) ---
+        # Usiamo iloc[-2] (penultima) come riferimento sicuro per i segnali
+        # Usiamo iloc[-1] (ultima) solo per il prezzo attuale live
+        
+        curr = df.iloc[-1] # Candela in corso (Live Price)
+        closed = df.iloc[-2] # Ultima candela chiusa (Safe Signal)
+        prev = df.iloc[-3] # Quella ancora prima (per vedere incroci)
+
+        # Logica Incrocio MACD (sulla candela chiusa)
+        macd_line = closed.get('MACD_12_26_9', 0)
+        macd_signal = closed.get('MACDs_12_26_9', 0)
+        prev_macd_line = prev.get('MACD_12_26_9', 0)
+        prev_macd_signal = prev.get('MACDs_12_26_9', 0)
+        
+        macd_cross = "NEUTRAL"
+        if prev_macd_line < prev_macd_signal and macd_line > macd_signal:
+            macd_cross = "BULLISH_CROSS"
+        elif prev_macd_line > prev_macd_signal and macd_line < macd_signal:
+            macd_cross = "BEARISH_CROSS"
+
+        # Logica Trend (Prezzo Chiuso vs SMA 200)
+        sma200 = closed.get('SMA_200', 0)
+        trend = "NEUTRAL"
+        if sma200 > 0:
+            trend = "BULLISH" if closed['close'] > sma200 else "BEARISH"
+
+        # --- COSTRUZIONE JSON PER BRAIN & DASHBOARD ---
+        results[tf] = {
+            "close_price": float(curr['close']), # Prezzo live
+            
+            "rsi_14": {
+                "current": float(closed.get('RSI_14', 50)),
+                "previous": float(prev.get('RSI_14', 50))
+            },
+            
+            "macd": {
+                "line": float(macd_line),
+                "hist": float(closed.get('MACDh_12_26_9', 0)),
+                "cross_status": macd_cross
+            },
+            
+            "bollinger": {
+                "upper": float(closed.get('BBU_20_2.0', 0)),
+                "lower": float(closed.get('BBL_20_2.0', 0)),
+                "width_pct": float((closed.get('BBU_20_2.0', 0) - closed.get('BBL_20_2.0', 0)) / closed['close'])
+            },
+            
+            "sma_50": {"current": float(closed.get('SMA_50', 0))},
+            "sma_200": {"current": float(sma200)},
+            
+            "atr_14": float(closed.get('ATRr_14', 0)),
+            
+            "trend_bias": trend
+        }
+
+    return {"symbol": req.symbol, "data": results}
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8001)

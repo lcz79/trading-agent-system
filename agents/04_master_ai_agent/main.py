@@ -2,23 +2,31 @@ import os
 import json
 from typing import Dict, Any, List, Optional
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from openai import OpenAI
 
 # --- CONFIGURAZIONE ---
-# Assicurati di avere OPENAI_API_KEY nelle variabili d'ambiente
+# Carica la chiave API e inizializza il client (Sintassi v1.0+)
 api_key = os.getenv("OPENAI_API_KEY")
 client = OpenAI(api_key=api_key)
 
-# Se vuoi velocità e risparmio usa "gpt-3.5-turbo-0125"
-# Se vuoi ragionamento massimo (consigliato per trading) usa "gpt-4o"
-MODEL_NAME = "gpt-4o" 
+# Modello consigliato: gpt-4o (veloce e intelligente) o gpt-4-turbo
+MODEL_NAME = "gpt-4o"
 
-app = FastAPI(title="Master Brain powered by OpenAI")
+app = FastAPI(title="Master AI Brain V3 (Smart & Safe)")
+
+# --- ABILITAZIONE CORS (Necessario per la Dashboard) ---
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # --- MODELLI DATI ---
-
-class DecisionRequest(BaseModel):
+class AnalysisPayload(BaseModel):
     symbol: str
     tech_data: Dict[str, Any]
     fib_data: Dict[str, Any]
@@ -26,85 +34,69 @@ class DecisionRequest(BaseModel):
     sentiment_data: Dict[str, Any]
 
 class TradeSetup(BaseModel):
-    strategy_name: str
-    action: str          # "OPEN_LONG", "OPEN_SHORT"
-    entry_price: float
-    stop_loss: float
-    take_profit: float
-    size_pct: float
-    risk_reward: float
-    reasoning: str       # Spiegazione dell'AI
+    entry_price: Optional[float]
+    stop_loss: Optional[float]
+    take_profit: Optional[float]
+    size_pct: Optional[float]
 
 class DecisionResponse(BaseModel):
-    symbol: str
-    decision: str        # "WAIT", "OPEN_LONG", "OPEN_SHORT"
-    logic_log: List[str]
+    decision: str
     trade_setup: Optional[TradeSetup]
+    logic_log: List[str]
 
-# --- SYSTEM PROMPT ---
-# Qui definiamo la "Personalità" del trader. È fondamentale.
+# --- PROMPT DI SISTEMA V2 (Il tuo prompt migliorato) ---
 SYSTEM_PROMPT = """
-You are a Senior Crypto Portfolio Manager AI. Your goal is capital preservation first, profit second.
-You will receive technical data, Fibonacci levels, Gann analysis, and News Sentiment.
+You are "Master-AI-Trader", a sophisticated trading analysis bot. Your primary goal is to identify high-probability trading setups by analyzing market data from multiple agents.
 
-YOUR MANDATE:
-1. Analyze the CONFLUENCE of data. Do not trade on weak signals.
-2. If Sentiment is extremely negative (< -0.8), DO NOT open LONG positions.
-3. If Sentiment is extremely positive (> 0.8), DO NOT open SHORT positions.
-4. Calculate strict Stop Loss (SL) and Take Profit (TP).
-   - For LONG: SL must be below support (Swing Low or Gann/Fib level).
-   - For SHORT: SL must be above resistance (Swing High or Gann/Fib level).
-5. Risk/Reward Ratio MUST be > 1.2. If not, reply with decision "WAIT".
-6. Position Sizing: Suggest 0.5 (50%) for weak setups, 1.0 (100%) for strong confluences.
+**DECISION HIERARCHY & WEIGHTING:**
+1. PRIMARY DRIVERS (High Weight): `tech_data` (Trend D/4H) and `fib_data` (Key Levels). A strong signal here is the main reason to act.
+2. CONFIRMATION (Medium Weight): `gann_data` for timing/precision.
+3. CONTEXT (Low Weight): `sentiment_data`.
+   **CRITICAL RULE:** If `sentiment_data` is missing, empty, or neutral, YOU MUST STILL DECIDE based on Technicals. Do NOT block a trade just because news are missing.
 
-OUTPUT FORMAT:
-You must return valid JSON ONLY. No markdown, no explanations outside JSON.
-Structure:
+**DECISION LOGIC:**
+- OPEN_LONG: Bounce off Support (Fib/Gann) + Bullish Tech (RSI oversold turning up, MACD cross).
+- OPEN_SHORT: Rejection at Resistance (Fib/Gann) + Bearish Tech (RSI overbought turning down).
+- WAIT: Conflicting signals or Sideways market.
+
+**RISK MANAGEMENT RULES (MANDATORY):**
+- Stop Loss MUST be technical (below support for Long, above resistance for Short).
+- Risk/Reward Ratio MUST be > 1.2. If the setup offers less, output WAIT.
+
+**OUTPUT FORMAT (JSON ONLY):**
 {
-  "decision": "OPEN_LONG" | "OPEN_SHORT" | "WAIT",
-  "strategy_name": "Name of the setup identified (e.g., Fibonacci Bounce)",
-  "entry_price": <float>,
-  "stop_loss": <float>,
-  "take_profit": <float>,
-  "size_pct": <float 0.1 to 1.0>,
-  "reasoning": "Short explanation of why"
+  "decision": "OPEN_LONG | OPEN_SHORT | WAIT",
+  "trade_setup": {
+    "entry_price": <float>,
+    "stop_loss": <float>,
+    "take_profit": <float>,
+    "size_pct": <float 0.1-1.0>
+  },
+  "logic_log": ["Detailed reason 1", "Detailed reason 2"]
 }
 """
 
-# --- FUNZIONE PRINCIPALE ---
-
 @app.post("/decide", response_model=DecisionResponse)
-def ask_chatgpt_decision(request: DecisionRequest):
-    symbol = request.symbol
+async def decide(payload: AnalysisPayload):
     
-    # 1. Preparazione del Payload per l'AI
-    # Creiamo un riassunto strutturato dei dati per non consumare troppi token
-    market_context = {
-        "symbol": symbol,
-        "price": request.fib_data.get("current_price"),
-        "technical_15m": {
-            "rsi": request.tech_data.get("data", {}).get("15", {}).get("rsi_14", {}).get("current"),
-            "macd_cross": "Bullish" if request.tech_data.get("data", {}).get("15", {}).get("macd_hist", {}).get("current", 0) > 0 else "Bearish"
+    # 1. Preparazione Dati (Gestione Sentiment vuoto)
+    sent_score = payload.sentiment_data.get("coin_news_score", "N/A")
+    
+    # Creiamo un contesto pulito per l'AI
+    context = {
+        "price": payload.fib_data.get("current_price"),
+        "trend_structure": payload.fib_data.get("trend_direction"),
+        "tech_15m": payload.tech_data.get("data", {}).get("15", {}),
+        "tech_4h": payload.tech_data.get("data", {}).get("240", {}),
+        "fib_levels": payload.fib_data.get("levels"),
+        "gann_levels": {
+            "support": payload.gann_data.get("support_level"),
+            "resistance": payload.gann_data.get("resistance_level")
         },
-        "trend_4h": "Bullish" if request.tech_data.get("data", {}).get("240", {}).get("close_price", 0) > request.tech_data.get("data", {}).get("240", {}).get("sma_200", {}).get("current", 0) else "Bearish",
-        "fibonacci": {
-            "trend": request.fib_data.get("trend_direction"),
-            "in_golden_pocket": request.fib_data.get("in_golden_pocket"),
-            "swing_low": request.fib_data.get("swing_low"),
-            "swing_high": request.fib_data.get("swing_high")
-        },
-        "sentiment": {
-            "score": request.sentiment_data.get("coin_news_score"),
-            "verdict": request.sentiment_data.get("final_verdict")
-        },
-        "gann": {
-            "support": request.gann_data.get("support_angle"),
-            "resistance": request.gann_data.get("resistance_angle")
-        }
+        "sentiment": sent_score
     }
-
-    # Convertiamo in stringa per il prompt
-    user_message = f"Analyze this market data for {symbol}: {json.dumps(market_context)}"
+    
+    user_prompt = f"Analyze {payload.symbol}. Market Data: {json.dumps(context)}"
 
     try:
         # 2. Chiamata OpenAI
@@ -112,83 +104,77 @@ def ask_chatgpt_decision(request: DecisionRequest):
             model=MODEL_NAME,
             messages=[
                 {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": user_message}
+                {"role": "user", "content": user_prompt}
             ],
-            temperature=0.2, # Bassa temperatura = Più razionale e deterministico
-            response_format={ "type": "json_object" } # Forza output JSON
+            temperature=0.2, # Bassa temperatura = più razionalità
+            response_format={"type": "json_object"}
         )
         
-        # Parsing della risposta
         ai_content = response.choices[0].message.content
-        ai_decision = json.loads(ai_content)
+        decision_json = json.loads(ai_content)
         
-    except Exception as e:
-        print(f"OpenAI Error: {e}")
-        return DecisionResponse(symbol=symbol, decision="ERROR", logic_log=[str(e)], trade_setup=None)
+        decision = decision_json.get("decision", "WAIT")
+        raw_setup = decision_json.get("trade_setup") or {}
+        
+        # Se l'AI dice WAIT, ci fermiamo qui
+        if decision == "WAIT":
+            return DecisionResponse(
+                decision="WAIT",
+                trade_setup=None,
+                logic_log=decision_json.get("logic_log", ["Wait signal generated"])
+            )
 
-    # 3. Validazione "Anti-Suicidio" (Il controllo umano/algoritmico finale)
-    # Anche se l'AI è intelligente, verifichiamo che non abbia dato numeri a caso.
-    
-    decision_enum = ai_decision.get("decision", "WAIT")
-    
-    if decision_enum == "WAIT":
-        return DecisionResponse(
-            symbol=symbol, 
-            decision="WAIT", 
-            logic_log=[ai_decision.get("reasoning", "AI decided to wait")], 
-            trade_setup=None
-        )
-    
-    # Estrazione parametri
-    entry = float(ai_decision.get("entry_price", 0))
-    sl = float(ai_decision.get("stop_loss", 0))
-    tp = float(ai_decision.get("take_profit", 0))
-    
-    # Controllo Geometrico
-    is_valid = False
-    risk = 0.0
-    
-    if decision_enum == "OPEN_LONG":
-        if sl < entry < tp:
-            risk = entry - sl
-            is_valid = True
-    elif decision_enum == "OPEN_SHORT":
-        if tp < entry < sl:
-            risk = sl - entry
-            is_valid = True
+        # --- 3. VALIDAZIONE "ANTI-SUICIDIO" (Safety Check) ---
+        # Verifichiamo che l'AI non abbia allucinato numeri rischiosi
+        
+        entry = float(raw_setup.get("entry_price") or 0)
+        sl = float(raw_setup.get("stop_loss") or 0)
+        tp = float(raw_setup.get("take_profit") or 0)
+        size = float(raw_setup.get("size_pct") or 0.5)
+        
+        is_valid = False
+        if decision == "OPEN_LONG" and sl < entry < tp: is_valid = True
+        if decision == "OPEN_SHORT" and tp < entry < sl: is_valid = True
+        
+        # Calcolo Risk Reward Ratio
+        risk = abs(entry - sl)
+        reward = abs(tp - entry)
+        rr = 0.0
+        if risk > 0:
+            rr = reward / risk
             
-    # Calcolo Risk:Reward reale
-    rr = 0.0
-    if is_valid and risk > 0:
-        rr = abs(tp - entry) / risk
-    
-    # Controllo R:R minimo (Ridondante col prompt, ma sicurezza extra)
-    if rr < 1.2:
+        # BLOCCO DI SICUREZZA
+        if not is_valid:
+            return DecisionResponse(
+                decision="WAIT",
+                trade_setup=None,
+                logic_log=[f"SAFETY BLOCK: Invalid Trade Geometry. Entry:{entry}, SL:{sl}, TP:{tp}"]
+            )
+            
+        if rr < 1.2:
+            return DecisionResponse(
+                decision="WAIT",
+                trade_setup=None,
+                logic_log=[f"SAFETY BLOCK: R:R too low ({rr:.2f}). Minimum 1.2 required."]
+            )
+
+        # Se passiamo i controlli, restituiamo il trade approvato
         return DecisionResponse(
-            symbol=symbol, decision="WAIT", 
-            logic_log=[f"AI proposed trade but R:R {rr:.2f} is too low (Hallucination check)."], 
-            trade_setup=None
+            decision=decision,
+            trade_setup=TradeSetup(
+                entry_price=entry,
+                stop_loss=sl,
+                take_profit=tp,
+                size_pct=size
+            ),
+            logic_log=decision_json.get("logic_log", ["Trade Approved"])
         )
 
-    # Se tutto è valido, creiamo il TradeSetup
-    setup = TradeSetup(
-        strategy_name=ai_decision.get("strategy_name", "AI Strategy"),
-        action=decision_enum,
-        entry_price=entry,
-        stop_loss=sl,
-        take_profit=tp,
-        size_pct=float(ai_decision.get("size_pct", 0.5)),
-        risk_reward=round(rr, 2),
-        reasoning=ai_decision.get("reasoning", "No reason provided")
-    )
+    except Exception as e:
+        # Fail-safe: in caso di errore, non fare nulla (WAIT)
+        print(f"Brain Error: {e}")
+        return DecisionResponse(decision="WAIT", trade_setup=None, logic_log=[f"System Error: {str(e)}"])
 
-    return DecisionResponse(
-        symbol=symbol,
-        decision=decision_enum,
-        logic_log=["AI Analysis Successful", setup.reasoning],
-        trade_setup=setup
-    )
-
-@app.get("/")
-def root():
-    return {"agent": "OpenAI GPT-4o Trader", "status": "Active"}
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)

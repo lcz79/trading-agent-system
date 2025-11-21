@@ -1,110 +1,83 @@
 version: '3.8'
 
 services:
-  # Servizio Database per salvare i dati
-  trading_db:
-    image: postgres:13
-    container_name: trading_db
-    restart: always
-    environment:
-      - POSTGRES_USER=user
-      - POSTGRES_PASSWORD=password
-      - POSTGRES_DB=trading_data
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    networks:
-      - trading_network
-
-  # Servizio N8N per l'orchestrazione dei workflow
-  n8n:
-    image: n8nio/n8n:1.45.1
-    container_name: trading-agent-system-n8n-1
-    restart: always
-    ports:
-      - "5678:5678"
-    environment:
-      - DB_TYPE=postgresdb
-      - DB_POSTGRESDB_HOST=trading_db
-      - DB_POSTGRESDB_USER=user
-      - DB_POSTGRESDB_PASSWORD=password
-      - DB_POSTGRESDB_DATABASE=trading_data
-      - N8N_BASIC_AUTH_ACTIVE=true
-      - N8N_BASIC_AUTH_USER=${N8N_USER}
-      - N8N_BASIC_AUTH_PASSWORD=${N8N_PASSWORD}
-      - N8N_SECURE_COOKIE=false
-    volumes:
-      - n8n_data:/home/node/.n8n
-    depends_on:
-      - trading_db
-    networks:
-      - trading_network
-
-  # --- AGENTI ANALISTI ---
-
-  # 01 - Agente Analisi Tecnica
   technical-analyzer-agent:
     build: ./agents/01_technical_analyzer_agent
-    container_name: trading-agent-system-technical-analyzer-agent-1
+    env_file: .env
     restart: always
-    networks:
-      - trading_network
+    ports:
+      - "8002:8000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/docs"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
 
-  # 02 - Agente Dati CoinGecko (RINOMINATO E CORRETTO)
-  coingecko-agent:
-    build: ./agents/02_news_sentiment_agent
-    container_name: trading-agent-system-coingecko-agent-1
-    restart: always
-    networks:
-      - trading_network
-    environment:
-      - COINGECKO_API_KEY=${COINGECKO_API_KEY}
-
-  # 03 - Agente Analisi Ciclica Fibonacci
   fibonacci-cyclical-agent:
     build: ./agents/03_fibonacci_cyclical_agent
-    container_name: trading-agent-system-fibonacci-cyclical-agent-1
+    env_file: .env
     restart: always
-    networks:
-      - trading_network
+    ports:
+      - "8003:8000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/docs"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
 
-  # 05 - Agente Analisi Geometrica Gann
   gann-analyzer-agent:
     build: ./agents/05_gann_analyzer_agent
-    container_name: trading-agent-system-gann-analyzer-agent-1
+    env_file: .env
     restart: always
-    networks:
-      - trading_network
+    ports:
+      - "8005:8000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/docs"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
 
-# --- AGENTE ESECUTORE ---
-  order-executor-agent:
-    build: ./agents/06_order_executor_agent
-    container_name: trading-agent-system-order-executor-agent-1
-    restart: always
-    environment:
-      - EXCHANGE_API_KEY=${EXCHANGE_API_KEY}
-      - EXCHANGE_API_SECRET=${EXCHANGE_API_SECRET}
-      - ENVIRONMENT=testnet
-    networks:
-      - trading_network
-
-  # --- AGENTE DECISIONALE (IL CERVELLO) ---
-
-  # 04 - Master AI Agent (Risk Manager)
   master-ai-agent:
     build: ./agents/04_master_ai_agent
-    container_name: trading-agent-system-master-ai-agent-1
+    env_file: .env
     restart: always
-    environment:
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
-    networks:
-      - trading_network
+    ports:
+      - "8004:8000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/docs"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
 
-# Definizione dei volumi per la persistenza dei dati
-volumes:
-  postgres_data:
-  n8n_data:
-
-# Definizione della rete per la comunicazione tra i container
-networks:
-  trading_network:
-    driver: bridge
+  position-manager-agent:
+    build: ./agents/07_position_manager_agent
+    env_file: .env
+    restart: always
+    ports:
+      - "8007:8000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/docs"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+      
+  orchestrator:
+    build: ./orchestrator
+    env_file: .env
+    restart: always
+    depends_on:
+      technical-analyzer-agent:
+        condition: service_healthy
+      fibonacci-cyclical-agent:
+        condition: service_healthy
+      gann-analyzer-agent:
+        condition: service_healthy
+      master-ai-agent:
+        condition: service_healthy
+      position-manager-agent:
+        condition: service_healthy
