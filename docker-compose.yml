@@ -1,6 +1,36 @@
 version: '3.8'
 
 services:
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: trading_user
+      POSTGRES_PASSWORD: trading_pass
+      POSTGRES_DB: trading_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U trading_user -d trading_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  auth-service:
+    build: ./backend/auth_service
+    ports:
+      - "8001:8001"
+    environment:
+      - DATABASE_URL=postgresql://trading_user:trading_pass@postgres:5432/trading_db
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-your-secret-key-change-this}
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY:-your-encryption-key-change-this}
+      - INTERNAL_SERVICE_TOKEN=${INTERNAL_SERVICE_TOKEN:-your-internal-token-change-this}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: always
+
   technical-analyzer-agent:
     build: ./agents/01_technical_analyzer_agent
     env_file: .env
@@ -70,7 +100,12 @@ services:
     build: ./orchestrator
     env_file: .env
     restart: always
+    environment:
+      - AUTH_SERVICE_URL=http://auth-service:8001
+      - INTERNAL_SERVICE_TOKEN=${INTERNAL_SERVICE_TOKEN:-your-internal-token-change-this}
     depends_on:
+      auth-service:
+        condition: service_started
       technical-analyzer-agent:
         condition: service_healthy
       fibonacci-cyclical-agent:
@@ -92,3 +127,6 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
+
+volumes:
+  postgres_data:

@@ -7,4 +7,5 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-CMD ["python", "-u", "main.py"]
+# Default to multi-user orchestrator
+CMD ["python", "-u", "main_multiuser.py"]

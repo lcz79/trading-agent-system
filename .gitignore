@@ -81,6 +81,22 @@ env/
 env.bak/
 ENV/
 
+# Node.js / React Native
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.expo/
+.expo-shared/
+dist/
+web-build/
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+*.orig.*
+
 # Spyder project settings
 .spyderproject
 .spyproject
@@ -102,6 +118,7 @@ dmypy.json
 # Docker
 n8n_data/
 db_data/
+postgres_data/
 
 # System files
 .DS_Store
