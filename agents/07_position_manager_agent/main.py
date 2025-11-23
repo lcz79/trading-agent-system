@@ -9,7 +9,9 @@ from pybit.unified_trading import HTTP
 from decimal import Decimal, ROUND_DOWN
 
 app = FastAPI(title="Position Manager (ATR Trailing)")
-
+@app.get("/health")
+def health_check():
+    return {"status": "ok"}
 # --- ABILITAZIONE CORS ---
 app.add_middleware(
     CORSMiddleware,

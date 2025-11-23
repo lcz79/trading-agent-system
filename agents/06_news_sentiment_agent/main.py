@@ -2,91 +2,51 @@ import os
 import httpx
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-import time
 
-app = FastAPI(title="News Sentiment Agent")
+API_KEY = os.getenv("COINGECKO_API_KEY")
+BASE_URL = "https://api.coingecko.com/api/v3"
+SYMBOL_TO_ID = {"BTCUSDT":"bitcoin", "ETHUSDT":"ethereum", "BNBUSDT":"binancecoin", "SOLUSDT":"solana", "XRPUSDT":"ripple", "ADAUSDT":"cardano", "DOGEUSDT":"dogecoin", "AVAXUSDT":"avalanche-2", "LINKUSDT":"chainlink", "MATICUSDT":"matic-network"}
 
-API_KEY = os.getenv("CRYPTOPANIC_API_KEY")
-BASE_URL = "https://cryptopanic.com/api/v1/posts/"
-
-### --- INIZIO NUOVA LOGICA DI CACHING --- ###
-CACHE_DURATION_SECONDS = 3600  # 1 ora
-news_cache = {} # Cache per salvare i risultati
-### --- FINE NUOVA LOGICA DI CACHING --- ###
-
-class SentimentRequest(BaseModel):
-    symbol: str
-
-class SentimentResponse(BaseModel):
-    sentiment_score: float
-    summary: str
+app = FastAPI(title="CoinGecko Market Analyzer")
+class MarketDataResponse(BaseModel): summary: str
 
 @app.get("/health")
 def health_check():
-    return {"status": "ok"}
+    return {"status": "ok" if API_KEY else "error", "detail": "COINGECKO_API_KEY missing" if not API_KEY else "API Key loaded"}
 
-@app.post("/analyze_sentiment", response_model=SentimentResponse)
-async def analyze_sentiment(request: SentimentRequest):
-    if not API_KEY:
-        raise HTTPException(status_code=500, detail="CryptoPanic API key non configurata.")
-
-    currency_code = request.symbol.replace("USDT", "")
-    current_time = time.time()
-
-    ### --- INIZIO CONTROLLO CACHE --- ###
-    # Controlla se abbiamo dati in cache e se non sono scaduti
-    if currency_code in news_cache and (current_time - news_cache[currency_code]['timestamp'] < CACHE_DURATION_SECONDS):
-        print(f"[{currency_code}] Servito dalla cache. Dati freschi.")
-        return news_cache[currency_code]['data']
-    ### --- FINE CONTROLLO CACHE --- ###
-
-    print(f"[{currency_code}] Cache scaduta o non esistente. Contatto l'API di CryptoPanic...")
-    params = {
-        "auth_token": API_KEY,
-        "currencies": currency_code,
-        "public": "true"
-    }
+@app.get("/analyze_market_data/{symbol}", response_model=MarketDataResponse)
+async def analyze_market_data(symbol: str):
+    coin_id = SYMBOL_TO_ID.get(symbol.upper())
+    if not coin_id: raise HTTPException(status_code=404, detail=f"Symbol {symbol} not mapped.")
+    
+    url = f"{BASE_URL}/coins/{coin_id}"
+    params = {"localization":"false", "tickers":"false", "market_data":"true", "community_data":"true", "developer_data":"false", "sparkline":"false"}
+    headers = {"x-cg-demo-api-key": API_KEY}
 
     try:
         async with httpx.AsyncClient() as client:
-            response = await client.get(BASE_URL, params=params)
+            response = await client.get(url, headers=headers, params=params)
             response.raise_for_status()
-        
         data = response.json()
 
-        if not data.get('results'):
-            # Anche se non ci sono notizie, mettiamo in cache il risultato per non chiedere di nuovo a vuoto
-            result = SentimentResponse(sentiment_score=0.0, summary="Nessuna notizia recente trovata per la valuta.")
-            news_cache[currency_code] = {'timestamp': current_time, 'data': result}
-            return result
+        # --- CODICE PIU' ROBUSTO ---
+        market_data = data.get("market_data") or {}
+        price_change_24h = market_data.get("price_change_percentage_24h", 0.0) or 0.0
+        total_volume_usd = (market_data.get("total_volume") or {}).get("usd", 0.0) or 0.0
+        market_cap_usd = (market_data.get("market_cap") or {}).get("usd", 0.0) or 0.0
+        sentiment_up = data.get("sentiment_votes_up_percentage", 0.0) or 0.0
 
-        total_votes = 0
-        sentiment_accumulator = 0
-        for news in data['results']:
-            votes = news.get('votes', {})
-            bullish = int(votes.get('bullish', 0))
-            bearish = int(votes.get('bearish', 0))
-            sentiment_accumulator += (bullish - bearish)
-            total_votes += (bullish + bearish)
-        
-        sentiment_score = (sentiment_accumulator / total_votes) if total_votes > 0 else 0.0
-        
-        summary = f"Sentiment basato su {len(data['results'])} notizie. Punteggio: {sentiment_score:.2f}"
-        result = SentimentResponse(sentiment_score=sentiment_score, summary=summary)
-        
-        ### --- INIZIO AGGIORNAMENTO CACHE --- ###
-        # Salva i nuovi dati e il timestamp nella cache
-        news_cache[currency_code] = {'timestamp': current_time, 'data': result}
-        print(f"[{currency_code}] Cache aggiornata con successo.")
-        ### --- FINE AGGIORNAMENTO CACHE --- ###
-        
-        return result
-
+        summary = (
+            f"CoinGecko Market Data for {symbol}:\n"
+            f"- 24h Price Change: {price_change_24h:.2f}%\n"
+            f"- 24h Total Volume: ${int(total_volume_usd):,}\n"
+            f"- Market Cap: ${int(market_cap_usd):,}\n"
+            f"- Community Sentiment: {sentiment_up:.2f}% positive votes."
+        )
+        return MarketDataResponse(summary=summary)
     except httpx.HTTPStatusError as e:
-        raise HTTPException(status_code=e.response.status_code, detail=f"Errore API CryptoPanic: {e.response.text}")
+        raise HTTPException(status_code=e.response.status_code, detail=f"API Error: {e.response.text}")
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Errore interno: {str(e)}")
-
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+        # Stampa l'errore per il debug ma restituisci un errore 500 pulito
+        print(f"CRITICAL ERROR processing {symbol}: {e}")
+        raise HTTPException(status_code=500, detail=f"Internal server error processing data for {symbol}.")

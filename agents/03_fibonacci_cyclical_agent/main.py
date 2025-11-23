@@ -9,6 +9,9 @@ class CryptoSymbol(BaseModel):
     crypto_symbol: str
 
 app = FastAPI()
+@app.get("/health")
+def health_check():
+    return {"status": "ok"}
 session = HTTP(testnet=False, api_key=os.getenv("BYBIT_API_KEY"), api_secret=os.getenv("BYBIT_API_SECRET"))
 
 def get_bybit_data(symbol: str, interval: str = 'D', limit: int = 200):

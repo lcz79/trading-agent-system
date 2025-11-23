@@ -8,7 +8,9 @@ from pydantic import BaseModel
 from pybit.unified_trading import HTTP
 
 app = FastAPI(title="Gann Fan Agent")
-
+@app.get("/health")
+def health_check():
+    return {"status": "ok"}
 # --- ABILITAZIONE CORS (Obbligatorio per la Dashboard) ---
 app.add_middleware(
     CORSMiddleware,

@@ -15,7 +15,9 @@ client = OpenAI(api_key=api_key)
 MODEL_NAME = "gpt-4o"
 
 app = FastAPI(title="Master AI Brain V3 (Smart & Safe)")
-
+@app.get("/health")
+def health_check():
+    return {"status": "ok"}
 # --- ABILITAZIONE CORS (Necessario per la Dashboard) ---
 app.add_middleware(
     CORSMiddleware,

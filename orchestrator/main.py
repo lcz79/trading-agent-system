@@ -1,159 +1,142 @@
-import time
-import schedule
-import requests
 import os
-import math
-from pybit.unified_trading import HTTP
+import asyncio
+import httpx
+import schedule
+import time
+from datetime import datetime, UTC
 
-# --- CONFIG ---
-SYMBOLS = [
+# --- Configurazione dagli Variabili d'Ambiente ---
+TECHNICAL_ANALYZER_AGENT_URL = os.getenv("TECHNICAL_ANALYZER_AGENT_URL")
+FIBONACCI_AGENT_URL = os.getenv("FIBONACCI_AGENT_URL")
+GANN_AGENT_URL = os.getenv("GANN_AGENT_URL")
+MASTER_AI_AGENT_URL = os.getenv("MASTER_AI_AGENT_URL")
+POSITION_MANAGER_AGENT_URL = os.getenv("POSITION_MANAGER_AGENT_URL")
+NEWS_SENTIMENT_AGENT_URL = os.getenv("NEWS_SENTIMENT_AGENT_URL")
+
+# Lista delle crypto da analizzare (tutte)
+SYMBOLS_TO_ANALYZE = [
     "BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT",
-    "ADAUSDT", "DOGEUSDT", "AVAXUSDT", "LINKUSDT", "MATICUSDT",
+    "ADAUSDT", "DOGEUSDT", "AVAXUSDT", "LINKUSDT", "MATICUSDT"
 ]
-QTY_USDT = 50
-LEVERAGE = 5
 
-# --- URL DEGLI AGENTI ---
-URL_BRAIN = "http://master-ai-agent:8000/decide"
-URL_TECH = "http://technical-analyzer-agent:8000/analyze_multi_tf"
-URL_FIB = "http://fibonacci-cyclical-agent:8000/analyze_fibonacci"
-URL_GANN = "http://gann-analyzer-agent:8000/analyze_gann"
-URL_MGMT = "http://position-manager-agent:8000/manage"
-URL_NEWS = "http://news-sentiment-agent:8000/analyze_sentiment" # URL del nuovo agente
-
-session = HTTP(testnet=False, api_key=os.getenv("BYBIT_API_KEY"), api_secret=os.getenv("BYBIT_API_SECRET"))
-instrument_rules_cache = {}
-
-def get_instrument_rules(symbol):
-    if symbol in instrument_rules_cache:
-        return instrument_rules_cache[symbol]
+async def make_request(client, url, method='get', json=None, timeout=60):
     try:
-        response = session.get_instruments_info(category="linear", symbol=symbol)
-        if response['retCode'] == 0 and response['result']['list']:
-            rules = response['result']['list'][0]['lotSizeFilter']
-            instrument_rules_cache[symbol] = rules
-            return rules
+        if method.lower() == 'post':
+            response = await client.post(url, json=json, timeout=timeout)
+        else:
+            response = await client.get(url, timeout=timeout)
+        response.raise_for_status()
+        return response.json()
     except Exception as e:
-        print(f"   -> ⚠️ Impossibile ottenere le regole per {symbol}: {e}")
-    return None
+        print(f"   -> [ORCHESTRATOR] Fallimento richiesta ({method.upper()}) a {url}: {str(e)}")
+        return None
 
-def get_data(url, payload):
-    try:
-        r = requests.post(url, json=payload, timeout=40)
-        r.raise_for_status()
-        return r.json()
-    except requests.exceptions.RequestException as e:
-        print(f"   -> [ORCHESTRATOR] Avviso: l'agente su {url} non ha risposto. {e}")
-        return {}
-    return {}
+async def get_all_data(client, symbol):
+    print(f"1. Raccolta Dati per {symbol}...")
 
-def execute_trade(setup, symbol):
-    if not setup:
-        print(f"   -> ❌ Errore: setup nullo per {symbol}.")
-        return
-    try:
-        action = setup.get('decision')
-        trade_details = setup.get('trade_setup') or {}
-        if not isinstance(trade_details, dict): trade_details = {}
+    # Technical Analyzer (POST)
+    tech_url = f"{TECHNICAL_ANALYZER_AGENT_URL}/analyze_multi_tf"
+    tech_payload = {"symbol": symbol, "timeframes": ["15", "240"]}
+    tech_task = make_request(client, tech_url, method='post', json=tech_payload)
 
-        side = "Buy" if action == "OPEN_LONG" else "Sell"
-        entry = trade_details.get('entry_price')
-        sl = trade_details.get('stop_loss')
-        tp = trade_details.get('take_profit')
-        
-        if not all([action, side, entry, sl, tp]):
-            print(f"   -> ❌ Errore: setup di trade incompleto per {symbol}: {setup}")
-            return
+    # Fibonacci Analyzer (POST)
+    fib_url = f"{FIBONACCI_AGENT_URL}/analyze_fibonacci"
+    fib_payload = {"crypto_symbol": symbol}
+    fib_task = make_request(client, fib_url, method='post', json=fib_payload)
 
-        rules = get_instrument_rules(symbol)
-        if not rules:
-            print(f"   -> ❌ Errore: impossibile procedere senza le regole di trading per {symbol}.")
-            return
+    # Gann Analyzer (POST)
+    gann_url = f"{GANN_AGENT_URL}/analyze_gann"
+    gann_payload = {"symbol": symbol}
+    gann_task = make_request(client, gann_url, method='post', json=gann_payload)
 
-        qty_step = float(rules.get('qtyStep', '0.001'))
-        budget = QTY_USDT * trade_details.get('size_pct', 0.5)
-        raw_qty = (budget * LEVERAGE) / entry
-        
-        precision = int(-math.log10(qty_step)) if qty_step < 1 else 0
-        qty = math.floor(raw_qty / qty_step) * qty_step
-        final_qty_str = f"{qty:.{precision}f}"
+    # CoinGecko Market Data (GET)
+    market_data_url = f"{NEWS_SENTIMENT_AGENT_URL}/analyze_market_data/{symbol}"
+    market_data_task = make_request(client, market_data_url)
 
-        print(f"   -> 🚀 ESECUZIONE ORDINE: {side} {final_qty_str} {symbol} @ {entry} | SL: {sl} | TP: {tp}")
-        
-        try:
-            session.set_leverage(category="linear", symbol=symbol, buyLeverage=str(LEVERAGE), sellLeverage=str(LEVERAGE))
-        except Exception as e:
-            if "110043" in str(e):
-                print(f"      - Info: leva per {symbol} già impostata a {LEVERAGE}x. Si procede.")
-            else:
-                print(f"      - Avviso durante impostazione leva: {e}")
+    tasks = [tech_task, fib_task, gann_task, market_data_task]
+    results = await asyncio.gather(*tasks)
 
-        session.place_order(
-            category="linear", symbol=symbol, side=side, orderType="Limit",
-            qty=final_qty_str, price=str(entry), timeInForce="GTC",
-            stopLoss=str(sl), takeProfit=str(tp),
-            slTriggerBy="LastPrice", tpTriggerBy="LastPrice"
-        )
-        print(f"   -> ✅ Ordine per {symbol} inviato con successo a Bybit.")
-    except Exception as e:
-        print(f"   -> ❌ Errore esecuzione ordine per {symbol}: {e}")
+    tech_data_raw = results[0] or {}
+    tech_data_15m = (tech_data_raw.get("data") or {}).get("15", {})
+    tech_data_4h = (tech_data_raw.get("data") or {}).get("240", {})
 
-def job():
-    print(f"\n--- 🕒 {time.strftime('%Y-%m-%d %H:%M:%S')} | INIZIO CICLO DI SCANSIONE MERCATO ---")
-    
+    fib_levels = results[1] or {}
+    gann_levels = results[2] or {}
+    market_data = results[3] or {}
+
+    return tech_data_15m, tech_data_4h, fib_levels, gann_levels, market_data
+
+async def consult_master_ai(client, symbol, tech_15m, tech_4h, fib, gann, market_data):
+    print(f"2. Consultazione Cervello AI per {symbol}...")
+    ai_payload = {
+        "symbol": symbol,
+        "tech_data": {
+            "data": {
+                "15": tech_15m,
+                "240": tech_4h
+            }
+        },
+        "fib_data": fib,
+        "gann_data": gann,
+        "sentiment_data": market_data
+    }
+    ai_url = f"{MASTER_AI_AGENT_URL}/decide"
+
+    decision = await make_request(client, ai_url, method='post', json=ai_payload)
+    if decision:
+        print(f"   -> 🤖 Risposta AI per {symbol}: {decision.get('decision', 'N/D')}")
+        if decision.get('logic_log'):
+            for line in decision['logic_log']:
+                print(f"      {line}")
+    else:
+        print(f"   -> 🚫 Nessuna risposta valida dalla AI per {symbol}")
+    return decision
+
+async def scan_market():
+    start_time = datetime.now(UTC)
+    print(f"\n--- 🕒 {start_time.strftime('%Y-%m-%d %H:%M:%S')} | INIZIO CICLO DI SCANSIONE MERCATO ---")
+
+    # Recupero posizioni aperte (se vuoi gestire questo aspetto)
     open_positions = []
     try:
-        positions_response = session.get_positions(category="linear", settleCoin="USDT")
-        if positions_response['retCode'] == 0 and 'list' in positions_response['result']:
-            open_positions = [p['symbol'] for p in positions_response['result']['list'] if float(p.get('size', 0)) > 0]
-            if open_positions:
-                print(f"ℹ️ Posizioni attualmente aperte: {', '.join(open_positions)}")
+        async with httpx.AsyncClient() as client:
+            pos_data = await make_request(client, f"{POSITION_MANAGER_AGENT_URL}/get_open_positions")
+            if pos_data:
+                open_positions = pos_data.get("open_positions", [])
+            print(f"ℹ️ Posizioni attualmente aperte: {open_positions if open_positions else 'Nessuna'}")
     except Exception as e:
-        print(f"   -> ⚠️ Impossibile recuperare le posizioni aperte: {e}")
+        print(f"⚠️ Impossibile recuperare posizioni aperte: {e}")
 
-    for symbol in SYMBOLS:
-        if symbol in open_positions:
-            print(f"\n--- 🚫 Analisi per {symbol} saltata: posizione già aperta. ---")
-            continue
+    async with httpx.AsyncClient() as client:
+        for symbol in SYMBOLS_TO_ANALYZE:
+            if symbol in open_positions:
+                print(f"\n--- 🚫 {symbol} saltato: posizione già aperta ---")
+                continue
+            print(f"\n--- Analizzando {symbol} ---")
+            tech_15m, tech_4h, fib, gann, market_data = await get_all_data(client, symbol)
+            print("   -> Dati analisi tecnica 15m:", "OK" if tech_15m else "FALLITI")
+            print("   -> Dati analisi tecnica 4h:", "OK" if tech_4h else "FALLITI")
+            print("   -> Dati Fibonacci:", "OK" if fib else "FALLITI")
+            print("   -> Dati Gann:", "OK" if gann else "FALLITI")
+            print("   -> Dati CoinGecko:", "OK" if market_data else "FALLITI")
 
-        print(f"\n--- Analizzando {symbol} ---")
-        print(f"1. Raccolta Dati per {symbol}...")
-        tech = get_data(URL_TECH, {"symbol": symbol})
-        fib = get_data(URL_FIB, {"crypto_symbol": symbol})
-        gann = get_data(URL_GANN, {"symbol": symbol})
-        # === MODIFICA CHIAVE: Chiamata al News Agent ===
-        sentiment = get_data(URL_NEWS, {"symbol": symbol})
-        
-        print(f"2. Consultazione Cervello AI per {symbol}...")
-        payload = {"symbol": symbol, "tech_data": tech, "fib_data": fib, "gann_data": gann, "sentiment_data": sentiment}
-        brain_resp = get_data(URL_BRAIN, payload)
-        
-        if not brain_resp:
-            print(f"   -> ⚠️ Il Cervello AI non ha risposto. Salto.")
-            continue
-            
-        decision = brain_resp.get("decision", "WAIT")
-        print(f"   -> 🤖 Risposta AI per {symbol}: {decision}")
-        
-        if brain_resp.get("logic_log"):
-            for log_entry in brain_resp["logic_log"]: print(f"      - {log_entry}")
-            
-        if decision in ["OPEN_LONG", "OPEN_SHORT"]:
-            execute_trade(brain_resp, symbol)
-    
-    print("\n--- Analisi Completata ---")
-    print("🛡️ Fase Finale: Gestione Posizioni Attive...")
-    
-    mgmt_resp = get_data(URL_MGMT, {"positions": []})
-    if mgmt_resp and len(mgmt_resp) > 0:
-        print(f"   -> {len(mgmt_resp)} azioni di management ricevute.")
-    else: print("   -> Nessuna azione di management richiesta.")
-    print(f"--- ✅ CICLO DI SCANSIONE COMPLETATO ({time.strftime('%Y-%m-%d %H:%M:%S')}) ---")
+            # Se tutti i dati sono ok, consulta l'AI
+            if tech_15m and tech_4h and fib and gann and market_data:
+                await consult_master_ai(client, symbol, tech_15m, tech_4h, fib, gann, market_data)
+            else:
+                print("   -> ⚠️ Consultazione AI saltata: dati di analisi incompleti.")
 
-print("🚀 Orchestrator V5 (News-Aware) avviato. Esecuzione primo ciclo...")
-job()
-schedule.every(15).minutes.do(job)
-print(f"🗓️ Prossima esecuzione schedulata tra 15 minuti. In attesa...")
-while True:
-    schedule.run_pending()
-    time.sleep(1)
+            await asyncio.sleep(5)
+
+    print("\n--- ✅ CICLO DI SCANSIONE COMPLETATO ---")
+
+def job():
+    asyncio.run(scan_market())
+
+if __name__ == "__main__":
+    print("🚀 Orchestrator avviato. Esecuzione primo ciclo...")
+    job()
+    schedule.every(15).minutes.do(job)
+    while True:
+        schedule.run_pending()
+        time.sleep(1)

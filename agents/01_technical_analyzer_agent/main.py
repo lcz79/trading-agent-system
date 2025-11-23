@@ -9,7 +9,9 @@ from pydantic import BaseModel
 from pybit.unified_trading import HTTP
 
 app = FastAPI(title="Technical Analyzer Agent (Pandas TA)")
-
+@app.get("/health")
+def health_check():
+    return {"status": "ok"}
 # --- ABILITAZIONE CORS (Per la Dashboard) ---
 app.add_middleware(
     CORSMiddleware,

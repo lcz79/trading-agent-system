@@ -1,3 +1,4 @@
 requests
 schedule
 pybit
+httpx
