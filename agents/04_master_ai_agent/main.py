@@ -1,24 +1,19 @@
 import os
 import json
 from typing import Dict, Any, List, Optional
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from openai import OpenAI
 
+app = FastAPI(title="Master AI Agent (DeepSeek/GPT)")
+
 # --- CONFIGURAZIONE ---
-# Carica la chiave API e inizializza il client (Sintassi v1.0+)
-api_key = os.getenv("OPENAI_API_KEY")
-client = OpenAI(api_key=api_key)
+client = OpenAI(
+    api_key=os.getenv("DEEPSEEK_API_KEY"), 
+    base_url="https://api.deepseek.com"
+)
 
-# Modello consigliato: gpt-4o (veloce e intelligente) o gpt-4-turbo
-MODEL_NAME = "gpt-4o"
-
-app = FastAPI(title="Master AI Brain V3 (Smart & Safe)")
-@app.get("/health")
-def health_check():
-    return {"status": "ok"}
-# --- ABILITAZIONE CORS (Necessario per la Dashboard) ---
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -27,9 +22,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# --- MODELLI DATI ---
+# --- MODELLI ---
 class AnalysisPayload(BaseModel):
     symbol: str
+    user_config: Dict[str, Any] = {} 
     tech_data: Dict[str, Any]
     fib_data: Dict[str, Any]
     gann_data: Dict[str, Any]
@@ -46,136 +42,91 @@ class DecisionResponse(BaseModel):
     trade_setup: Optional[TradeSetup]
     logic_log: List[str]
 
-# --- PROMPT DI SISTEMA V2 (Il tuo prompt migliorato) ---
-SYSTEM_PROMPT = """
-You are "Master-AI-Trader", a sophisticated trading analysis bot. Your primary goal is to identify high-probability trading setups by analyzing market data from multiple agents.
-
-**DECISION HIERARCHY & WEIGHTING:**
-1. PRIMARY DRIVERS (High Weight): `tech_data` (Trend D/4H) and `fib_data` (Key Levels). A strong signal here is the main reason to act.
-2. CONFIRMATION (Medium Weight): `gann_data` for timing/precision.
-3. CONTEXT (Low Weight): `sentiment_data`.
-   **CRITICAL RULE:** If `sentiment_data` is missing, empty, or neutral, YOU MUST STILL DECIDE based on Technicals. Do NOT block a trade just because news are missing.
-
-**DECISION LOGIC:**
-- OPEN_LONG: Bounce off Support (Fib/Gann) + Bullish Tech (RSI oversold turning up, MACD cross).
-- OPEN_SHORT: Rejection at Resistance (Fib/Gann) + Bearish Tech (RSI overbought turning down).
-- WAIT: Conflicting signals or Sideways market.
-
-**RISK MANAGEMENT RULES (MANDATORY):**
-- Stop Loss MUST be technical (below support for Long, above resistance for Short).
-- Risk/Reward Ratio MUST be > 1.2. If the setup offers less, output WAIT.
-
-**OUTPUT FORMAT (JSON ONLY):**
-{
-  "decision": "OPEN_LONG | OPEN_SHORT | WAIT",
-  "trade_setup": {
-    "entry_price": <float>,
-    "stop_loss": <float>,
-    "take_profit": <float>,
-    "size_pct": <float 0.1-1.0>
-  },
-  "logic_log": ["Detailed reason 1", "Detailed reason 2"]
-}
-"""
+@app.get("/health")
+def health_check(): return {"status": "ok"}
 
 @app.post("/decide", response_model=DecisionResponse)
 async def decide(payload: AnalysisPayload):
+    # Recupera la strategia utente (Default: intraday)
+    strategy = payload.user_config.get("strategy", "intraday")
+    risk_pct = payload.user_config.get("risk_per_trade", 1.0)
     
-    # 1. Preparazione Dati (Gestione Sentiment vuoto)
-    sent_score = payload.sentiment_data.get("coin_news_score", "N/A")
+    # Dati tecnici
+    tech_15m = payload.tech_data.get("data", {}).get("15", {})
+    tech_4h = payload.tech_data.get("data", {}).get("240", {})
+    current_price = payload.fib_data.get("current_price", 0.0)
+
+    # Costruiamo il prompt per l'AI
+    system_prompt = f"""
+    You are an elite Crypto Trading AI. Your goal is to find PROFITABLE entries, not to be passive.
     
-    # Creiamo un contesto pulito per l'AI
-    context = {
-        "price": payload.fib_data.get("current_price"),
-        "trend_structure": payload.fib_data.get("trend_direction"),
-        "tech_15m": payload.tech_data.get("data", {}).get("15", {}),
-        "tech_4h": payload.tech_data.get("data", {}).get("240", {}),
-        "fib_levels": payload.fib_data.get("levels"),
-        "gann_levels": {
-            "support": payload.gann_data.get("support_level"),
-            "resistance": payload.gann_data.get("resistance_level")
-        },
-        "sentiment": sent_score
-    }
+    CURRENT STRATEGY: {strategy.upper()}
     
-    user_prompt = f"Analyze {payload.symbol}. Market Data: {json.dumps(context)}"
+    RULES FOR TIMEFRAME CONFLICTS:
+    1. If Strategy is INTRADAY: You MUST prioritize the 15-minute timeframe signals. Use 4H only for major support/resistance levels, NOT for trend direction. If 15m is strong, TAKE THE TRADE even if 4H is weak.
+    2. If Strategy is SWING: You MUST prioritize the 4-Hour timeframe. Use 15m only to fine-tune entry price.
+    
+    RULES FOR MISSING DATA:
+    - If Sentiment is "N/A" or missing, IGNORE IT. Do not let missing news stop a technical trade. Focus on Price Action, RSI, MACD, and Levels.
+    
+    DECISION LOGIC:
+    - OPEN_LONG if the PRIMARY timeframe for the strategy shows Bullish momentum (RSI < 70, MACD cross up, Price > EMA).
+    - OPEN_SHORT if the PRIMARY timeframe for the strategy shows Bearish momentum (RSI > 30, MACD cross down, Price < EMA).
+    - WAIT only if the PRIMARY timeframe itself is flat/choppy/neutral.
+    
+    OUTPUT FORMAT (JSON):
+    {{
+      "decision": "OPEN_LONG" | "OPEN_SHORT" | "WAIT",
+      "trade_setup": {{
+        "entry_price": {current_price},
+        "stop_loss": <price_level>,
+        "take_profit": <price_level>,
+        "size_pct": {risk_pct}
+      }},
+      "logic_log": ["Reason 1", "Reason 2"]
+    }}
+    """
+
+    user_prompt = f"""
+    Analyze {payload.symbol}. Price: {current_price}.
+    
+    [TECHNICAL 15m]: {json.dumps(tech_15m)}
+    [TECHNICAL 4H]: {json.dumps(tech_4h)}
+    [FIBONACCI]: {json.dumps(payload.fib_data)}
+    [GANN]: {json.dumps(payload.gann_data)}
+    [SENTIMENT]: {json.dumps(payload.sentiment_data)}
+    
+    Make a decision based on {strategy.upper()} strategy. Be decisive.
+    """
 
     try:
-        # 2. Chiamata OpenAI
         response = client.chat.completions.create(
-            model=MODEL_NAME,
+            model="deepseek-chat",
             messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt}
             ],
-            temperature=0.2, # Bassa temperatura = più razionalità
-            response_format={"type": "json_object"}
+            temperature=0.2, # Bassa temperatura per essere più logico e meno creativo
+            max_tokens=500,
+            response_format={ 'type': 'json_object' }
         )
         
-        ai_content = response.choices[0].message.content
-        decision_json = json.loads(ai_content)
+        content = response.choices[0].message.content
+        data = json.loads(content)
         
-        decision = decision_json.get("decision", "WAIT")
-        raw_setup = decision_json.get("trade_setup") or {}
-        
-        # Se l'AI dice WAIT, ci fermiamo qui
-        if decision == "WAIT":
-            return DecisionResponse(
-                decision="WAIT",
-                trade_setup=None,
-                logic_log=decision_json.get("logic_log", ["Wait signal generated"])
-            )
-
-        # --- 3. VALIDAZIONE "ANTI-SUICIDIO" (Safety Check) ---
-        # Verifichiamo che l'AI non abbia allucinato numeri rischiosi
-        
-        entry = float(raw_setup.get("entry_price") or 0)
-        sl = float(raw_setup.get("stop_loss") or 0)
-        tp = float(raw_setup.get("take_profit") or 0)
-        size = float(raw_setup.get("size_pct") or 0.5)
-        
-        is_valid = False
-        if decision == "OPEN_LONG" and sl < entry < tp: is_valid = True
-        if decision == "OPEN_SHORT" and tp < entry < sl: is_valid = True
-        
-        # Calcolo Risk Reward Ratio
-        risk = abs(entry - sl)
-        reward = abs(tp - entry)
-        rr = 0.0
-        if risk > 0:
-            rr = reward / risk
+        # Validazione base
+        if data['decision'] not in ["OPEN_LONG", "OPEN_SHORT", "WAIT"]:
+            data['decision'] = "WAIT"
             
-        # BLOCCO DI SICUREZZA
-        if not is_valid:
-            return DecisionResponse(
-                decision="WAIT",
-                trade_setup=None,
-                logic_log=[f"SAFETY BLOCK: Invalid Trade Geometry. Entry:{entry}, SL:{sl}, TP:{tp}"]
-            )
-            
-        if rr < 1.2:
-            return DecisionResponse(
-                decision="WAIT",
-                trade_setup=None,
-                logic_log=[f"SAFETY BLOCK: R:R too low ({rr:.2f}). Minimum 1.2 required."]
-            )
-
-        # Se passiamo i controlli, restituiamo il trade approvato
-        return DecisionResponse(
-            decision=decision,
-            trade_setup=TradeSetup(
-                entry_price=entry,
-                stop_loss=sl,
-                take_profit=tp,
-                size_pct=size
-            ),
-            logic_log=decision_json.get("logic_log", ["Trade Approved"])
-        )
+        return data
 
     except Exception as e:
-        # Fail-safe: in caso di errore, non fare nulla (WAIT)
-        print(f"Brain Error: {e}")
-        return DecisionResponse(decision="WAIT", trade_setup=None, logic_log=[f"System Error: {str(e)}"])
+        print(f"AI Error: {e}")
+        return {
+            "decision": "WAIT", 
+            "trade_setup": None, 
+            "logic_log": [f"Error: {str(e)}"]
+        }
 
 if __name__ == "__main__":
     import uvicorn

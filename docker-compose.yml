@@ -3,6 +3,8 @@ services:
     build: ./orchestrator
     container_name: trading-agent-system-orchestrator-1
     env_file: .env
+    volumes:
+      - ./data:/app/data
     networks:
       - trading-network
     depends_on:
@@ -18,6 +20,16 @@ services:
         condition: service_healthy
       position-manager-agent:
         condition: service_healthy
+
+  dashboard:
+    build: ./dashboard
+    container_name: trading-agent-system-dashboard-1
+    ports: [ "8501:8501" ]
+    volumes:
+      - ./data:/app/data
+    networks:
+      - trading-network
+    restart: always
 
   technical-analyzer-agent:
     build: ./agents/01_technical_analyzer_agent

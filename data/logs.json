@@ -1,0 +1,247 @@
+[
+    {
+        "timestamp": "2025-11-23 21:33:51",
+        "symbol": "ETHUSDT",
+        "decision": "WAIT",
+        "reason": "Error: Error code: 401 - {'error': {'message': 'Authentication Fails, Your api key: ****uZMA is invalid', 'type': 'authentication_error', 'param': None, 'code': 'invalid_request_error'}}",
+        "strategy_used": "intraday"
+    },
+    {
+        "timestamp": "2025-11-23 21:33:51",
+        "symbol": "SOLUSDT",
+        "decision": "WAIT",
+        "reason": "Error: Error code: 401 - {'error': {'message': 'Authentication Fails, Your api key: ****uZMA is invalid', 'type': 'authentication_error', 'param': None, 'code': 'invalid_request_error'}}",
+        "strategy_used": "intraday"
+    },
+    {
+        "timestamp": "2025-11-23 21:33:51",
+        "symbol": "XRPUSDT",
+        "decision": "WAIT",
+        "reason": "Error: Error code: 401 - {'error': {'message': 'Authentication Fails, Your api key: ****uZMA is invalid', 'type': 'authentication_error', 'param': None, 'code': 'invalid_request_error'}}",
+        "strategy_used": "intraday"
+    },
+    {
+        "timestamp": "2025-11-23 21:33:51",
+        "symbol": "ADAUSDT",
+        "decision": "WAIT",
+        "reason": "Error: Error code: 401 - {'error': {'message': 'Authentication Fails, Your api key: ****uZMA is invalid', 'type': 'authentication_error', 'param': None, 'code': 'invalid_request_error'}}",
+        "strategy_used": "intraday"
+    },
+    {
+        "timestamp": "2025-11-23 21:33:51",
+        "symbol": "BNBUSDT",
+        "decision": "WAIT",
+        "reason": "Error: Error code: 401 - {'error': {'message': 'Authentication Fails, Your api key: ****uZMA is invalid', 'type': 'authentication_error', 'param': None, 'code': 'invalid_request_error'}}",
+        "strategy_used": "intraday"
+    },
+    {
+        "timestamp": "2025-11-23 21:33:51",
+        "symbol": "LTCUSDT",
+        "decision": "WAIT",
+        "reason": "Error: Error code: 401 - {'error': {'message': 'Authentication Fails, Your api key: ****uZMA is invalid', 'type': 'authentication_error', 'param': None, 'code': 'invalid_request_error'}}",
+        "strategy_used": "intraday"
+    },
+    {
+        "timestamp": "2025-11-23 21:33:51",
+        "symbol": "DOTUSDT",
+        "decision": "WAIT",
+        "reason": "Error: Error code: 401 - {'error': {'message': 'Authentication Fails, Your api key: ****uZMA is invalid', 'type': 'authentication_error', 'param': None, 'code': 'invalid_request_error'}}",
+        "strategy_used": "intraday"
+    },
+    {
+        "timestamp": "2025-11-23 21:49:12",
+        "symbol": "ETHUSDT",
+        "decision": "WAIT",
+        "reason": "Error: Error code: 401 - {'error': {'message': 'Authentication Fails, Your api key: ****uZMA is invalid', 'type': 'authentication_error', 'param': None, 'code': 'invalid_request_error'}}",
+        "strategy_used": "intraday"
+    },
+    {
+        "timestamp": "2025-11-23 21:49:12",
+        "symbol": "SOLUSDT",
+        "decision": "WAIT",
+        "reason": "Error: Error code: 401 - {'error': {'message': 'Authentication Fails, Your api key: ****uZMA is invalid', 'type': 'authentication_error', 'param': None, 'code': 'invalid_request_error'}}",
+        "strategy_used": "intraday"
+    },
+    {
+        "timestamp": "2025-11-23 21:49:12",
+        "symbol": "XRPUSDT",
+        "decision": "WAIT",
+        "reason": "Error: Error code: 401 - {'error': {'message': 'Authentication Fails, Your api key: ****uZMA is invalid', 'type': 'authentication_error', 'param': None, 'code': 'invalid_request_error'}}",
+        "strategy_used": "intraday"
+    },
+    {
+        "timestamp": "2025-11-23 21:49:12",
+        "symbol": "ADAUSDT",
+        "decision": "WAIT",
+        "reason": "Error: Error code: 401 - {'error': {'message': 'Authentication Fails, Your api key: ****uZMA is invalid', 'type': 'authentication_error', 'param': None, 'code': 'invalid_request_error'}}",
+        "strategy_used": "intraday"
+    },
+    {
+        "timestamp": "2025-11-23 21:49:12",
+        "symbol": "BNBUSDT",
+        "decision": "WAIT",
+        "reason": "Error: Error code: 401 - {'error': {'message': 'Authentication Fails, Your api key: ****uZMA is invalid', 'type': 'authentication_error', 'param': None, 'code': 'invalid_request_error'}}",
+        "strategy_used": "intraday"
+    },
+    {
+        "timestamp": "2025-11-23 21:49:12",
+        "symbol": "LTCUSDT",
+        "decision": "WAIT",
+        "reason": "Error: Error code: 401 - {'error': {'message': 'Authentication Fails, Your api key: ****uZMA is invalid', 'type': 'authentication_error', 'param': None, 'code': 'invalid_request_error'}}",
+        "strategy_used": "intraday"
+    },
+    {
+        "timestamp": "2025-11-23 21:49:12",
+        "symbol": "DOTUSDT",
+        "decision": "WAIT",
+        "reason": "Error: Error code: 401 - {'error': {'message': 'Authentication Fails, Your api key: ****uZMA is invalid', 'type': 'authentication_error', 'param': None, 'code': 'invalid_request_error'}}",
+        "strategy_used": "intraday"
+    },
+    {
+        "timestamp": "2025-11-23 22:02:58",
+        "symbol": "ETHUSDT",
+        "decision": "WAIT",
+        "reason": "Error: Error code: 401 - {'error': {'message': 'Authentication Fails, Your api key: ****RH0A is invalid', 'type': 'authentication_error', 'param': None, 'code': 'invalid_request_error'}}",
+        "strategy_used": "intraday"
+    },
+    {
+        "timestamp": "2025-11-23 22:02:58",
+        "symbol": "SOLUSDT",
+        "decision": "WAIT",
+        "reason": "Error: Error code: 401 - {'error': {'message': 'Authentication Fails, Your api key: ****RH0A is invalid', 'type': 'authentication_error', 'param': None, 'code': 'invalid_request_error'}}",
+        "strategy_used": "intraday"
+    },
+    {
+        "timestamp": "2025-11-23 22:02:58",
+        "symbol": "XRPUSDT",
+        "decision": "WAIT",
+        "reason": "Error: Error code: 401 - {'error': {'message': 'Authentication Fails, Your api key: ****RH0A is invalid', 'type': 'authentication_error', 'param': None, 'code': 'invalid_request_error'}}",
+        "strategy_used": "intraday"
+    },
+    {
+        "timestamp": "2025-11-23 22:02:58",
+        "symbol": "ADAUSDT",
+        "decision": "WAIT",
+        "reason": "Error: Error code: 401 - {'error': {'message': 'Authentication Fails, Your api key: ****RH0A is invalid', 'type': 'authentication_error', 'param': None, 'code': 'invalid_request_error'}}",
+        "strategy_used": "intraday"
+    },
+    {
+        "timestamp": "2025-11-23 22:02:58",
+        "symbol": "BNBUSDT",
+        "decision": "WAIT",
+        "reason": "Error: Error code: 401 - {'error': {'message': 'Authentication Fails, Your api key: ****RH0A is invalid', 'type': 'authentication_error', 'param': None, 'code': 'invalid_request_error'}}",
+        "strategy_used": "intraday"
+    },
+    {
+        "timestamp": "2025-11-23 22:02:58",
+        "symbol": "LTCUSDT",
+        "decision": "WAIT",
+        "reason": "Error: Error code: 401 - {'error': {'message': 'Authentication Fails, Your api key: ****RH0A is invalid', 'type': 'authentication_error', 'param': None, 'code': 'invalid_request_error'}}",
+        "strategy_used": "intraday"
+    },
+    {
+        "timestamp": "2025-11-23 22:02:58",
+        "symbol": "DOTUSDT",
+        "decision": "WAIT",
+        "reason": "Error: Error code: 401 - {'error': {'message': 'Authentication Fails, Your api key: ****RH0A is invalid', 'type': 'authentication_error', 'param': None, 'code': 'invalid_request_error'}}",
+        "strategy_used": "intraday"
+    },
+    {
+        "timestamp": "2025-11-23 22:08:26",
+        "symbol": "ETHUSDT",
+        "decision": "WAIT",
+        "reason": "Error: Error code: 401 - {'error': {'message': 'Authentication Fails, Your api key: ****RH0A is invalid', 'type': 'authentication_error', 'param': None, 'code': 'invalid_request_error'}}",
+        "strategy_used": "intraday"
+    },
+    {
+        "timestamp": "2025-11-23 22:08:26",
+        "symbol": "SOLUSDT",
+        "decision": "WAIT",
+        "reason": "Error: Error code: 401 - {'error': {'message': 'Authentication Fails, Your api key: ****RH0A is invalid', 'type': 'authentication_error', 'param': None, 'code': 'invalid_request_error'}}",
+        "strategy_used": "intraday"
+    },
+    {
+        "timestamp": "2025-11-23 22:08:26",
+        "symbol": "XRPUSDT",
+        "decision": "WAIT",
+        "reason": "Error: Error code: 401 - {'error': {'message': 'Authentication Fails, Your api key: ****RH0A is invalid', 'type': 'authentication_error', 'param': None, 'code': 'invalid_request_error'}}",
+        "strategy_used": "intraday"
+    },
+    {
+        "timestamp": "2025-11-23 22:08:26",
+        "symbol": "ADAUSDT",
+        "decision": "WAIT",
+        "reason": "Error: Error code: 401 - {'error': {'message': 'Authentication Fails, Your api key: ****RH0A is invalid', 'type': 'authentication_error', 'param': None, 'code': 'invalid_request_error'}}",
+        "strategy_used": "intraday"
+    },
+    {
+        "timestamp": "2025-11-23 22:08:26",
+        "symbol": "BNBUSDT",
+        "decision": "WAIT",
+        "reason": "Error: Error code: 401 - {'error': {'message': 'Authentication Fails, Your api key: ****RH0A is invalid', 'type': 'authentication_error', 'param': None, 'code': 'invalid_request_error'}}",
+        "strategy_used": "intraday"
+    },
+    {
+        "timestamp": "2025-11-23 22:08:26",
+        "symbol": "LTCUSDT",
+        "decision": "WAIT",
+        "reason": "Error: Error code: 401 - {'error': {'message': 'Authentication Fails, Your api key: ****RH0A is invalid', 'type': 'authentication_error', 'param': None, 'code': 'invalid_request_error'}}",
+        "strategy_used": "intraday"
+    },
+    {
+        "timestamp": "2025-11-23 22:08:26",
+        "symbol": "DOTUSDT",
+        "decision": "WAIT",
+        "reason": "Error: Error code: 401 - {'error': {'message': 'Authentication Fails, Your api key: ****RH0A is invalid', 'type': 'authentication_error', 'param': None, 'code': 'invalid_request_error'}}",
+        "strategy_used": "intraday"
+    },
+    {
+        "timestamp": "2025-11-23 22:14:01",
+        "symbol": "ETHUSDT",
+        "decision": "WAIT",
+        "reason": "Error: Error code: 401 - {'error': {'message': 'Authentication Fails, Your api key: ****RH0A is invalid', 'type': 'authentication_error', 'param': None, 'code': 'invalid_request_error'}}",
+        "strategy_used": "intraday"
+    },
+    {
+        "timestamp": "2025-11-23 22:14:01",
+        "symbol": "SOLUSDT",
+        "decision": "WAIT",
+        "reason": "Error: Error code: 401 - {'error': {'message': 'Authentication Fails, Your api key: ****RH0A is invalid', 'type': 'authentication_error', 'param': None, 'code': 'invalid_request_error'}}",
+        "strategy_used": "intraday"
+    },
+    {
+        "timestamp": "2025-11-23 22:14:01",
+        "symbol": "XRPUSDT",
+        "decision": "WAIT",
+        "reason": "Error: Error code: 401 - {'error': {'message': 'Authentication Fails, Your api key: ****RH0A is invalid', 'type': 'authentication_error', 'param': None, 'code': 'invalid_request_error'}}",
+        "strategy_used": "intraday"
+    },
+    {
+        "timestamp": "2025-11-23 22:14:01",
+        "symbol": "ADAUSDT",
+        "decision": "WAIT",
+        "reason": "Error: Error code: 401 - {'error': {'message': 'Authentication Fails, Your api key: ****RH0A is invalid', 'type': 'authentication_error', 'param': None, 'code': 'invalid_request_error'}}",
+        "strategy_used": "intraday"
+    },
+    {
+        "timestamp": "2025-11-23 22:14:01",
+        "symbol": "BNBUSDT",
+        "decision": "WAIT",
+        "reason": "Error: Error code: 401 - {'error': {'message': 'Authentication Fails, Your api key: ****RH0A is invalid', 'type': 'authentication_error', 'param': None, 'code': 'invalid_request_error'}}",
+        "strategy_used": "intraday"
+    },
+    {
+        "timestamp": "2025-11-23 22:14:01",
+        "symbol": "LTCUSDT",
+        "decision": "WAIT",
+        "reason": "Error: Error code: 401 - {'error': {'message': 'Authentication Fails, Your api key: ****RH0A is invalid', 'type': 'authentication_error', 'param': None, 'code': 'invalid_request_error'}}",
+        "strategy_used": "intraday"
+    },
+    {
+        "timestamp": "2025-11-23 22:14:01",
+        "symbol": "DOTUSDT",
+        "decision": "WAIT",
+        "reason": "Error: Error code: 401 - {'error': {'message': 'Authentication Fails, Your api key: ****RH0A is invalid', 'type': 'authentication_error', 'param': None, 'code': 'invalid_request_error'}}",
+        "strategy_used": "intraday"
+    }
+]

@@ -3,15 +3,34 @@ import httpx
 import schedule
 import time
 import os
+import json
 from datetime import datetime, timezone
 
-# --- CONFIGURAZIONE ---
+# --- PERCORSI DATI ---
+DATA_DIR = "/app/data"
+if not os.path.exists(DATA_DIR):
+    os.makedirs(DATA_DIR)
+
+CONFIG_FILE = os.path.join(DATA_DIR, "config.json")
+LOGS_FILE = os.path.join(DATA_DIR, "logs.json")
+ACTIONS_FILE = os.path.join(DATA_DIR, "actions.json")
+EQUITY_FILE = os.path.join(DATA_DIR, "equity.json")
+
+# --- CONFIGURAZIONE DEFAULT ---
+DEFAULT_CONFIG = {
+    "risk_per_trade": 1.0,
+    "strategy": "intraday",
+    "initial_budget": 1000.0,
+    "active": True
+}
+
+# NOTA: Ho rimosso MATICUSDT per evitare errori API
 SYMBOLS_TO_ANALYZE = [
     "BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "ADAUSDT", 
-    "DOGEUSDT", "BNBUSDT", "LTCUSDT", "MATICUSDT", "DOTUSDT"
+    "DOGEUSDT", "BNBUSDT", "LTCUSDT", "DOTUSDT"
 ]
 
-# URL degli Agenti (Corretti con i trattini '-' come nel docker-compose)
+# URL AGENTI
 TECHNICAL_ANALYZER_AGENT_URL = os.getenv("TECHNICAL_ANALYZER_URL", "http://technical-analyzer-agent:8000")
 FIBONACCI_AGENT_URL = os.getenv("FIBONACCI_AGENT_URL", "http://fibonacci-cyclical-agent:8000")
 GANN_AGENT_URL = os.getenv("GANN_AGENT_URL", "http://gann-analyzer-agent:8000")
@@ -20,154 +39,145 @@ MASTER_AI_AGENT_URL = os.getenv("MASTER_AI_AGENT_URL", "http://master-ai-agent:8
 POSITION_MANAGER_AGENT_URL = os.getenv("POSITION_MANAGER_AGENT_URL", "http://position-manager-agent:8000")
 
 # --- UTILS ---
-async def make_request(client, url, method='get', json=None):
+def load_config():
+    if os.path.exists(CONFIG_FILE):
+        try:
+            with open(CONFIG_FILE, 'r') as f: return json.load(f)
+        except: return DEFAULT_CONFIG
+    return DEFAULT_CONFIG
+
+def save_json_append(filepath, entry, max_items=200):
+    data = []
+    if os.path.exists(filepath):
+        try:
+            with open(filepath, 'r') as f: data = json.load(f)
+        except: pass
+    
+    data.append(entry)
+    if len(data) > max_items: data = data[-max_items:]
+    
+    with open(filepath, 'w') as f: json.dump(data, f, indent=4)
+
+async def make_request(client, url, method='get', json_data=None):
     try:
-        if method == 'get':
-            resp = await client.get(url, timeout=20.0)
-        else:
-            resp = await client.post(url, json=json, timeout=20.0)
-        
-        if resp.status_code == 200:
-            return resp.json()
-        else:
-            print(f"⚠️ Errore {resp.status_code} da {url}: {resp.text}")
-            return None
+        if method == 'get': resp = await client.get(url, timeout=20.0)
+        else: resp = await client.post(url, json=json_data, timeout=20.0)
+        return resp.json() if resp.status_code == 200 else None
     except Exception as e:
-        print(f"❌ Eccezione chiamando {url}: {e}")
+        print(f"❌ Error {url}: {e}")
         return None
 
 # --- LOGICA ---
 
-async def get_all_data(client, symbol):
-    print(f"   1. Raccolta Dati per {symbol}...")
-
-    # Technical Analyzer (POST)
-    tech_url = f"{TECHNICAL_ANALYZER_AGENT_URL}/analyze_multi_tf"
-    tech_payload = {"symbol": symbol, "timeframes": ["15", "240"]}
-    tech_task = make_request(client, tech_url, method='post', json=tech_payload)
-
-    # Fibonacci Analyzer (POST)
-    fib_url = f"{FIBONACCI_AGENT_URL}/analyze_fibonacci"
-    fib_payload = {"crypto_symbol": symbol}
-    fib_task = make_request(client, fib_url, method='post', json=fib_payload)
-
-    # Gann Analyzer (POST)
-    gann_url = f"{GANN_AGENT_URL}/analyze_gann"
-    gann_payload = {"symbol": symbol}
-    gann_task = make_request(client, gann_url, method='post', json=gann_payload)
-
-    # CoinGecko Market Data (GET)
-    market_data_url = f"{NEWS_SENTIMENT_AGENT_URL}/analyze_market_data/{symbol}"
-    market_data_task = make_request(client, market_data_url)
-
-    tasks = [tech_task, fib_task, gann_task, market_data_task]
-    results = await asyncio.gather(*tasks)
-
-    tech_data_raw = results[0] or {}
-    tech_data_15m = (tech_data_raw.get("data") or {}).get("15", {})
-    tech_data_4h = (tech_data_raw.get("data") or {}).get("240", {})
-
-    fib_levels = results[1] or {}
-    gann_levels = results[2] or {}
-    market_data = results[3] or {}
-
-    return tech_data_15m, tech_data_4h, fib_levels, gann_levels, market_data
-
-async def consult_master_ai(client, symbol, tech_15m, tech_4h, fib, gann, market_data):
-    print(f"   2. Consultazione Cervello AI per {symbol}...")
-    ai_payload = {
-        "symbol": symbol,
-        "tech_data": {
-            "data": {
-                "15": tech_15m,
-                "240": tech_4h
+async def track_equity(client):
+    """Recupera il saldo reale e lo salva per il grafico"""
+    resp = await make_request(client, f"{POSITION_MANAGER_AGENT_URL}/get_wallet_balance")
+    if resp:
+        equity = resp.get("equity", 0.0)
+        if equity > 0:
+            entry = {
+                "timestamp": datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S'),
+                "equity": equity
             }
-        },
-        "fib_data": fib,
-        "gann_data": gann,
-        "sentiment_data": market_data
-    }
-    ai_url = f"{MASTER_AI_AGENT_URL}/decide"
-
-    decision = await make_request(client, ai_url, method='post', json=ai_payload)
-    if decision:
-        print(f"   -> 🤖 Risposta AI per {symbol}: {decision.get('decision', 'N/D')}")
-        if decision.get('logic_log'):
-            for line in decision['logic_log']:
-                print(f"      {line}")
-    else:
-        print(f"   -> 🚫 Nessuna risposta valida dalla AI per {symbol}")
-    return decision
+            save_json_append(EQUITY_FILE, entry, max_items=500)
+            print(f"💰 Equity Tracciata: ${equity}")
 
 async def manage_active_positions():
-    """Ordina al Position Manager di controllare e aggiornare i Trailing Stop"""
     print("\n--- 🛡️ GESTIONE POSIZIONI APERTE (Trailing Stop) ---")
-    try:
-        async with httpx.AsyncClient() as client:
-            # Chiamata POST vuota: il Position Manager scaricherà le posizioni reali da Bybit
-            response = await client.post(f"{POSITION_MANAGER_AGENT_URL}/manage", json={"positions": []}, timeout=20.0)
-            
-            if response.status_code == 200:
-                actions = response.json()
-                if actions:
-                    for action in actions:
-                        print(f"✅ AZIONE SU {action['symbol']}: {action['message']}")
-                else:
-                    print("ℹ️ Nessuna modifica agli Stop Loss necessaria (Trailing non scattato).")
-            else:
-                print(f"⚠️ Errore Position Manager durante il trailing: {response.status_code}")
-    except Exception as e:
-        print(f"⚠️ Impossibile contattare Position Manager per Trailing Stop: {e}")
+    async with httpx.AsyncClient() as client:
+        response = await client.post(f"{POSITION_MANAGER_AGENT_URL}/manage", json={"positions": []}, timeout=20.0)
+        if response and response.status_code == 200:
+            actions = response.json()
+            for action in actions:
+                print(f"✅ AZIONE: {action['message']}")
+                save_json_append(ACTIONS_FILE, {
+                    "timestamp": datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S'),
+                    "symbol": action['symbol'],
+                    "action": "TRAILING_STOP",
+                    "details": action['message']
+                })
 
 async def scan_market():
-    start_time = datetime.now(timezone.utc)
-    print(f"\n--- 🕒 {start_time.strftime('%Y-%m-%d %H:%M:%S')} | INIZIO CICLO DI SCANSIONE MERCATO ---")
+    config = load_config()
+    
+    # Tracciamento Equity Reale
+    async with httpx.AsyncClient() as client:
+        await track_equity(client)
 
-    # 1. PRIMA DI TUTTO: Gestiamo le posizioni esistenti (Trailing Stop)
+    if not config.get("active", True):
+        print("💤 BOT IN PAUSA (da Dashboard)")
+        return
+
+    start_time = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
+    print(f"\n--- 🕒 {start_time} | SCAN (Strategy: {config.get('strategy')}, Risk: {config.get('risk_per_trade')}%) ---")
+
     await manage_active_positions()
 
-    # 2. Recupero posizioni aperte per evitare duplicati e analisi inutili
+    # Get Open Positions
     open_positions = []
-    try:
-        async with httpx.AsyncClient() as client:
-            pos_data = await make_request(client, f"{POSITION_MANAGER_AGENT_URL}/get_open_positions")
-            if pos_data:
-                open_positions = pos_data.get("open_positions", [])
-            print(f"ℹ️ Posizioni attualmente aperte (SKIP ANALISI): {open_positions if open_positions else 'Nessuna'}")
-    except Exception as e:
-        print(f"⚠️ Impossibile recuperare lista posizioni aperte: {e}")
+    async with httpx.AsyncClient() as client:
+        pos_data = await make_request(client, f"{POSITION_MANAGER_AGENT_URL}/get_open_positions")
+        if pos_data: open_positions = pos_data.get("open_positions", [])
+        print(f"ℹ️ Posizioni aperte (SKIP): {open_positions}")
 
-    # 3. Scansione Nuovi Ingressi
     async with httpx.AsyncClient() as client:
         for symbol in SYMBOLS_TO_ANALYZE:
-            # SE ABBIAMO GIÀ UNA POSIZIONE APERTA, NON ANALIZZIAMO PER APRIRE DI NUOVO
-            if symbol in open_positions:
-                print(f"\n--- 🚫 {symbol} saltato: posizione già aperta ---")
+            if symbol in open_positions: continue
+
+            print(f"Analizzando {symbol}...")
+            # Chiamate parallele
+            tech_url = f"{TECHNICAL_ANALYZER_AGENT_URL}/analyze_multi_tf"
+            fib_url = f"{FIBONACCI_AGENT_URL}/analyze_fibonacci"
+            gann_url = f"{GANN_AGENT_URL}/analyze_gann"
+            news_url = f"{NEWS_SENTIMENT_AGENT_URL}/analyze_market_data/{symbol}"
+
+            tasks = [
+                make_request(client, tech_url, 'post', {"symbol": symbol, "timeframes": ["15", "240"]}),
+                make_request(client, fib_url, 'post', {"crypto_symbol": symbol}),
+                make_request(client, gann_url, 'post', {"symbol": symbol}),
+                make_request(client, news_url)
+            ]
+            results = await asyncio.gather(*tasks)
+            tech, fib, gann, news = results
+
+            # Se mancano dati critici (Tech o Fib), saltiamo. 
+            # Se manca News o Gann, proseguiamo lo stesso (Resilienza).
+            if not tech or not fib:
+                print(f"⚠️ Dati tecnici critici mancanti per {symbol}, skip.")
                 continue
 
-            print(f"\n--- Analizzando {symbol} ---")
-            tech_15m, tech_4h, fib, gann, market_data = await get_all_data(client, symbol)
-            
-            # Se manca qualcosa (es. errore o 404), passiamo oltre
-            if not (tech_15m and tech_4h and fib and gann and market_data):
-                print("   -> ⚠️ Consultazione AI saltata: dati di analisi incompleti.")
-                continue
+            ai_payload = {
+                "symbol": symbol,
+                "user_config": config, # PASSAGGIO CONFIGURAZIONE UTENTE
+                "tech_data": {"data": {"15": tech.get("data", {}).get("15"), "240": tech.get("data", {}).get("240")}},
+                "fib_data": fib,
+                "gann_data": gann or {},
+                "sentiment_data": news or {"summary": "N/A"}
+            }
 
-            # Se tutti i dati sono ok, consulta l'AI
-            await consult_master_ai(client, symbol, tech_15m, tech_4h, fib, gann, market_data)
+            decision_resp = await make_request(client, f"{MASTER_AI_AGENT_URL}/decide", 'post', ai_payload)
             
-            # Pausa anti-rate-limit
-            await asyncio.sleep(2)
-
-    print("\n--- ✅ CICLO DI SCANSIONE COMPLETATO ---")
+            if decision_resp:
+                decision = decision_resp.get('decision', 'WAIT')
+                reason = " | ".join(decision_resp.get('logic_log', []))
+                print(f"   -> 🤖 {symbol}: {decision}")
+                
+                save_json_append(LOGS_FILE, {
+                    "timestamp": start_time,
+                    "symbol": symbol,
+                    "decision": decision,
+                    "reason": reason,
+                    "strategy_used": config.get('strategy')
+                })
+            
+            await asyncio.sleep(1)
 
 def job():
     asyncio.run(scan_market())
 
 if __name__ == "__main__":
-    print("🚀 Orchestrator avviato. Esecuzione immediata primo ciclo...")
+    print("🚀 Orchestrator V2 Control Room Ready.")
     job()
-    # Pianifica ogni 15 minuti
     schedule.every(15).minutes.do(job)
     while True:
         schedule.run_pending()
