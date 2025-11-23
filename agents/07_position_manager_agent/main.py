@@ -7,11 +7,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from pybit.unified_trading import HTTP
 from decimal import Decimal, ROUND_DOWN
+import uvicorn
 
 app = FastAPI(title="Position Manager (ATR Trailing)")
-@app.get("/health")
-def health_check():
-    return {"status": "ok"}
+
 # --- ABILITAZIONE CORS ---
 app.add_middleware(
     CORSMiddleware,
@@ -20,6 +19,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+@app.get("/health")
+def health_check():
+    return {"status": "ok"}
 
 # --- CONFIGURAZIONE ---
 session = HTTP(
@@ -66,7 +69,6 @@ def get_tick_size(symbol: str) -> float:
 def round_price(price: float, tick_size: float) -> float:
     """Arrotonda il prezzo al tick size corretto."""
     if tick_size == 0: return price
-    # Usiamo Decimal per precisione matematica
     d_price = Decimal(str(price))
     d_tick = Decimal(str(tick_size))
     rounded = d_price.quantize(d_tick, rounding=ROUND_DOWN)
@@ -101,13 +103,11 @@ def calculate_atr_stop(symbol: str, side: str, entry_price: float, interval: str
         multiplier = 2.5
         
         if side == "Buy":
-            # Per i Long, lo stop sale: Prezzo - (ATR * Mult)
-            # Usiamo il prezzo di chiusura attuale o l'entry price come base?
-            # Per un Trailing Stop vero, si usa il prezzo corrente (Highest High sarebbe meglio ma Close va bene)
+            # Per i Long, lo stop sale: Prezzo Corrente - (ATR * Mult)
             current_price = df['c'].iloc[-1]
             stop_price = current_price - (current_atr * multiplier)
         else:
-            # Per gli Short, lo stop scende
+            # Per gli Short, lo stop scende: Prezzo Corrente + (ATR * Mult)
             current_price = df['c'].iloc[-1]
             stop_price = current_price + (current_atr * multiplier)
             
@@ -117,7 +117,22 @@ def calculate_atr_stop(symbol: str, side: str, entry_price: float, interval: str
         print(f"ATR Calc Error for {symbol}: {e}")
         return 0.0
 
-# --- ENDPOINT ---
+# --- ENDPOINTS ---
+
+@app.get("/get_open_positions")
+def get_open_positions():
+    """Restituisce una lista dei simboli con posizioni aperte su Bybit"""
+    try:
+        resp = session.get_positions(category="linear", settleCoin="USDT")
+        open_positions = []
+        if resp['retCode'] == 0:
+            for p in resp['result']['list']:
+                if float(p['size']) > 0:
+                    open_positions.append(p['symbol'])
+        return {"open_positions": open_positions}
+    except Exception as e:
+        print(f"Error getting positions: {e}")
+        return {"open_positions": []}
 
 @app.post("/manage", response_model=List[Action])
 def manage_positions(request: ManageRequest):
@@ -160,8 +175,6 @@ def manage_positions(request: ManageRequest):
         
         if pos.side == "Buy":
             # Aggiorna SOLO se il nuovo SL è più alto del vecchio (Trail UP)
-            # E opzionalmente solo se è sopra il prezzo di ingresso (Break Even)
-            # Qui usiamo la logica standard: alza sempre per proteggere profitti
             if new_sl > pos.stop_loss:
                 # Filtro Anti-Spam: Aggiorna solo se la differenza è > 5 tick
                 if (new_sl - pos.stop_loss) > (tick_size * 5):
@@ -169,19 +182,30 @@ def manage_positions(request: ManageRequest):
                     
         elif pos.side == "Sell":
             # Aggiorna SOLO se il nuovo SL è più basso del vecchio (Trail DOWN)
+            # O se non c'era stop loss (0)
             if pos.stop_loss == 0 or new_sl < pos.stop_loss:
                 if pos.stop_loss == 0 or (pos.stop_loss - new_sl) > (tick_size * 5):
                     should_update = True
         
         if should_update:
-            actions.append(Action(
-                symbol=pos.symbol,
-                new_stop_loss=new_sl,
-                message=f"ATR Trailing: SL moved to {new_sl}"
-            ))
+            print(f"Updating SL for {pos.symbol} to {new_sl}")
+            try:
+                # Eseguiamo l'aggiornamento su Bybit
+                session.set_trading_stop(
+                    category="linear",
+                    symbol=pos.symbol,
+                    stopLoss=str(new_sl),
+                    positionIdx=0
+                )
+                actions.append(Action(
+                    symbol=pos.symbol,
+                    new_stop_loss=new_sl,
+                    message=f"ATR Trailing: SL moved to {new_sl}"
+                ))
+            except Exception as e:
+                print(f"Error updating SL on Bybit: {e}")
 
     return actions
 
 if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8005)
+    uvicorn.run(app, host="0.0.0.0", port=8000)
