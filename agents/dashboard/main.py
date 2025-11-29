@@ -1,5 +1,5 @@
 """
-Trading Dashboard v7.2 - Bulletproof JS (No-Crash Edition)
+Trading Dashboard v7.3 - FIXED DATA MAPPING
 """
 import os
 from fastapi import FastAPI, Request
@@ -7,9 +7,10 @@ from fastapi.responses import HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 import httpx
 
-app = FastAPI(title="Mitragliere Dashboard", version="7.2.0")
+app = FastAPI(title="Mitragliere Dashboard", version="7.3.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
+# URL interni della rete Docker
 POS_URL = os.getenv("POSITION_MANAGER_URL", "http://position-manager-agent:8000")
 AI_URL = os.getenv("MASTER_AI_URL", "http://master-ai-agent:8000")
 
@@ -23,15 +24,28 @@ async def safe_get(client, url, default):
 
 @app.get("/api/wallet")
 async def gw():
-    async with httpx.AsyncClient() as c: return await safe_get(c, f"{POS_URL}/get_wallet_balance", {"equity":0,"availableToWithdraw":0})
+    async with httpx.AsyncClient() as c:
+        # Chiamiamo il backend (che restituisce 'balance')
+        data = await safe_get(c, f"{POS_URL}/get_wallet_balance", {"balance": 0})
+        # ADATTATORE: Trasformiamo 'balance' in 'equity' per il JS
+        val = data.get("balance", 0)
+        return {"equity": val, "availableToWithdraw": val}
 
 @app.get("/api/stats")
 async def gs():
-    async with httpx.AsyncClient() as c: return await safe_get(c, f"{POS_URL}/stats", {})
+    async with httpx.AsyncClient() as c: 
+        data = await safe_get(c, f"{POS_URL}/stats", {})
+        return {
+            "total_pnl": data.get("daily_pnl", 0),
+            "win_rate": data.get("win_rate", 0)
+        }
 
 @app.get("/api/positions")
 async def gp():
-    async with httpx.AsyncClient() as c: return await safe_get(c, f"{POS_URL}/get_open_positions", {"active":[]})
+    async with httpx.AsyncClient() as c: 
+        # Il backend restituisce una lista, il JS vuole {"active": [...]}
+        raw_list = await safe_get(c, f"{POS_URL}/get_open_positions", [])
+        return {"active": raw_list}
 
 @app.get("/api/ai")
 async def gai():
@@ -39,7 +53,10 @@ async def gai():
 
 @app.get("/api/mgmt")
 async def gmgmt():
-    async with httpx.AsyncClient() as c: return await safe_get(c, f"{POS_URL}/management_logs", {"logs":[]})
+    async with httpx.AsyncClient() as c: 
+        # Il backend restituisce lista, JS vuole {"logs": [...]}
+        raw_logs = await safe_get(c, f"{POS_URL}/management_logs", [])
+        return {"logs": raw_logs}
 
 @app.get("/api/history")
 async def ghist():
@@ -57,12 +74,11 @@ DASHBOARD_HTML = '''<!DOCTYPE html>
 <html lang="it">
 <head>
     <meta charset="UTF-8">
-    <title>MITRAGLIERE // BULLETPROOF</title>
+    <title>MITRAGLIERE // V7.3</title>
     <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&family=JetBrains+Mono:wght@400;700&family=Orbitron:wght@900&display=swap" rel="stylesheet">
-    <!-- Carichiamo Chart.js ma non blocchiamo se fallisce -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
-        :root { --neon-green: #00ff9d; --neon-red: #ff2a6d; --neon-blue: #00f3ff; --card-bg: rgba(12, 18, 24, 0.85); }
+        :root { --neon-green: #00ff9d; --neon-red: #ff2a6d; --neon-blue: #00f3ff; --card-bg: rgba(12, 18, 24, 0.95); }
         body { background-color: #050505; color: #e0e0e0; font-family: 'Rajdhani', sans-serif; margin: 0; padding: 20px; min-height: 100vh; }
         
         /* LAYOUT */
@@ -88,8 +104,8 @@ DASHBOARD_HTML = '''<!DOCTYPE html>
 </head>
 <body>
     <div class="header">
-        <div class="logo">MITRAGLIERE <span style="font-size:1rem; opacity:0.5; color:white;">// V7.2</span></div>
-        <div class="status" id="sys-status">JS LOADING...</div>
+        <div class="logo">MITRAGLIERE <span style="font-size:1rem; opacity:0.5; color:white;">// V7.3</span></div>
+        <div class="status" id="sys-status">INIT...</div>
     </div>
 
     <div class="grid">
@@ -109,12 +125,10 @@ DASHBOARD_HTML = '''<!DOCTYPE html>
     </div>
 
     <script>
-        // 1. GESTIONE SICURA DEL GRAFICO
         let chart = null;
         const sysStatus = document.getElementById('sys-status');
         
         try {
-            sysStatus.innerText = "INIT CHART...";
             if (typeof Chart !== 'undefined') {
                 const ctx = document.getElementById('chart').getContext('2d');
                 chart = new Chart(ctx, {
@@ -122,27 +136,19 @@ DASHBOARD_HTML = '''<!DOCTYPE html>
                     data: { labels: [], datasets: [{ label: 'Equity', data: [], borderColor: '#00ff9d', tension: 0.2 }] },
                     options: { responsive: true, maintainAspectRatio: false, plugins:{legend:{display:false}}, scales:{x:{display:false}, y:{grid:{color:'#222'}}} }
                 });
-            } else {
-                console.log("Chart.js non caricato.");
             }
-        } catch (e) {
-            console.log("Errore Grafico (Ignorato):", e);
-        }
+        } catch (e) {}
 
-        // 2. FUNZIONE UPDATE ULTRA-SICURA
         async function update() {
-            sysStatus.innerText = "FETCHING...";
-            
             // A. WALLET
             try {
                 const r = await fetch('/api/wallet');
                 const w = await r.json();
                 document.getElementById('equity').innerText = '$' + (w.equity||0).toFixed(2);
                 document.getElementById('avail').innerText = '$' + (w.availableToWithdraw||0).toFixed(2);
-                sysStatus.innerText = "ONLINE"; sysStatus.style.color = "#00ff9d";
+                sysStatus.innerText = "SYSTEM ONLINE"; sysStatus.style.color = "#00ff9d";
             } catch(e) {
-                sysStatus.innerText = "API ERROR"; sysStatus.style.color = "#ff2a6d";
-                console.log("Wallet err", e);
+                sysStatus.innerText = "CONN ERROR"; sysStatus.style.color = "#ff2a6d";
             }
 
             // B. STATS
@@ -166,7 +172,6 @@ DASHBOARD_HTML = '''<!DOCTYPE html>
                         <div style="border:1px solid ${x.pnl>=0?'#00ff9d':'#ff2a6d'}; padding:10px; border-radius:5px;">
                             <b>${x.symbol}</b> ${x.side} <br>
                             <span style="font-size:1.2rem; color:${x.pnl>=0?'#00ff9d':'#ff2a6d'}">${x.pnl.toFixed(2)}$</span>
-                            <br><button class="btn-kill" onclick="closePos('${x.symbol}')">CLOSE</button>
                         </div>
                     `).join('');
                 }
@@ -179,28 +184,15 @@ DASHBOARD_HTML = '''<!DOCTYPE html>
                     let h=''; for(const [k,v] of Object.entries(ai.decisions)) h+=`<div class="log-entry"><b style="color:#00f3ff">${k}</b>: ${v.decision}<br><small>${v.reasoning}</small></div>`;
                     document.getElementById('ai-box').innerHTML = h;
                 }
+                
                 const mgmt = await fetch('/api/mgmt').then(r=>r.json());
-                if(mgmt.logs && mgmt.logs.length>0) document.getElementById('mgmt-box').innerHTML = mgmt.logs.map(l=>`<div class="log-entry"><b style="color:#00ff9d">${l.symbol}</b>: ${l.details}</div>`).join('');
-            } catch(e) {}
-
-            // E. CHART UPDATE
-            try {
-                if(chart) {
-                    const h = await fetch('/api/history').then(r=>r.json());
-                    if(h.history && h.history.length>0) {
-                        chart.data.labels = h.history.map(x=>x.ts);
-                        chart.data.datasets[0].data = h.history.map(x=>x.equity);
-                        chart.update();
-                    }
+                if(mgmt.logs && mgmt.logs.length>0) {
+                     document.getElementById('mgmt-box').innerHTML = mgmt.logs.map(l=>`<div class="log-entry"><small>${l.time}</small> <b style="color:#00ff9d">${l.pair}</b>: ${l.action}</div>`).join('');
                 }
             } catch(e) {}
         }
 
-        window.closePos = async (sym) => { if(confirm('Close '+sym+'?')) await fetch('/api/close_position', {method:'POST', body:JSON.stringify({symbol:sym})}); };
-
-        // AVVIO SICURO
-        sysStatus.innerText = "JS STARTED";
-        setInterval(update, 2500);
+        setInterval(update, 3000);
         update();
     </script>
 </body>

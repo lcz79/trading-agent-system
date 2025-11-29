@@ -1,356 +1,192 @@
-"""
-Position Manager Agent v2.2 - TRAILING STOP EDITION
-====================================================
-FUNZIONALITÀ:
-1. Trailing Stop: Sposta SL quando il profitto supera la soglia
-2. Break-even: Opzione per spostare SL al prezzo di entrata
-3. Monitoraggio attivo: Controlla posizioni ogni 60 secondi
-4. Log dettagliato di tutte le modifiche
-"""
-
-import os
-import json
 import time
-import asyncio
+import requests
+import os
+import logging
 from datetime import datetime
-from typing import Optional, Dict, List
 from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
+from threading import Thread
 from pybit.unified_trading import HTTP
 
-app = FastAPI(title="Position Manager - Trailing Stop Edition", version="2.2.0")
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
+# --- CONFIGURAZIONE ---
+SLEEP_INTERVAL = 900
+MASTER_AI_URL = "http://master-ai-agent:8000"
+QTY_PRECISION = {"BTCUSDT": 3, "ETHUSDT": 2, "SOLUSDT": 1}
 
-TESTNET = os.getenv("BYBIT_TESTNET", "false").lower() == "true"
-session = HTTP(testnet=TESTNET, api_key=os.getenv("BYBIT_API_KEY"), api_secret=os.getenv("BYBIT_API_SECRET"))
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("PositionManager")
 
-DATA_DIR = "/app/data"
-os.makedirs(DATA_DIR, exist_ok=True)
-HISTORY_FILE = os.path.join(DATA_DIR, "equity_history.json")
-ORDERS_LOG = os.path.join(DATA_DIR, "orders_log.json")
-TRAILING_LOG = os.path.join(DATA_DIR, "trailing_log.json")
+app = FastAPI()
 
-MAX_LEVERAGE = int(os.getenv("MAX_LEVERAGE", "10"))
-MAX_SIZE_PCT = float(os.getenv("MAX_POSITION_SIZE_PCT", "0.25"))
+# MEMORIA DASHBOARD (Formato Mitragliere)
+management_logs = [] 
+equity_history = []
 
-ENABLE_TRAILING_STOP = os.getenv("ENABLE_TRAILING_STOP", "true").lower() == "true"
-TRAILING_ACTIVATION_PCT = float(os.getenv("TRAILING_ACTIVATION_PCT", "1.0"))
-TRAILING_CALLBACK_PCT = float(os.getenv("TRAILING_CALLBACK_PCT", "0.5"))
-ENABLE_BREAKEVEN = os.getenv("ENABLE_BREAKEVEN", "true").lower() == "true"
-BREAKEVEN_ACTIVATION_PCT = float(os.getenv("BREAKEVEN_ACTIVATION_PCT", "0.5"))
-BREAKEVEN_OFFSET_PCT = float(os.getenv("BREAKEVEN_OFFSET_PCT", "0.1"))
-MONITOR_INTERVAL = int(os.getenv("MONITOR_INTERVAL", "60"))
+API_KEY = os.getenv("BYBIT_API_KEY")
+API_SECRET = os.getenv("BYBIT_API_SECRET")
+IS_TESTNET = os.getenv("BYBIT_TESTNET", "false").lower() == "true"
 
-class OrderRequest(BaseModel):
-    symbol: str
-    side: str
-    leverage: int = Field(default=5, ge=1, le=10)
-    stop_loss: float
-    take_profit: float
-    size_pct: float = Field(default=0.15, ge=0.01, le=0.25)
+session = None
+try:
+    session = HTTP(testnet=IS_TESTNET, api_key=API_KEY, api_secret=API_SECRET)
+    logger.info("Connessione Bybit OK")
+except Exception as e:
+    logger.error(f"Errore Bybit: {e}")
 
-class OrderResponse(BaseModel):
-    status: str
-    order_id: Optional[str] = None
-    symbol: Optional[str] = None
-    side: Optional[str] = None
-    qty: Optional[float] = None
-    message: Optional[str] = None
+# --- UTILS ---
+def add_log(title, message, status="info"):
+    """Log formattato per Dashboard React"""
+    timestamp = datetime.now().strftime("%H:%M:%S")
+    logger.info(f"{title}: {message}")
+    
+    # Struttura specifica richiesta dal frontend Mitragliere
+    log_entry = {
+        "id": int(time.time() * 100000),
+        "time": timestamp,
+        "pair": title,       
+        "action": message,    
+        "status": status
+    }
+    management_logs.insert(0, log_entry)
+    if len(management_logs) > 50: management_logs.pop()
 
-def log_print(msg: str, level: str = "INFO"):
-    ts = datetime.now().strftime("%H:%M:%S")
-    prefix = {"INFO": "ℹ️", "WARN": "⚠️", "ERROR": "❌", "SUCCESS": "✅", "TRAIL": "📈"}.get(level, "📝")
-    print(f"[{ts}] {prefix} {msg}", flush=True)
-
-def safe_float(value, default=0.0) -> float:
-    if value is None or value == '':
-        return default
+def get_wallet_balance_value():
+    if not session: return 0.0
     try:
-        return float(value)
-    except:
-        return default
-
-def get_instrument_info(symbol: str) -> dict:
-    try:
-        resp = session.get_instruments_info(category="linear", symbol=symbol)
-        if resp['retCode'] == 0 and resp['result']['list']:
-            info = resp['result']['list'][0]
-            return {"min_qty": float(info['lotSizeFilter']['minOrderQty']), "qty_step": float(info['lotSizeFilter']['qtyStep']), "tick_size": float(info['priceFilter']['tickSize'])}
+        resp = session.get_wallet_balance(accountType="UNIFIED", coin="USDT")
+        if resp['retCode'] == 0:
+            for coin in resp['result']['list'][0]['coin']:
+                if coin['coin'] == "USDT": return float(coin['walletBalance'])
     except: pass
-    return {"min_qty": 0.001, "qty_step": 0.001, "tick_size": 0.01}
+    return 0.0
 
-def round_qty(qty: float, step: float) -> float:
-    if step <= 0: return round(qty, 3)
-    decimals = len(str(step).split('.')[-1]) if '.' in str(step) else 0
-    return round(qty - (qty % step), decimals)
-
-def round_price(price: float, tick: float) -> float:
-    if tick <= 0: return round(price, 2)
-    decimals = len(str(tick).split('.')[-1]) if '.' in str(tick) else 0
-    return round(price - (price % tick), decimals)
-
-def get_price(symbol: str) -> Optional[float]:
-    try:
-        r = session.get_tickers(category="linear", symbol=symbol)
-        if r['retCode'] == 0: return float(r['result']['list'][0]['lastPrice'])
-    except: pass
-    return None
-
-def get_equity() -> tuple:
-    try:
-        r = session.get_wallet_balance(accountType="UNIFIED", coin="USDT")
-        if r['retCode'] == 0 and r['result']['list']:
-            account = r['result']['list'][0]
-            total_equity = safe_float(account.get('totalEquity'))
-            total_wallet = safe_float(account.get('totalWalletBalance'))
-            for coin_data in account.get('coin', []):
-                if coin_data.get('coin') == 'USDT':
-                    equity = safe_float(coin_data.get('equity'))
-                    wallet = safe_float(coin_data.get('walletBalance'))
-                    available = safe_float(coin_data.get('availableToWithdraw'))
-                    final_equity = equity if equity > 0 else wallet
-                    final_available = available if available > 0 else wallet
-                    if final_equity > 0:
-                        return final_equity, final_available
-            if total_equity > 0:
-                return total_equity, total_wallet
-            if total_wallet > 0:
-                return total_wallet, total_wallet
-    except Exception as e:
-        log_print(f"get_equity error: {e}", "ERROR")
-    return 0.0, 0.0
-
-def log_order(data: dict):
-    try:
-        orders = []
-        if os.path.exists(ORDERS_LOG):
-            with open(ORDERS_LOG, 'r') as f: orders = json.load(f)
-        data['timestamp'] = datetime.now().isoformat()
-        orders.append(data)
-        with open(ORDERS_LOG, 'w') as f: json.dump(orders[-500:], f, indent=2)
-    except: pass
-
-def log_trailing(data: dict):
-    try:
-        logs = []
-        if os.path.exists(TRAILING_LOG):
-            with open(TRAILING_LOG, 'r') as f: logs = json.load(f)
-        data['timestamp'] = datetime.now().isoformat()
-        logs.append(data)
-        with open(TRAILING_LOG, 'w') as f: json.dump(logs[-500:], f, indent=2)
-    except: pass
-
-def save_equity():
-    try:
-        eq, _ = get_equity()
-        if eq <= 0: return
-        history = []
-        if os.path.exists(HISTORY_FILE):
-            with open(HISTORY_FILE, 'r') as f: history = json.load(f)
-        history.append({"ts": int(time.time()), "date": datetime.now().strftime("%Y-%m-%d %H:%M"), "equity": eq})
-        with open(HISTORY_FILE, 'w') as f: json.dump(history[-2000:], f)
-    except: pass
-
-def get_open_positions_detailed() -> List[Dict]:
+def get_open_positions_data():
     positions = []
+    if not session: return positions
     try:
-        r = session.get_positions(category="linear", settleCoin="USDT")
-        if r['retCode'] == 0:
-            for p in r['result']['list']:
-                size = safe_float(p.get('size'))
-                if size > 0:
+        resp = session.get_positions(category="linear", settleCoin="USDT")
+        if resp['retCode'] == 0:
+            for p in resp['result']['list']:
+                if float(p['size']) > 0:
                     positions.append({
                         "symbol": p['symbol'],
                         "side": p['side'],
-                        "size": size,
-                        "entry_price": safe_float(p.get('avgPrice')),
-                        "mark_price": safe_float(p.get('markPrice')),
-                        "pnl": safe_float(p.get('unrealisedPnl')),
-                        "pnl_pct": safe_float(p.get('unrealisedPnl')) / safe_float(p.get('positionValue', 1)) * 100 if safe_float(p.get('positionValue')) > 0 else 0,
-                        "current_sl": safe_float(p.get('stopLoss')),
-                        "current_tp": safe_float(p.get('takeProfit')),
-                        "leverage": p.get('leverage', '1'),
-                        "position_value": safe_float(p.get('positionValue'))
+                        "size": float(p['size']),
+                        "entry_price": float(p['avgPrice']),
+                        "pnl": float(p['unrealisedPnl']),
+                        "roi": 0.0 # Placeholder
                     })
-    except Exception as e:
-        log_print(f"get_open_positions_detailed error: {e}", "ERROR")
+    except: pass
     return positions
 
-def update_stop_loss(symbol: str, side: str, new_sl: float) -> bool:
+def get_price(symbol):
+    if not session: return 0.0
     try:
-        r = session.set_trading_stop(category="linear", symbol=symbol, stopLoss=str(new_sl), positionIdx=0)
-        if r['retCode'] == 0:
-            log_print(f"SL aggiornato {symbol}: {new_sl}", "SUCCESS")
-            return True
-        else:
-            log_print(f"Errore update SL {symbol}: {r.get('retMsg')}", "ERROR")
-            return False
-    except Exception as e:
-        log_print(f"Exception update SL {symbol}: {e}", "ERROR")
-        return False
+        resp = session.get_tickers(category="linear", symbol=symbol)
+        if resp['retCode'] == 0: return float(resp['result']['list'][0]['markPrice'])
+    except: pass
+    return 0.0
 
-def manage_trailing_stop(position: Dict) -> bool:
-    symbol = position['symbol']
-    side = position['side']
-    entry_price = position['entry_price']
-    current_price = position['mark_price']
-    current_sl = position['current_sl']
+def execute_trade(symbol, decision, size_pct, leverage):
+    if not session: return
     
-    info = get_instrument_info(symbol)
-    tick = info['tick_size']
-    
-    if side == "Buy":
-        profit_pct = ((current_price - entry_price) / entry_price) * 100
-    else:
-        profit_pct = ((entry_price - current_price) / entry_price) * 100
-    
-    new_sl = None
-    action = None
-    
-    if ENABLE_BREAKEVEN and profit_pct >= BREAKEVEN_ACTIVATION_PCT:
-        if side == "Buy":
-            breakeven_sl = entry_price * (1 + BREAKEVEN_OFFSET_PCT / 100)
-            if current_sl < breakeven_sl:
-                new_sl = round_price(breakeven_sl, tick)
-                action = "BREAKEVEN"
-        else:
-            breakeven_sl = entry_price * (1 - BREAKEVEN_OFFSET_PCT / 100)
-            if current_sl == 0 or current_sl > breakeven_sl:
-                new_sl = round_price(breakeven_sl, tick)
-                action = "BREAKEVEN"
-    
-    if ENABLE_TRAILING_STOP and profit_pct >= TRAILING_ACTIVATION_PCT:
-        if side == "Buy":
-            trailing_sl = current_price * (1 - TRAILING_CALLBACK_PCT / 100)
-            if trailing_sl > current_sl:
-                new_sl = round_price(trailing_sl, tick)
-                action = "TRAILING"
-        else:
-            trailing_sl = current_price * (1 + TRAILING_CALLBACK_PCT / 100)
-            if current_sl == 0 or trailing_sl < current_sl:
-                new_sl = round_price(trailing_sl, tick)
-                action = "TRAILING"
-    
-    if new_sl and new_sl != current_sl:
-        log_print(f"{action} {symbol} | Profit: {profit_pct:.2f}% | SL: {current_sl} → {new_sl}", "TRAIL")
-        success = update_stop_loss(symbol, side, new_sl)
-        if success:
-            log_trailing({"symbol": symbol, "side": side, "action": action, "profit_pct": round(profit_pct, 2), "old_sl": current_sl, "new_sl": new_sl, "entry_price": entry_price, "current_price": current_price})
-            return True
-    return False
+    # Recupera posizioni attuali per vedere se chiudere o ignorare
+    positions = get_open_positions_data()
+    target_pos = next((p for p in positions if p['symbol'] == symbol), None)
 
-async def monitor_positions_loop():
-    log_print(f"Position Monitor started - Interval: {MONITOR_INTERVAL}s", "INFO")
-    log_print(f"Trailing Stop: {'ON' if ENABLE_TRAILING_STOP else 'OFF'} (Activation: {TRAILING_ACTIVATION_PCT}%, Callback: {TRAILING_CALLBACK_PCT}%)", "INFO")
-    log_print(f"Breakeven: {'ON' if ENABLE_BREAKEVEN else 'OFF'} (Activation: {BREAKEVEN_ACTIVATION_PCT}%)", "INFO")
+    if decision == "CLOSE" and target_pos:
+        add_log(symbol, "Closing Position...", "warning")
+        try:
+            side = "Sell" if target_pos['side'] == "Buy" else "Buy"
+            session.place_order(category="linear", symbol=symbol, side=side, orderType="Market", qty=str(target_pos['size']), reduceOnly=True)
+            add_log(symbol, "Position Closed", "success")
+        except Exception as e:
+            add_log(symbol, f"Close Error: {e}", "error")
+            
+    elif "OPEN" in decision and not target_pos:
+        add_log(symbol, f"Opening {decision}...", "info")
+        try:
+            session.set_leverage(category="linear", symbol=symbol, buyLeverage=str(leverage), sellLeverage=str(leverage))
+        except: pass
+
+        bal = get_wallet_balance_value()
+        price = get_price(symbol)
+        
+        if bal > 0 and price > 0:
+            raw_qty = (bal * size_pct * leverage * 0.95) / price
+            precision = QTY_PRECISION.get(symbol, 3)
+            qty = round(raw_qty, precision)
+            if precision == 0: qty = int(qty)
+            
+            side = "Buy" if "LONG" in decision else "Sell"
+            try:
+                resp = session.place_order(category="linear", symbol=symbol, side=side, orderType="Market", qty=str(qty))
+                if resp['retCode'] == 0:
+                    add_log(symbol, f"Order Filled: {qty}", "success")
+                else:
+                    add_log(symbol, f"Order Failed: {resp['retMsg']}", "error")
+            except Exception as e:
+                 add_log(symbol, f"Order Exception: {e}", "error")
+
+# --- LOOP ---
+def trading_loop():
+    add_log("SYSTEM", "Bot Online. Cycle: 15m", "success")
     while True:
         try:
-            await asyncio.sleep(MONITOR_INTERVAL)
-            if not ENABLE_TRAILING_STOP and not ENABLE_BREAKEVEN:
-                continue
-            positions = get_open_positions_detailed()
-            if positions:
-                for pos in positions:
-                    manage_trailing_stop(pos)
-            save_equity()
+            market_data = {}
+            for sym in ["BTCUSDT", "ETHUSDT", "SOLUSDT"]:
+                p = get_price(sym)
+                if p > 0: market_data[sym] = {"price": p}
+            
+            if market_data:
+                try:
+                    resp = requests.post(f"{MASTER_AI_URL}/analyze", json={"raw_data": market_data}, timeout=60)
+                    if resp.status_code == 200:
+                        decisions = resp.json()
+                        for sym, dec in decisions.items():
+                            d = dec.get("decision", "HOLD")
+                            if d != "HOLD":
+                                execute_trade(sym, d, 0.1, 5)
+                            else:
+                                # Logga solo ogni tanto per non spammare, o logga nel backend
+                                pass 
+                except Exception as e:
+                    add_log("AI", f"Analysis Failed: {e}", "error")
+            
+            time.sleep(SLEEP_INTERVAL)
         except Exception as e:
-            log_print(f"Monitor loop error: {e}", "ERROR")
-            await asyncio.sleep(10)
-
-@app.get("/health")
-def health():
-    return {"status": "ok", "service": "position-manager-trailing", "version": "2.2.0", "testnet": TESTNET, "trailing_stop": ENABLE_TRAILING_STOP, "breakeven": ENABLE_BREAKEVEN}
-
-@app.get("/get_wallet_balance")
-def get_wallet_balance():
-    eq, avail = get_equity()
-    pnl = 0.0
-    try:
-        r = session.get_positions(category="linear", settleCoin="USDT")
-        if r['retCode'] == 0:
-            for p in r['result']['list']:
-                if safe_float(p.get('size')) > 0: pnl += safe_float(p.get('unrealisedPnl'))
-    except: pass
-    return {"equity": eq, "available": avail, "live_pnl": round(pnl, 2)}
-
-@app.get("/get_open_positions")
-def get_open_positions():
-    positions = get_open_positions_detailed()
-    return {"open_positions": [p['symbol'] for p in positions], "details": positions, "count": len(positions)}
-
-@app.post("/open_position", response_model=OrderResponse)
-def open_position(order: OrderRequest):
-    symbol, side = order.symbol, order.side.capitalize()
-    if side not in ["Buy", "Sell"]: return OrderResponse(status="rejected", message=f"Invalid side: {side}")
-    price = get_price(symbol)
-    if not price: return OrderResponse(status="error", message="Cannot get price")
-    eq, _ = get_equity()
-    log_print(f"Opening {side} {symbol} - Equity: {eq} USDT")
-    if eq <= 0: return OrderResponse(status="error", message="No equity")
-    info = get_instrument_info(symbol)
-    lev = min(order.leverage, MAX_LEVERAGE)
-    size = min(order.size_pct, MAX_SIZE_PCT)
-    qty = round_qty((eq * size * lev) / price, info['qty_step'])
-    # Force min qty if too small but we have enough margin
-    if qty < info['min_qty'] and (eq * size * lev) >= (info['min_qty'] * price * 0.5):
-        qty = info['min_qty']
-    if qty < info['min_qty']: return OrderResponse(status="rejected", message=f"Qty {qty} < min {info['min_qty']}")
-    sl = round_price(order.stop_loss, info['tick_size'])
-    tp = round_price(order.take_profit, info['tick_size'])
-    if side == "Buy" and (sl >= price * 1.02 or tp <= price * 0.98): return OrderResponse(status="rejected", message="Invalid SL/TP for Buy")
-    if side == "Sell" and (sl <= price * 0.98 or tp >= price * 1.02): return OrderResponse(status="rejected", message="Invalid SL/TP for Sell")
-    try: session.set_leverage(category="linear", symbol=symbol, buyLeverage=str(lev), sellLeverage=str(lev))
-    except: pass
-    try:
-        r = session.place_order(category="linear", symbol=symbol, side=side, orderType="Market", qty=str(qty), stopLoss=str(sl), takeProfit=str(tp), timeInForce="GoodTillCancel", positionIdx=0)
-        if r['retCode'] != 0:
-            log_order({"symbol": symbol, "side": side, "status": "error", "error": r.get('retMsg')})
-            return OrderResponse(status="error", message=r.get('retMsg'))
-        log_print(f"ORDER EXECUTED: {side} {symbol} qty={qty} SL={sl} TP={tp}", "SUCCESS")
-        log_order({"symbol": symbol, "side": side, "qty": qty, "sl": sl, "tp": tp, "order_id": r['result']['orderId'], "status": "executed"})
-        save_equity()
-        return OrderResponse(status="executed", order_id=r['result']['orderId'], symbol=symbol, side=side, qty=qty)
-    except Exception as e:
-        log_order({"symbol": symbol, "side": side, "status": "exception", "error": str(e)})
-        return OrderResponse(status="error", message=str(e))
-
-@app.post("/manage")
-def manage():
-    positions = get_open_positions_detailed()
-    modified = 0
-    for pos in positions:
-        if manage_trailing_stop(pos): modified += 1
-    save_equity()
-    return {"status": "managed", "positions_checked": len(positions), "sl_modified": modified, "timestamp": datetime.now().isoformat()}
-
-@app.get("/trailing_status")
-def trailing_status():
-    return {"trailing_stop_enabled": ENABLE_TRAILING_STOP, "trailing_activation_pct": TRAILING_ACTIVATION_PCT, "trailing_callback_pct": TRAILING_CALLBACK_PCT, "breakeven_enabled": ENABLE_BREAKEVEN, "breakeven_activation_pct": BREAKEVEN_ACTIVATION_PCT, "breakeven_offset_pct": BREAKEVEN_OFFSET_PCT, "monitor_interval_seconds": MONITOR_INTERVAL}
-
-@app.get("/trailing_log")
-def get_trailing_log():
-    try:
-        if os.path.exists(TRAILING_LOG):
-            with open(TRAILING_LOG, 'r') as f: return {"log": json.load(f)}
-    except: pass
-    return {"log": []}
-
-@app.get("/equity_history")
-def equity_history():
-    try:
-        if os.path.exists(HISTORY_FILE):
-            with open(HISTORY_FILE, 'r') as f: return {"history": json.load(f)}
-    except: pass
-    return {"history": []}
+            logger.error(f"Loop Error: {e}")
+            time.sleep(60)
 
 @app.on_event("startup")
-async def startup():
-    eq, _ = get_equity()
-    log_print(f"Position Manager v2.2 starting - Equity: {eq} USDT", "INFO")
-    log_print(f"Testnet: {TESTNET}", "INFO")
-    asyncio.create_task(monitor_positions_loop())
+def startup():
+    Thread(target=trading_loop, daemon=True).start()
 
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+# --- API ENDPOINTS (Quelli che davano 404) ---
+@app.get("/health")
+def health(): return {"status": "active"}
+
+@app.get("/get_wallet_balance")
+def api_balance(): 
+    return {"balance": get_wallet_balance_value()}
+
+@app.get("/get_open_positions")
+def api_positions(): 
+    # La dashboard si aspetta una lista diretta
+    return get_open_positions_data()
+
+@app.get("/management_logs")
+def api_logs(): 
+    # La dashboard si aspetta un oggetto con chiave 'logs' O una lista diretta?
+    # Mitragliere v7.2 di solito vuole una lista diretta di oggetti log.
+    return management_logs
+
+@app.get("/stats")
+def api_stats():
+    return {
+        "daily_pnl": 0.00,
+        "win_rate": 0,
+        "total_trades": 0
+    }
+
+@app.get("/equity_history")
+def api_equity(): return equity_history

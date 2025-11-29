@@ -1,280 +1,173 @@
-import os
-import math
-import json
 import time
-import asyncio
 import requests
+import os
+import logging
+from datetime import datetime
 from fastapi import FastAPI
-from pydantic import BaseModel
+from fastapi.middleware.cors import CORSMiddleware
+from threading import Thread
 from pybit.unified_trading import HTTP
+
+# --- CONFIGURAZIONE ---
+SLEEP_INTERVAL = 900
+MASTER_AI_URL = "http://master-ai-agent:8000"
+QTY_PRECISION = {"BTCUSDT": 3, "ETHUSDT": 2, "SOLUSDT": 1}
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("PositionManager")
 
 app = FastAPI()
 
-# --- CONFIGURAZIONE STRATEGIA ---
-AI_URL = os.getenv("MASTER_AI_URL", "http://master-ai-agent:8000")
-MAX_ALLOCATION = 0.20       # Max capitale per trade
-DEFAULT_SL_PCT = 0.02       # 2% Stop Loss (Sicurezza se l'AI non lo specifica)
-DEFAULT_TP_PCT = 0.05       # 5% Take Profit (Target base)
-TRAILING_TRIGGER = 0.015    # Se profitto > 1.5%, attiva trailing
-STATS_FILE = "stats.json"
-HISTORY_FILE = "equity_history.json"
-MANAGEMENT_LOGS = []
-BOT_START_TIME = int(time.time()) * 1000
-
-# --- CONNESSIONE BYBIT ---
-client = HTTP(
-    testnet=os.getenv("BYBIT_TESTNET")=="true",
-    api_key=os.getenv("BYBIT_API_KEY"),
-    api_secret=os.getenv("BYBIT_API_SECRET")
+# --- FIX CORS (Il pezzo mancante per la Dashboard) ---
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Accetta richieste da TUTTI (Dashboard compresa)
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
-# --- MODELLI DATI ---
-class Order(BaseModel):
-    symbol: str; side: str; leverage: int; size_pct: float
-class CloseRequest(BaseModel):
-    symbol: str
+# MEMORIA DASHBOARD
+management_logs = [] 
+equity_history = []
+
+API_KEY = os.getenv("BYBIT_API_KEY")
+API_SECRET = os.getenv("BYBIT_API_SECRET")
+IS_TESTNET = os.getenv("BYBIT_TESTNET", "false").lower() == "true"
+
+session = None
+try:
+    session = HTTP(testnet=IS_TESTNET, api_key=API_KEY, api_secret=API_SECRET)
+    logger.info("Connessione Bybit OK")
+except Exception as e:
+    logger.error(f"Errore Bybit: {e}")
 
 # --- UTILS ---
-def safe_float(val):
-    try: return float(val)
-    except: return 0.0
+def add_log(title, message, status="info"):
+    timestamp = datetime.now().strftime("%H:%M:%S")
+    logger.info(f"{title}: {message}")
+    log_entry = {
+        "id": int(time.time() * 100000),
+        "time": timestamp,
+        "pair": title,       
+        "action": message,    
+        "status": status
+    }
+    management_logs.insert(0, log_entry)
+    if len(management_logs) > 50: management_logs.pop()
 
-def round_step_size(quantity, step_size):
-    if step_size == 0: return quantity
-    return math.floor(quantity / step_size) * step_size
-
-def load_json(f, d):
-    if os.path.exists(f):
-        try: 
-            with open(f) as file: return json.load(file)
-        except: pass
-    return d
-
-def save_json(f, d):
-    try: 
-        with open(f, 'w') as file: json.dump(d, file)
+def get_wallet_balance_value():
+    if not session: return 0.0
+    try:
+        resp = session.get_wallet_balance(accountType="UNIFIED", coin="USDT")
+        if resp['retCode'] == 0:
+            for coin in resp['result']['list'][0]['coin']:
+                if coin['coin'] == "USDT": return float(coin['walletBalance'])
     except: pass
+    return 0.0
 
-# --- CICLI AUTOMATICI (IL MOTORE) ---
-@app.on_event("startup")
-async def startup():
-    # 1. Ciclo di Trading (Analisi -> Esecuzione con SL/TP)
-    asyncio.create_task(trading_loop())
-    # 2. Ciclo di Sincronizzazione Dati (Per Dashboard)
-    asyncio.create_task(data_sync_loop())
-    # 3. Ciclo di Trailing Stop (Gestione Dinamica)
-    asyncio.create_task(trailing_stop_loop())
+def get_open_positions_data():
+    positions = []
+    if not session: return positions
+    try:
+        resp = session.get_positions(category="linear", settleCoin="USDT")
+        if resp['retCode'] == 0:
+            for p in resp['result']['list']:
+                if float(p['size']) > 0:
+                    positions.append({
+                        "symbol": p['symbol'],
+                        "side": p['side'],
+                        "size": float(p['size']),
+                        "entry_price": float(p['avgPrice']),
+                        "pnl": float(p['unrealisedPnl']),
+                        "roi": 0.0 
+                    })
+    except: pass
+    return positions
 
-async def trading_loop():
-    print(">>> SYSTEM ONLINE: WAITING FOR OPPORTUNITIES...")
-    while True:
+def get_price(symbol):
+    if not session: return 0.0
+    try:
+        resp = session.get_tickers(category="linear", symbol=symbol)
+        if resp['retCode'] == 0: return float(resp['result']['list'][0]['markPrice'])
+    except: pass
+    return 0.0
+
+def execute_trade(symbol, decision, size_pct, leverage):
+    if not session: return
+    positions = get_open_positions_data()
+    target_pos = next((p for p in positions if p['symbol'] == symbol), None)
+
+    if decision == "CLOSE" and target_pos:
+        add_log(symbol, "Closing Position...", "warning")
         try:
-            # A. Recupera Dati Mercato Reali
-            symbols = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT']
-            market_data = {}
-            for sym in symbols:
-                try:
-                    t = client.get_tickers(category='linear', symbol=sym)['result']['list'][0]
-                    market_data[sym] = {
-                        'price': float(t['lastPrice']),
-                        'change_24h': float(t['price24hPcnt']),
-                        'volume_24h': float(t['volume24h']),
-                        'turnover_24h': float(t['turnover24h'])
-                    }
-                except: pass
-
-            # B. Invia al Cervello (Master AI)
-            # L'AI usa GPT/Claude per analizzare trend, sentiment e strategia Rizzo
-            try:
-                r = requests.post(f"{AI_URL}/analyze", json={'raw_data': market_data}, timeout=15)
-                decisions = r.json()
-            except Exception as e:
-                print(f"AI Connection Error: {e}")
-                decisions = {}
-
-            # C. Esecuzione Ordini INTELLIGENTE
-            if decisions:
-                for sym, dec in decisions.items():
-                    action = dec.get('decision', 'HOLD')
-                    
-                    if action in ['OPEN_LONG', 'OPEN_SHORT']:
-                        # Verifica se siamo già dentro
-                        is_open = False
-                        try:
-                            curr = client.get_positions(category='linear', symbol=sym)['result']['list'][0]
-                            if float(curr['size']) > 0: is_open = True
-                        except: pass
-                        
-                        if not is_open:
-                            print(f">>> ESECUZIONE STRATEGIA: {action} su {sym}")
-                            # ESEGUE L'ORDINE CON PROTEZIONI
-                            do_open_position(
-                                symbol=sym, 
-                                side='Buy' if 'LONG' in action else 'Sell',
-                                leverage=dec.get('leverage', 5),
-                                size_pct=dec.get('size_pct', 0.15)
-                            )
-                            
+            side = "Sell" if target_pos['side'] == "Buy" else "Buy"
+            session.place_order(category="linear", symbol=symbol, side=side, orderType="Market", qty=str(target_pos['size']), reduceOnly=True)
+            add_log(symbol, "Position Closed", "success")
         except Exception as e:
-            print(f"Trading Loop Error: {e}")
-        
-        await asyncio.sleep(60) # Analisi ogni 60 secondi
-
-async def trailing_stop_loop():
-    """Gestisce le posizioni aperte spostando lo SL a profitto"""
-    global MANAGEMENT_LOGS
-    while True:
-        try:
-            pos_data = api_positions().get("active", [])
-            for p in pos_data:
-                entry = p['entry_price']
-                mark = p['mark_price']
-                curr_sl = p['sl']
-                side = p['side']
-                sym = p['symbol']
-                size = p['size']
-                
-                # Calcolo ROI%
-                if entry > 0:
-                    roi = (mark - entry)/entry if side == "Buy" else (entry - mark)/entry
-                    
-                    # SE PROFITTO > TRIGGER (es. 1.5%), SPOSTA SL A BE (Break Even) + piccolo profitto
-                    if roi > TRAILING_TRIGGER:
-                        new_sl = entry * 1.005 if side == "Buy" else entry * 0.995
-                        
-                        should_update = False
-                        if side == "Buy" and new_sl > curr_sl: should_update = True
-                        if side == "Sell" and (curr_sl == 0 or new_sl < curr_sl): should_update = True
-                        
-                        if should_update:
-                            try:
-                                client.set_trading_stop(category="linear", symbol=sym, stopLoss=str(round(new_sl, 4)))
-                                
-                                log_entry = {
-                                    "time": int(time.time()),
-                                    "symbol": sym,
-                                    "details": f"Trailing Stop attivato a {new_sl:.2f} (ROI: {roi*100:.2f}%)",
-                                    "locked_profit": "SECURED"
-                                }
-                                MANAGEMENT_LOGS.insert(0, log_entry)
-                                if len(MANAGEMENT_LOGS)>50: MANAGEMENT_LOGS.pop()
-                            except: pass
-        except: pass
-        await asyncio.sleep(10)
-
-async def data_sync_loop():
-    """Tiene aggiornati i dati per la Dashboard"""
-    while True:
-        try:
-            bal = get_balance_internal()
-            if bal['equity'] > 0:
-                h = load_json(HISTORY_FILE, [])
-                h.append({"ts": int(time.time()), "equity": bal['equity']})
-                save_json(HISTORY_FILE, h[-2000:])
+            add_log(symbol, f"Close Error: {e}", "error")
             
-            r = client.get_closed_pnl(category="linear", limit=50)
-            if r.get('result'):
-                trades = [t for t in r['result']['list'] if int(t['updatedTime']) > BOT_START_TIME]
-                wins = sum(1 for t in trades if safe_float(t['closedPnl']) > 0)
-                pnl = sum(safe_float(t['closedPnl']) for t in trades)
-                wr = (wins/len(trades)*100) if len(trades)>0 else 0
-                save_json(STATS_FILE, {"total_pnl": round(pnl, 2), "win_rate": round(wr, 1)})
-        except: pass
-        await asyncio.sleep(30)
-
-# --- FUNZIONI ESECUTIVE (ORDER BLOCK) ---
-def get_balance_internal():
-    try:
-        r = client.get_wallet_balance(accountType="UNIFIED", coin="USDT")
-        if r['retCode']==0 and r['result']['list']:
-            c = r['result']['list'][0]['coin'][0]
-            eq = safe_float(c.get('equity'))
-            av = safe_float(c.get('availableToWithdraw'))
-            # Fix Smart Balance se available è buggato
-            if eq > 0 and av == 0: av = eq - 2.0 
-            return {"equity": eq, "availableToWithdraw": av}
-    except: pass
-    return {"equity":0.0, "availableToWithdraw":0.0}
-
-def do_open_position(symbol, side, leverage, size_pct):
-    try:
-        # 1. Check Fondi
-        bal = get_balance_internal()
-        if bal['availableToWithdraw'] < 5: return
-        
-        # 2. Configura Leva
-        try: client.set_leverage(category="linear", symbol=symbol, buyLeverage=str(leverage), sellLeverage=str(leverage))
+    elif "OPEN" in decision and not target_pos:
+        add_log(symbol, f"Opening {decision}...", "info")
+        try:
+            session.set_leverage(category="linear", symbol=symbol, buyLeverage=str(leverage), sellLeverage=str(leverage))
         except: pass
 
-        # 3. Calcola Quantità
-        ticker = client.get_tickers(category="linear", symbol=symbol)
-        price = safe_float(ticker['result']['list'][0]['lastPrice'])
-        
-        trade_amt = bal['availableToWithdraw'] * min(size_pct, MAX_ALLOCATION) * leverage
-        
-        # Rispetta i filtri di quantità di Bybit
-        instr = client.get_instruments_info(category="linear", symbol=symbol)
-        qty_step = float(instr['result']['list'][0]['lotSizeFilter']['qtyStep'])
-        min_qty = float(instr['result']['list'][0]['lotSizeFilter']['minOrderQty'])
-        
-        raw_qty = trade_amt / price
-        qty = max(min_qty, round_step_size(raw_qty, qty_step))
+        bal = get_wallet_balance_value()
+        price = get_price(symbol)
+        if bal > 0 and price > 0:
+            raw_qty = (bal * size_pct * leverage * 0.95) / price
+            precision = QTY_PRECISION.get(symbol, 3)
+            qty = round(raw_qty, precision)
+            if precision == 0: qty = int(qty)
+            
+            side = "Buy" if "LONG" in decision else "Sell"
+            try:
+                resp = session.place_order(category="linear", symbol=symbol, side=side, orderType="Market", qty=str(qty))
+                if resp['retCode'] == 0:
+                    add_log(symbol, f"Order Filled: {qty}", "success")
+                else:
+                    add_log(symbol, f"Order Failed: {resp['retMsg']}", "error")
+            except Exception as e:
+                 add_log(symbol, f"Order Exception: {e}", "error")
 
-        # 4. CALCOLA SL e TP (Cruciale per strategia Rizzo)
-        # Se Side è Buy: SL sotto, TP sopra. Se Sell: SL sopra, TP sotto.
-        sl_price = price * (1 - DEFAULT_SL_PCT) if side == "Buy" else price * (1 + DEFAULT_SL_PCT)
-        tp_price = price * (1 + DEFAULT_TP_PCT) if side == "Buy" else price * (1 - DEFAULT_TP_PCT)
+def trading_loop():
+    add_log("SYSTEM", "Bot Online (CORS ENABLED). Cycle: 15m", "success")
+    while True:
+        try:
+            market_data = {}
+            for sym in ["BTCUSDT", "ETHUSDT", "SOLUSDT"]:
+                p = get_price(sym)
+                if p > 0: market_data[sym] = {"price": p}
+            
+            if market_data:
+                try:
+                    resp = requests.post(f"{MASTER_AI_URL}/analyze", json={"raw_data": market_data}, timeout=60)
+                    if resp.status_code == 200:
+                        decisions = resp.json()
+                        for sym, dec in decisions.items():
+                            d = dec.get("decision", "HOLD")
+                            if d != "HOLD":
+                                execute_trade(sym, d, 0.1, 5)
+                except Exception as e:
+                    add_log("AI", f"Analysis Failed: {e}", "error")
+            time.sleep(SLEEP_INTERVAL)
+        except Exception:
+            time.sleep(60)
 
-        # 5. INVIA ORDINE COMPLETO
-        client.place_order(
-            category="linear",
-            symbol=symbol,
-            side=side,
-            orderType="Market",
-            qty=str(qty),
-            stopLoss=str(round(sl_price, 4)),
-            takeProfit=str(round(tp_price, 4))
-        )
-        print(f">>> ORDINE APERTO: {symbol} {side} x{leverage} | SL: {sl_price:.2f} TP: {tp_price:.2f}")
-        
-    except Exception as e:
-        print(f"Order Failed: {e}")
+@app.on_event("startup")
+def startup():
+    Thread(target=trading_loop, daemon=True).start()
 
-# --- API ENDPOINTS ---
+@app.get("/health")
+def health(): return {"status": "active"}
 @app.get("/get_wallet_balance")
-def api_balance(): return get_balance_internal()
-@app.get("/stats")
-def api_stats(): return load_json(STATS_FILE, {})
-@app.get("/equity_history")
-def api_hist(): return {"history": load_json(HISTORY_FILE, [])}
-@app.get("/management_logs")
-def api_logs(): return {"logs": MANAGEMENT_LOGS}
+def api_balance(): return {"balance": get_wallet_balance_value()}
 @app.get("/get_open_positions")
-def api_positions():
-    try:
-        r = client.get_positions(category="linear", settleCoin="USDT")
-        active = []
-        for p in r['result']['list']:
-            if safe_float(p['size']) > 0:
-                active.append({
-                    "symbol": p['symbol'], "side": p['side'], "size": p['size'],
-                    "entry_price": safe_float(p['avgPrice']), "mark_price": safe_float(p['markPrice']),
-                    "pnl": safe_float(p['unrealisedPnl']), "leverage": p['leverage'], "sl": safe_float(p['stopLoss'])
-                })
-        return {"active": active}
-    except: return {"active": []}
-
-@app.post("/close_position")
-def close_pos(r: CloseRequest):
-    try:
-        pos = client.get_positions(category="linear", symbol=r.symbol)['result']['list'][0]
-        if float(pos['size']) > 0:
-            side = "Sell" if pos['side']=="Buy" else "Buy"
-            client.place_order(category="linear", symbol=r.symbol, side=side, qty=pos['size'], orderType="Market", reduceOnly=True)
-            return {"status": "closed"}
-    except Exception as e: return {"error": str(e)}
-    
-@app.post("/open_position")
-def api_open(o: Order):
-    do_open_position(o.symbol, o.side, o.leverage, o.size_pct)
-    return {"status": "ok"}
+def api_positions(): return get_open_positions_data()
+@app.get("/management_logs")
+def api_logs(): return management_logs
+@app.get("/stats")
+def api_stats(): return {"daily_pnl": 0.00, "win_rate": 0, "total_trades": 0}
+@app.get("/equity_history")
+def api_equity(): return equity_history
