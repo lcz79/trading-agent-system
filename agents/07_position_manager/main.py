@@ -1,302 +1,169 @@
-import time
-import requests
 import os
-import logging
-from datetime import datetime
+import ccxt
+import pandas as pd
+import numpy as np
 from fastapi import FastAPI
-from threading import Thread
-from pybit.unified_trading import HTTP
 from pydantic import BaseModel
 
-# --- CONFIGURAZIONE ---
-SLEEP_INTERVAL = 900  # 15 Minuti (Ciclo AI Master)
-FAST_CHECK_INTERVAL = 30 # 30 Secondi (Ciclo Guardiano SL)
-
-MASTER_AI_URL = "http://master-ai-agent:8000"
-TARGET_SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
-
-# Precisione decimali per Qty e Prezzo (SL/TP)
-QTY_PRECISION = {"BTCUSDT": 3, "ETHUSDT": 2, "SOLUSDT": 1}
-PRICE_PRECISION = {"BTCUSDT": 1, "ETHUSDT": 2, "SOLUSDT": 3}
-
-# --- GESTIONE RISCHIO ---
-DEFAULT_SL_PERCENT = 0.02  # 2% Stop Loss iniziale
-DEFAULT_TP_PERCENT = 0.05  # 5% Take Profit iniziale (Risk:Reward 1:2.5)
-
-# --- BREAK EVEN (Pareggio Dinamico) ---
-BE_TRIGGER_PCT = 0.008 # Se il prezzo va a +0.8% a favore...
-BE_OFFSET_PCT = 0.001  # ...sposta lo SL a +0.1% (così paghiamo le commissioni)
-
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("PositionManager")
 app = FastAPI()
 
-# LOGS
-management_logs = [] 
-equity_history = [] 
+# --- CONFIGURAZIONE STRATEGIA ATR ---
+ATR_PERIOD = 14          # Periodo calcolo volatilità
+SL_MULTIPLIER = 2.0      # Stop Loss = 2 volte la volatilità (Standard)
+TP_MULTIPLIER = 3.0      # Take Profit = 3 volte la volatilità (Reward > Risk)
+# ------------------------------------
 
-API_KEY = os.getenv("BYBIT_API_KEY")
-API_SECRET = os.getenv("BYBIT_API_SECRET")
-IS_TESTNET = os.getenv("BYBIT_TESTNET", "false").lower() == "true"
+# Connessione Bybit
+API_KEY = os.getenv('BYBIT_API_KEY')
+API_SECRET = os.getenv('BYBIT_API_SECRET')
+IS_TESTNET = os.getenv('BYBIT_TESTNET', 'true').lower() == 'true'
 
-session = None
-try:
-    session = HTTP(testnet=IS_TESTNET, api_key=API_KEY, api_secret=API_SECRET)
-except: pass
+exchange = None
+if API_KEY and API_SECRET:
+    try:
+        exchange = ccxt.bybit({
+            'apiKey': API_KEY,
+            'secret': API_SECRET,
+            'options': {'defaultType': 'future'},
+        })
+        if IS_TESTNET:
+            exchange.set_sandbox_mode(True)
+        print(f"🔌 Position Manager: Connesso a Bybit (Testnet: {IS_TESTNET})")
+    except Exception as e:
+        print(f"⚠️ Errore connessione Bybit: {e}")
 
-class CloseRequest(BaseModel):
+class OrderRequest(BaseModel):
     symbol: str
+    side: str
+    leverage: float
+    size_pct: float
 
-def add_log(title, message, status="info"):
-    timestamp = datetime.now().strftime("%H:%M:%S")
-    print(f"[{timestamp}] {title}: {message}")
-    management_logs.insert(0, {"id": int(time.time()*1000), "time": timestamp, "pair": title, "action": message, "status": status})
-    if len(management_logs) > 100: management_logs.pop()
+def calculate_atr_sl_tp(symbol, side, current_price, leverage):
+    """
+    Calcola i prezzi di Stop Loss e Take Profit basati su ATR.
+    Include protezione contro liquidazione in base alla leva.
+    """
+    if not exchange: return 0, 0, 0
 
-def get_wallet_data():
-    if not session: return 0.0, []
-    bal = 0.0
-    pos = []
     try:
-        r = session.get_wallet_balance(accountType="UNIFIED", coin="USDT")
-        if r['retCode'] == 0:
-            bal = float(r['result']['list'][0]['coin'][0]['walletBalance'])
-        r2 = session.get_positions(category="linear", settleCoin="USDT")
-        if r2['retCode'] == 0:
-            for p in r2['result']['list']:
-                if float(p['size']) > 0:
-                    pos.append({
-                        "symbol": p['symbol'],
-                        "side": p['side'],
-                        "size": float(p['size']),
-                        "entry_price": float(p['avgPrice']),
-                        "leverage": float(p['leverage']),
-                        "pnl": float(p['unrealisedPnl']),
-                        "stop_loss": float(p.get('stopLoss', 0)),
-                        "take_profit": float(p.get('takeProfit', 0)),
-                        "mark_price": float(p['markPrice'])
-                    })
-    except: pass
-    return bal, pos
+        # 1. Scarica candele orarie (1h) per l'ATR
+        ohlcv = exchange.fetch_ohlcv(symbol, timeframe='1h', limit=ATR_PERIOD + 5)
+        if not ohlcv: return 0, 0, 0
+        
+        df = pd.DataFrame(ohlcv, columns=['time', 'open', 'high', 'low', 'close', 'vol'])
+        
+        # 2. Calcolo ATR (True Range)
+        df['h-l'] = df['high'] - df['low']
+        df['h-pc'] = abs(df['high'] - df['close'].shift(1))
+        df['l-pc'] = abs(df['low'] - df['close'].shift(1))
+        df['tr'] = df[['h-l', 'h-pc', 'l-pc']].max(axis=1)
+        atr = df['tr'].rolling(window=ATR_PERIOD).mean().iloc[-1]
+        
+        # 3. Calcolo Distanze
+        stop_dist = atr * SL_MULTIPLIER
+        tp_dist = atr * TP_MULTIPLIER
+        
+        # 4. Protezione Anti-Liquidazione (Safety Net)
+        # Esempio: Leva 10x => Liquidazione a +/- 10%. Stop Loss max deve essere al 8%.
+        max_sl_dist_pct = (1.0 / leverage) * 0.80 
+        max_sl_dist_price = current_price * max_sl_dist_pct
+        
+        # Se l'ATR suggerisce uno stop troppo largo per questa leva, lo stringiamo
+        if stop_dist > max_sl_dist_price:
+            print(f"⚠️ ATR Stop troppo largo per Leva {leverage}x. Ridimensionamento di sicurezza.")
+            stop_dist = max_sl_dist_price
 
-def get_price(sym):
+        # 5. Calcolo Prezzi Finali
+        if side.lower() == 'buy': # LONG
+            sl_price = current_price - stop_dist
+            tp_price = current_price + tp_dist
+        else: # SHORT
+            sl_price = current_price + stop_dist
+            tp_price = current_price - tp_dist
+            
+        return sl_price, tp_price, atr
+
+    except Exception as e:
+        print(f"❌ Errore calcolo ATR: {e}")
+        return 0, 0, 0
+
+@app.post("/open_position")
+def open_position(order: OrderRequest):
+    if not exchange:
+        return {"status": "simulated", "msg": "No Exchange Connected"}
+    
     try:
-        r = session.get_tickers(category="linear", symbol=sym)
-        return float(r['result']['list'][0]['markPrice'])
-    except: return 0.0
-
-def calculate_sl_tp(entry_price, direction, sl_pct, tp_pct, precision):
-    """Calcola prezzi esatti per SL e TP in base alla direzione"""
-    if direction == "long":
-        sl = entry_price * (1 - sl_pct)
-        tp = entry_price * (1 + tp_pct)
-    else: # short
-        sl = entry_price * (1 + sl_pct)
-        tp = entry_price * (1 - tp_pct)
-    
-    return round(sl, precision), round(tp, precision)
-
-# --- GUARDIANO VELOCE (Thread Parallelo) ---
-def monitor_positions():
-    """Controlla ogni 30s se dobbiamo spostare lo SL a pareggio"""
-    time.sleep(60) # Aspetta 1 minuto all'avvio
-    add_log("GUARDIAN", "Break-Even Monitor Active", "success")
-    
-    while True:
-        try:
-            _, positions = get_wallet_data()
-            
-            for p in positions:
-                sym = p['symbol']
-                side = p['side']
-                entry = p['entry_price']
-                curr_price = p['mark_price']
-                curr_sl = p['stop_loss']
-                precision = PRICE_PRECISION.get(sym, 2)
-
-                # LOGICA LONG
-                if side == "Buy":
-                    # Se il prezzo è salito sopra il trigger (es. +0.8%)
-                    target_trigger = entry * (1 + BE_TRIGGER_PCT)
-                    new_sl = round(entry * (1 + BE_OFFSET_PCT), precision)
-                    
-                    if curr_price > target_trigger:
-                        # Controlla se abbiamo già spostato lo SL (per non spammare API)
-                        # Se current SL è 0 o è minore del new_sl, lo alziamo
-                        if curr_sl == 0 or curr_sl < new_sl: 
-                            add_log(sym, f"Moving SL to Break Even (${new_sl})", "warning")
-                            try:
-                                session.set_trading_stop(category="linear", symbol=sym, stopLoss=str(new_sl), slTriggerBy="MarkPrice")
-                            except Exception as e:
-                                logger.error(f"Failed move SL {sym}: {e}")
-
-                # LOGICA SHORT
-                elif side == "Sell":
-                    # Se il prezzo è sceso sotto il trigger (es. -0.8%)
-                    target_trigger = entry * (1 - BE_TRIGGER_PCT)
-                    new_sl = round(entry * (1 - BE_OFFSET_PCT), precision)
-                    
-                    if curr_price < target_trigger:
-                        # Controlla se abbiamo già spostato lo SL
-                        # Se current SL è 0 o è maggiore del new_sl, lo abbassiamo
-                        if curr_sl == 0 or curr_sl > new_sl: 
-                            add_log(sym, f"Moving SL to Break Even (${new_sl})", "warning")
-                            try:
-                                session.set_trading_stop(category="linear", symbol=sym, stopLoss=str(new_sl), slTriggerBy="MarkPrice")
-                            except Exception as e:
-                                logger.error(f"Failed move SL {sym}: {e}")
-            
-            time.sleep(FAST_CHECK_INTERVAL)
-            
-        except Exception as e:
-            logger.error(f"Guardian Error: {e}")
-            time.sleep(60)
-
-def execute_decision(decision):
-    sym = decision.get("symbol") + "USDT"
-    op = decision.get("operation", "hold").lower()
-    direct = decision.get("direction", "").lower()
-    lev = int(decision.get("leverage", 1))
-    size_pct = float(decision.get("target_portion_of_balance", 0.0))
-    reason = decision.get("reason", "")
-
-    logger.info(f"EXEC: {sym} -> {op.upper()} ({reason[:40]}...)")
-    
-    if op == "hold": return
-
-    bal, positions = get_wallet_data()
-    my_pos = next((p for p in positions if p['symbol'] == sym), None)
-
-    # --- CHIUSURA ---
-    if op == "close" and my_pos:
-        try:
-            side = "Sell" if my_pos['side'] == "Buy" else "Buy"
-            session.place_order(category="linear", symbol=sym, side=side, orderType="Market", qty=str(my_pos['size']), reduceOnly=True)
-            add_log(sym, f"CLOSED {my_pos['side']} (AI)", "success")
-        except Exception as e: add_log(sym, f"Close Fail: {e}", "error")
-
-    # --- APERTURA con SL/TP ---
-    elif op == "open" and not my_pos:
-        try:
-            session.set_leverage(category="linear", symbol=sym, buyLeverage=str(lev), sellLeverage=str(lev))
-        except: pass
+        symbol = order.symbol
+        side = order.side.lower() # 'buy' or 'sell'
         
-        bal, _ = get_wallet_data()
-        price = get_price(sym)
-        if price == 0 or bal < 10: return
-
-        # 1. Calcola Quantità
-        amount = (bal * size_pct * lev * 0.95) / price
-        qty_prec = QTY_PRECISION.get(sym, 3)
-        qty = f"{amount:.{qty_prec}f}"
-        
-        # 2. Calcola SL e TP Dinamici
-        adjusted_sl = DEFAULT_SL_PERCENT / (lev / 2) if lev > 2 else DEFAULT_SL_PERCENT
-        adjusted_tp = DEFAULT_TP_PERCENT / (lev / 2) if lev > 2 else DEFAULT_TP_PERCENT
-        
-        price_prec = PRICE_PRECISION.get(sym, 2)
-        sl_price, tp_price = calculate_sl_tp(price, direct, adjusted_sl, adjusted_tp, price_prec)
-        
-        side = "Buy" if direct == "long" else "Sell"
-        
-        add_log(sym, f"Opening {direct.upper()} x{lev} | SL: {sl_price} TP: {tp_price}", "info")
-
+        # A. Imposta Leva
         try:
-            r = session.place_order(
-                category="linear", 
-                symbol=sym, 
-                side=side, 
-                orderType="Market", 
-                qty=qty,
-                stopLoss=str(sl_price),
-                takeProfit=str(tp_price)
-            )
-            if r['retCode'] == 0: 
-                add_log(sym, f"OPENED {direct.upper()} with SL/TP", "success")
-            else: 
-                add_log(sym, f"Open Rejected: {r['retMsg']}", "error")
-        except Exception as e: 
-            add_log(sym, f"Open Fail: {e}", "error")
+            exchange.set_leverage(int(order.leverage), symbol)
+        except: pass 
 
-def trading_cycle():
-    add_log("SYSTEM", "Smart Batch Engine Started (15m Cycle)", "success")
-    while True:
-        try:
-            bal, pos = get_wallet_data()
-            equity_history.append({"time": datetime.now().strftime("%H:%M"), "equity": bal})
-            if len(equity_history) > 50: equity_history.pop(0)
-            
-            payload = {
-                "symbols": TARGET_SYMBOLS,
-                "portfolio": {"balance_usd": bal, "open_positions": pos}
+        # B. Prepara Dati Ordine
+        ticker = exchange.fetch_ticker(symbol)
+        current_price = float(ticker['last'])
+        
+        # C. Calcola Size
+        bal = exchange.fetch_balance()
+        available_equity = float(bal['USDT']['free'])
+        trade_cost = available_equity * order.size_pct
+        qty_usdt = trade_cost * order.leverage
+        qty = qty_usdt / current_price
+        
+        # D. CALCOLO ATR (Il cuore della strategia)
+        sl_price, tp_price, atr_val = calculate_atr_sl_tp(symbol, side, current_price, order.leverage)
+        
+        print(f"📊 {symbol} ATR: {atr_val:.2f} | Prezzo: {current_price}")
+        print(f"🎯 Setting SL: {sl_price:.2f} | TP: {tp_price:.2f}")
+
+        # E. Parametri Ordine Avanzato (Order attaches SL/TP immediately)
+        params = {}
+        if sl_price > 0 and tp_price > 0:
+            params = {
+                'stopLoss': str(round(sl_price, 4)),
+                'takeProfit': str(round(tp_price, 4))
             }
-            
-            add_log("AI", "Calling Mitragliere Master Brain...", "info")
-            resp = requests.post(f"{MASTER_AI_URL}/execute_batch_strategy", json=payload, timeout=180)
-            
-            if resp.status_code == 200:
-                data = resp.json()
-                trades = data.get("trades", []) 
-                if not trades: add_log("AI", "Mitragliere says: HOLD position.", "info")
-                for trade in trades: execute_decision(trade)
-            else:
-                add_log("AI", f"API Error: {resp.status_code}", "error")
-            
-            add_log("SYSTEM", f"Cycle Done. Sleeping 15m...", "info")
-            time.sleep(SLEEP_INTERVAL)
-            
-        except Exception as e:
-            add_log("CRASH", f"{e}", "error")
-            time.sleep(60)
 
-@app.on_event("startup")
-def startup():
-    # Avviamo DUE thread: uno per l'AI (lento) e uno per il Guardiano (veloce)
-    Thread(target=trading_cycle, daemon=True).start()
-    Thread(target=monitor_positions, daemon=True).start()
+        # F. Invia Ordine a Mercato
+        direction = 'buy' if side in ['buy', 'open_long'] else 'sell'
+        order_resp = exchange.create_order(symbol, 'market', direction, qty, params=params)
+        
+        return {
+            "status": "executed", 
+            "id": order_resp['id'], 
+            "atr_used": atr_val,
+            "sl": sl_price,
+            "tp": tp_price
+        }
 
-# --- ENDPOINTS API ---
-@app.get("/health")
-def health(): return {"status": "active"}
-
-@app.get("/management_logs")
-def logs(): return management_logs
+    except Exception as e:
+        print(f"❌ ERRORE CRITICO ORDINE: {e}")
+        return {"status": "failed", "error": str(e)}
 
 @app.get("/get_wallet_balance")
-def api_balance(): 
-    b, _ = get_wallet_data()
-    return {"balance": b}
+def get_balance():
+    if not exchange: return {"equity": 10000}
+    try:
+        b = exchange.fetch_balance()['USDT']
+        return {"equity": b['total'], "available": b['free']}
+    except: return {"equity": 0}
 
 @app.get("/get_open_positions")
-def api_positions():
-    _, p = get_wallet_data()
-    return p
-
-@app.get("/equity_history")
-def api_equity(): return equity_history
-
-@app.post("/close_position")
-def manual_close(req: CloseRequest):
-    symbol = req.symbol
-    add_log("MANUAL", f"Manually closing {symbol}...", "warning")
-    
-    if not session: return {"status": "error", "message": "No Session"}
-    
-    _, positions = get_wallet_data()
-    target = next((p for p in positions if p['symbol'] == symbol), None)
-    
-    if target:
-        try:
-            side = "Sell" if target['side'] == "Buy" else "Buy"
-            resp = session.place_order(category="linear", symbol=symbol, side=side, orderType="Market", qty=str(target['size']), reduceOnly=True)
-            if resp['retCode'] == 0:
-                add_log("MANUAL", f"Closed {symbol} successfully", "success")
-                return {"status": "closed", "symbol": symbol}
-            else:
-                return {"status": "error", "message": resp['retMsg']}
-        except Exception as e:
-            return {"status": "error", "message": str(e)}
-    return {"status": "error", "message": "Position not found"}
+def get_positions():
+    if not exchange: return {"active": []}
+    try:
+        # Fetch posizioni che hanno size > 0
+        pos = [p for p in exchange.fetch_positions() if float(p['contracts']) > 0]
+        active = [p['symbol'] for p in pos]
+        return {"active": active, "details": pos}
+    except: return {"active": []}
 
 @app.post("/manage_active_positions")
-def manage_compat(): return {"status": "ok"}
+def manage_positions():
+    # Con lo Stop Loss nativo su Bybit (impostato sopra), 
+    # questa funzione serve solo per monitoraggio o trailing stop futuri.
+    # La protezione è già attiva sull'exchange!
+    return {"status": "protected_by_exchange_orders"}
+

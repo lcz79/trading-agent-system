@@ -1,0 +1,466 @@
+==== Repository inspection - Tue Dec  2 13:56:28 UTC 2025 ====
+
+== Current directory and disk usage ==
+/home/luca/trading-agent-system
+
+-- ls -la (root) --
+total 80
+drwxrwxr-x  6 luca luca  4096 Dec  2 13:56 .
+drwxr-x---  9 luca luca  4096 Dec  2 13:23 ..
+-rw-rw-r--  1 luca luca  2457 Nov 29 09:54 .env
+-rw-rw-r--  1 luca luca   581 Nov 26 13:32 .env.example
+drwxrwxr-x  8 luca luca  4096 Nov 30 10:04 .git
+-rw-rw-r--  1 luca luca    54 Nov 26 13:33 .gitignore
+-rw-rw-r--  1 luca luca   657 Nov 29 09:35 Dockerfile
+-rw-rw-r--  1 luca luca  1147 Nov 26 11:49 README.md
+drwxrwxr-x 19 luca luca  4096 Nov 29 09:41 agents
+drwxrwxr-x  2 luca luca  4096 Nov 29 15:41 dashboard
+drwxrwxr-x  3 luca luca  4096 Nov 29 09:27 data
+-rw-rw-r--  1 luca luca  1261 Nov 29 15:48 docker-compose.yml
+-rw-rw-r--  1 luca luca 16146 Dec  2 13:33 main.py
+-rw-rw-r--  1 luca luca 10967 Dec  2 13:12 position_manager.py
+-rw-rw-r--  1 luca luca   156 Dec  2 13:56 repo_inspect_output.txt
+
+== Git status (if repo) ==
+
+== Top-level python / run files to check ==
+app.py: NOT FOUND
+--- main.py (first 300 lines) ---
+"""
+Trading Dashboard v7.8 - NO CLOSE BUTTONS
+"""
+import os
+import time
+import json
+from fastapi import FastAPI, Request
+from fastapi.responses import HTMLResponse
+from fastapi.middleware.cors import CORSMiddleware
+import httpx
+import re
+
+app = FastAPI(title="Mitragliere Dashboard", version="7.8.0")
+app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
+
+POS_URL = os.getenv("POSITION_MANAGER_URL", "http://position-manager-agent:8000")
+AI_URL = os.getenv("MASTER_AI_URL", "http://master-ai-agent:8000")
+DATA_FILE = "chart_history.json"
+
+# --- GESTIONE MEMORIA SU FILE ---
+def load_history():
+    try:
+        if os.path.exists(DATA_FILE):
+            with open(DATA_FILE, "r") as f: return json.load(f)
+    except: pass
+    return {"start_equity": None, "history": []}
+
+def save_history(data):
+    try:
+        with open(DATA_FILE, "w") as f: json.dump(data, f)
+    except: pass
+
+chart_memory = load_history()
+
+# --- UTILS ---
+async def safe_get(client, url, default):
+    try:
+        r = await client.get(url, timeout=2.0)
+        if r.status_code == 200: return r.json()
+    except: pass
+    return default
+
+@app.get("/api/wallet")
+async def gw():
+    global chart_memory
+    async with httpx.AsyncClient() as c:
+        bal_data = await safe_get(c, f"{POS_URL}/get_wallet_balance", {"balance": 0})
+        balance = float(bal_data.get("balance", 0))
+        pos_list = await safe_get(c, f"{POS_URL}/get_open_positions", [])
+        
+        total_unrealized_pnl = sum(float(p.get("pnl", 0)) for p in pos_list)
+        used_margin = sum((float(p.get("size", 0)) * float(p.get("entry_price", 0))) / 5 for p in pos_list)
+        
+        current_equity = balance + total_unrealized_pnl
+        available = balance - used_margin
+        if available < 0: available = 0
+
+        # CHART LOGIC
+        if chart_memory["start_equity"] is None and current_equity > 0:
+            chart_memory["start_equity"] = current_equity
+            save_history(chart_memory)
+
+        timestamp = time.strftime("%H:%M")
+        should_add = False
+        if not chart_memory["history"]: should_add = True
+        elif chart_memory["history"][-1]["ts"] != timestamp: should_add = True
+        
+        if should_add and current_equity > 0:
+            chart_memory["history"].append({
+                "ts": timestamp, 
+                "equity": round(current_equity, 2),
+                "baseline": chart_memory["start_equity"]
+            })
+            if len(chart_memory["history"]) > 2000: chart_memory["history"].pop(0)
+            save_history(chart_memory)
+
+        return {
+            "equity": round(current_equity, 2),
+            "availableToWithdraw": round(available, 2),
+            "pnl_open": round(total_unrealized_pnl, 2)
+        }
+
+@app.get("/api/stats")
+async def gs():
+    async with httpx.AsyncClient() as c: 
+        pos_list = await safe_get(c, f"{POS_URL}/get_open_positions", [])
+        current_pnl = sum(float(p.get("pnl", 0)) for p in pos_list)
+        return {"total_pnl": round(current_pnl, 2), "win_rate": 0}
+
+@app.get("/api/positions")
+async def gp():
+    async with httpx.AsyncClient() as c: 
+        raw_list = await safe_get(c, f"{POS_URL}/get_open_positions", [])
+        return {"active": raw_list}
+
+@app.get("/api/ai")
+async def gai():
+    async with httpx.AsyncClient() as c: return await safe_get(c, f"{AI_URL}/latest_reasoning", {})
+
+@app.get("/api/mgmt")
+async def gmgmt():
+    async with httpx.AsyncClient() as c: 
+        raw_logs = await safe_get(c, f"{POS_URL}/management_logs", [])
+        
+        # Parsing Logs
+        fixed_logs = []
+        closed_positions = []
+        
+        for l in raw_logs:
+            # Standard Log
+            pair = l.get("pair") or l.get("symbol") or "SYS"
+            action = l.get("action") or l.get("details") or "..."
+            ts = l.get("time", "")
+            fixed_logs.append({"time": ts, "pair": pair, "action": action})
+
+            # Check for Closed Position
+            if "CLOSED" in action.upper():
+                is_win = "profit" in action.lower() or "win" in action.lower()
+                is_loss = "loss" in action.lower() 
+                style = "green" if is_win else ("red" if is_loss else "gray")
+                closed_positions.append({
+                    "time": ts, 
+                    "pair": pair, 
+                    "action": action, 
+                    "style": style
+                })
+
+        return {"logs": fixed_logs, "closed": closed_positions[:20]}
+
+@app.get("/api/history")
+async def ghist():
+    return {"history": chart_memory["history"], "start": chart_memory["start_equity"]}
+
+@app.get("/api/news")
+async def gnews():
+    # Proxy per CoinGecko
+    url = "https://api.coingecko.com/api/v3/coins/bitcoin/status_updates"
+    async with httpx.AsyncClient() as c:
+        data = await safe_get(c, url, {})
+        updates = data.get('status_updates', [])
+        news = []
+        for u in updates[:5]:
+            news.append({
+                "desc": u.get('description', '')[:150] + "...",
+                "time": u.get('created_at', '')[:10]
+            })
+        return {"news": news}
+
+@app.post("/api/close_position")
+async def cp(request: Request):
+    try:
+        # API mantenuta per compatibilità ma disabilitata nel frontend
+        data = await request.json()
+        async with httpx.AsyncClient() as c:
+            return (await c.post(f"{POS_URL}/close_position", json=data)).json()
+    except Exception as e: return {"error": str(e)}
+
+DASHBOARD_HTML = '''<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <title>MITRAGLIERE // V7.8</title>
+    <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&family=JetBrains+Mono:wght@400;700&family=Orbitron:wght@900&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        :root { --neon-green: #00ff9d; --neon-red: #ff2a6d; --neon-blue: #00f3ff; --neon-yellow: #ffd700; --card-bg: rgba(12, 18, 24, 0.95); }
+        body { background-color: #050505; color: #e0e0e0; font-family: 'Rajdhani', sans-serif; margin: 0; padding: 20px; min-height: 100vh; }
+        .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; border-bottom: 1px solid #333; padding-bottom: 15px; }
+        .logo { font-family: 'Orbitron'; font-size: 2rem; color: var(--neon-green); text-shadow: 0 0 15px rgba(0,255,157,0.3); }
+        .status { font-family: 'JetBrains Mono'; font-size: 0.8rem; color: #888; border: 1px solid #333; padding: 5px 10px; border-radius: 4px; }
+        .grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; }
+        .col-2 { grid-column: span 2; } .col-4 { grid-column: span 4; }
+        .card { background: var(--card-bg); border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; padding: 20px; display: flex; flex-direction: column; }
+        .label { font-size: 0.75rem; color: #888; text-transform: uppercase; font-weight: 700; margin-bottom: 5px; border-bottom: 1px solid #222; padding-bottom: 5px; }
+        .val { font-family: 'JetBrains Mono'; font-size: 2.2rem; font-weight: 700; color: white; }
+        .green { color: var(--neon-green); } .red { color: var(--neon-red); } .blue { color: var(--neon-blue); } .gray { color: #888; }
+        .terminal { font-family: 'JetBrains Mono'; font-size: 0.75rem; flex: 1; overflow-y: auto; background: rgba(0,0,0,0.3); padding: 10px; border: 1px solid #222; min-height: 150px; max-height: 250px; }
+        .log-entry { margin-bottom: 5px; border-bottom: 1px solid #222; padding-bottom: 5px; }
+        .news-item { margin-bottom: 10px; padding-bottom: 10px; border-bottom: 1px solid #333; }
+        .news-date { font-size: 0.65rem; color: var(--neon-blue); }
+        @media(max-width: 900px) { .grid { grid-template-columns: 1fr; } .col-2, .col-4 { grid-column: span 1; } }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div class="logo">MITRAGLIERE <span style="font-size:1rem; opacity:0.5; color:white;">// V7.8</span></div>
+        <div class="status" id="sys-status">INIT...</div>
+    </div>
+    <div class="grid">
+        <!-- KPI -->
+        <div class="card"><div class="label">NET EQUITY</div><div class="val" id="equity">----</div></div>
+        <div class="card"><div class="label">AVAILABLE</div><div class="val blue" id="avail">----</div></div>
+        <div class="card"><div class="label">SESSION PNL (OPEN)</div><div class="val" id="pnl">----</div></div>
+        <div class="card"><div class="label">MARKET PULSE</div><div class="terminal" id="news-box">Loading News...</div></div>
+        
+        <!-- MAIN CHART -->
+        <div class="card col-4"><div class="label">EQUITY HISTORY (BASE: <span id="base-val">---</span>)</div><div style="height:300px"><canvas id="chart"></canvas></div></div>
+        
+        <!-- ACTIVE POSITIONS -->
+        <div class="card col-2">
+            <div class="label">ACTIVE ENGAGEMENTS</div>
+            <div id="pos-box" style="display:flex; flex-direction:column; gap:10px; margin-top:10px;">Scanning...</div>
+        </div>
+
+        <!-- CLOSED POSITIONS -->
+        <div class="card col-2">
+            <div class="label">CLOSED POSITIONS (HISTORY)</div>
+            <div class="terminal" id="closed-box">No recent closures.</div>
+        </div>
+
+        <!-- LOGS & AI -->
+        <div class="card col-2"><div class="label">AI BRAIN LOGS</div><div class="terminal" id="ai-box">...</div></div>
+        <div class="card col-2"><div class="label">SYSTEM LOGS</div><div class="terminal" id="mgmt-box">...</div></div>
+    </div>
+
+    <script>
+        let chart = null;
+        const sysStatus = document.getElementById('sys-status');
+        
+        // INIT CHART
+        try {
+            if (typeof Chart !== 'undefined') {
+                const ctx = document.getElementById('chart').getContext('2d');
+                chart = new Chart(ctx, { 
+                    type: 'line', 
+                    data: { 
+                        labels: [], 
+                        datasets: [
+                            { label: 'Equity', data: [], borderColor: '#00ff9d', tension: 0.2, borderWidth: 2, fill: true, backgroundColor: 'rgba(0,255,157,0.05)' },
+                            { label: 'Baseline', data: [], borderColor: '#ff2a6d', borderDash: [5, 5], borderWidth: 1, pointRadius: 0 } 
+                        ] 
+                    }, 
+                    options: { responsive: true, maintainAspectRatio: false, plugins:{legend:{display:true, labels:{color:'#666'}}}, scales:{x:{display:true, grid:{display:false}, ticks:{color:'#444'}}, y:{grid:{color:'#222'}, ticks:{color:'#666'}}} } 
+                });
+            }
+        } catch (e) {}
+        
+        async function update() {
+            // Wallet
+            try {
+                const r = await fetch('/api/wallet');
+                const w = await r.json();
+                document.getElementById('equity').innerText = '$' + (w.equity||0).toFixed(2);
+                document.getElementById('avail').innerText = '$' + (w.availableToWithdraw||0).toFixed(2);
+                sysStatus.innerText = "SYSTEM ONLINE"; sysStatus.style.color = "#00ff9d";
+            } catch(e) { sysStatus.innerText = "CONN ERROR"; sysStatus.style.color = "#ff2a6d"; }
+
+            // Stats
+            try {
+                const s = await fetch('/api/stats').then(r=>r.json());
+                const pnl = s.total_pnl || 0;
+                const pnlEl = document.getElementById('pnl');
+                pnlEl.innerText = (pnl>=0?'+':'') + '$' + pnl.toFixed(2);
+                pnlEl.className = `val ${pnl>=0?'green':'red'}`;
+            } catch(e) {}
+
+            // Positions
+            try {
+                const p = await fetch('/api/positions').then(r=>r.json());
+                const pos = p.active || [];
+                const pb = document.getElementById('pos-box');
+                if(pos.length === 0) pb.innerHTML = '<span style="color:#555; padding:10px;">NO ACTIVE POSITIONS</span>';
+                else {
+                    pb.innerHTML = pos.map(x => `
+                        <div style="border-left:4px solid ${x.pnl>=0?'#00ff9d':'#ff2a6d'}; background:rgba(255,255,255,0.05); padding:10px; border-radius:4px;">
+                            <div style="display:flex; justify-content:space-between;">
+                                <b>${x.symbol} <span style="color:#888; font-size:0.8em">(${x.side})</span></b>
+                                <span style="color:${x.pnl>=0?'#00ff9d':'#ff2a6d'}; font-weight:bold;">${x.pnl.toFixed(2)}$</span>
+                            </div>
+                            <div style="font-size:0.8em; color:#aaa; margin-top:5px;">Size: ${x.size} | Entry: ${x.entry_price}</div>
+                        </div>
+                    `).join('');
+                }
+            } catch(e) {}
+            
+            // Logs & Closed
+            try {
+                const mgmt = await fetch('/api/mgmt').then(r=>r.json());
+                if(mgmt.logs) document.getElementById('mgmt-box').innerHTML = mgmt.logs.map(l=>`<div class="log-entry"><small>${l.time}</small> <b style="color:#00ff9d">${l.pair}</b>: ${l.action}</div>`).join('');
+                
+                if(mgmt.closed && mgmt.closed.length > 0) {
+                    document.getElementById('closed-box').innerHTML = mgmt.closed.map(c=>`
+                        <div class="log-entry">
+                            <span style="color:${c.style==='green'?'#00ff9d':(c.style==='red'?'#ff2a6d':'#888')}">●</span> 
+                            <b>${c.pair}</b>: ${c.action} <span style="float:right; font-size:0.8em; color:#666">${c.time}</span>
+                        </div>
+                    `).join('');
+                }
+                
+                const ai = await fetch('/api/ai').then(r=>r.json());
+                if(ai.decisions) {
+                     let h=''; for(const [k,v] of Object.entries(ai.decisions)) h+=`<div class="log-entry"><b style="color:#00f3ff">${k}</b>: ${v.decision}<br><small style="color:#aaa">${v.reasoning}</small></div>`;
+                     document.getElementById('ai-box').innerHTML = h;
+                }
+            } catch(e) {}
+
+            // Chart
+            try {
+                if(chart) {
+                    const h = await fetch('/api/history').then(r=>r.json());
+
+server.py: NOT FOUND
+run.py: NOT FOUND
+wsgi.py: NOT FOUND
+asgi.py: NOT FOUND
+__main__.py: NOT FOUND
+mitragliere_terminal.py: NOT FOUND
+
+== Packaging / config files (if present) ==
+pyproject.toml: NOT FOUND
+setup.py: NOT FOUND
+setup.cfg: NOT FOUND
+requirements.txt: NOT FOUND
+Pipfile: NOT FOUND
+Pipfile.lock: NOT FOUND
+runtime.txt: NOT FOUND
+
+== Docker / deploy files ==
+--- Dockerfile (first 200 lines) ---
+FROM python:3.10-slim
+
+WORKDIR /app
+
+# Installiamo git e libgomp1 (per Prophet)
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    curl \
+    git \
+    libgomp1 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copiamo i requirements
+COPY requirements.txt .
+
+# Aggiorniamo pip e installiamo le dipendenze
+RUN pip install --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt
+
+# Copiamo il codice
+COPY . .
+
+# Creiamo cartelle dati
+RUN mkdir -p /app/data /app/logs
+
+# Healthcheck
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD curl -f http://localhost:8000/health || exit 1
+
+CMD ["python", "main.py"]
+
+--- docker-compose.yml (first 200 lines) ---
+services:
+  technical-analyzer-agent:
+    build: ./agents/01_technical_analyzer
+    container_name: technical-analyzer-agent
+    ports:
+      - "8001:8000"
+    env_file: .env
+    restart: always
+
+  fibonacci-cyclical-agent:
+    build: ./agents/03_fibonacci_agent
+    container_name: fibonacci-cyclical-agent
+    ports:
+      - "8003:8000"
+    env_file: .env
+    restart: always
+
+  master-ai-agent:
+    build: ./agents/04_master_ai_agent
+    container_name: master-ai-agent
+    ports:
+      - "8004:8000"
+    env_file: .env
+    restart: always
+
+  gann-analyzer-agent:
+    build: ./agents/05_gann_analyzer_agent
+    container_name: gann-analyzer-agent
+    ports:
+      - "8005:8000"
+    env_file: .env
+    restart: always
+
+  news-sentiment-agent:
+    build: ./agents/06_news_sentiment_agent
+    container_name: news-sentiment-agent
+    ports:
+      - "8006:8000"
+    env_file: .env
+    restart: always
+
+  position-manager-agent:
+    build: ./agents/07_position_manager
+    container_name: position-manager-agent
+    ports:
+      - "8007:8000"
+    env_file: .env
+    restart: always
+
+  dashboard:
+    build: ./dashboard
+    container_name: dashboard
+    ports:
+      - "8080:8080"
+    environment:
+      - PYTHONUNBUFFERED=1
+    env_file: .env
+    restart: always
+
+Procfile: NOT FOUND
+.streamlit/config.toml: NOT FOUND
+
+== Github Actions workflows (list and head) ==
+.github/workflows: NOT FOUND
+
+== List top-level directories (common src/app folders) ==
+src: NOT FOUND
+app: NOT FOUND
+mitragliere: NOT FOUND
+server: NOT FOUND
+web: NOT FOUND
+backend: NOT FOUND
+frontend: NOT FOUND
+
+== Search for references (streamlit, mitragliere_terminal, 'streamlit run') ==
+
+== Search for 'entrypoint' or console_scripts in packaging files ==
+
+== Check for Procfile or Docker CMD/ENTRYPOINT lines referencing streamlit ==
+--- Dockerfile CMD/ENTRYPOINT lines ---
+
+== Check .env or env files (only list names, do NOT print secrets) ==
+.env: FOUND (not printing contents for safety)
+env: NOT FOUND
+.env.example: FOUND (not printing contents for safety)
+
+== End of inspection ==

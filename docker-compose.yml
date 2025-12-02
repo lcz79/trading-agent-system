@@ -1,51 +1,83 @@
 services:
-  technical-analyzer-agent:
+  01_technical_analyzer:
     build: ./agents/01_technical_analyzer
-    container_name: technical-analyzer-agent
+    container_name: 01_technical_analyzer
     ports:
       - "8001:8000"
     env_file: .env
     restart: always
+    networks:
+      - trading-network
 
-  fibonacci-cyclical-agent:
+  03_fibonacci_agent:
     build: ./agents/03_fibonacci_agent
-    container_name: fibonacci-cyclical-agent
+    container_name: 03_fibonacci_agent
     ports:
       - "8003:8000"
     env_file: .env
     restart: always
+    networks:
+      - trading-network
 
-  master-ai-agent:
+  04_master_ai_agent:
     build: ./agents/04_master_ai_agent
-    container_name: master-ai-agent
+    container_name: 04_master_ai_agent
     ports:
       - "8004:8000"
     env_file: .env
     restart: always
+    networks:
+      - trading-network
 
-  gann-analyzer-agent:
+  05_gann_analyzer_agent:
     build: ./agents/05_gann_analyzer_agent
-    container_name: gann-analyzer-agent
+    container_name: 05_gann_analyzer_agent
     ports:
       - "8005:8000"
     env_file: .env
     restart: always
+    networks:
+      - trading-network
 
-  news-sentiment-agent:
+  06_news_sentiment_agent:
     build: ./agents/06_news_sentiment_agent
-    container_name: news-sentiment-agent
+    container_name: 06_news_sentiment_agent
     ports:
       - "8006:8000"
     env_file: .env
     restart: always
+    networks:
+      - trading-network
 
-  position-manager-agent:
+  07_position_manager:
     build: ./agents/07_position_manager
-    container_name: position-manager-agent
+    container_name: 07_position_manager
     ports:
       - "8007:8000"
     env_file: .env
     restart: always
+    networks:
+      - trading-network
+
+  08_forecaster_agent:
+    build: ./agents/08_forecaster_agent
+    container_name: 08_forecaster_agent
+    ports:
+      - "8008:8000"
+    env_file: .env
+    restart: always
+    networks:
+      - trading-network
+
+  orchestrator:
+    build: ./agents/orchestrator
+    container_name: orchestrator
+    environment:
+      - PYTHONUNBUFFERED=1
+    env_file: .env
+    restart: always
+    networks:
+      - trading-network
 
   dashboard:
     build: ./dashboard
@@ -56,3 +88,9 @@ services:
       - PYTHONUNBUFFERED=1
     env_file: .env
     restart: always
+    networks:
+      - trading-network
+
+networks:
+  trading-network:
+    driver: bridge

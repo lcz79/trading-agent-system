@@ -1,136 +1,147 @@
 import os
 import json
-import time
-import requests
-from fastapi import FastAPI
-from pydantic import BaseModel
-from typing import Dict, Any, List
+import logging
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel, field_validator
+from typing import Dict, Any, List, Literal
 from openai import OpenAI
-# from forecaster import get_crypto_forecasts # DISABILITATO TEMP
+
+# Configurazione Logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("MasterAI")
 
 app = FastAPI()
 
-OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+if not OPENAI_API_KEY:
+    raise RuntimeError("OPENAI_API_KEY non impostata nell'ambiente")
+
 client = OpenAI(api_key=OPENAI_API_KEY)
 
-AGENTS = {
-    "technical": "http://technical-analyzer-agent:8000/analyze_multi_tf",
-    "fibonacci": "http://fibonacci-cyclical-agent:8000/analyze_fib",
-    "sentiment": "http://news-sentiment-agent:8000/analyze_sentiment",
-    "gann": "http://gann-analyzer-agent:8000/analyze_gann"
-}
+# --- MODELLI DATI E SICUREZZA ---
+class Decision(BaseModel):
+    symbol: str
+    # AGGIUNTO "CLOSE" PER PERMETTERE ALL'AI DI USCIRE DAI TRADE
+    action: Literal["OPEN_LONG", "OPEN_SHORT", "HOLD", "CLOSE"]
+    leverage: float
+    size_pct: float
+    rationale: str
 
-class BatchTradeRequest(BaseModel):
-    symbols: List[str]
-    portfolio: Dict[str, Any]
+    @field_validator("leverage")
+    @classmethod
+    def clamp_leverage(cls, v: float) -> float:
+        # SICUREZZA: Forza la leva tra 1x e 10x anche se l'AI sbaglia
+        if v < 1: return 1
+        if v > 10: return 10
+        return v
 
-def get_agent_data(name, url, payload):
+    @field_validator("size_pct")
+    @classmethod
+    def clamp_size_pct(cls, v: float) -> float:
+        # SICUREZZA: Mai rischiare più del 20% del wallet su un singolo trade
+        if v < 0: return 0
+        if v > 0.2: return 0.2
+        return v
+
+class AnalysisPayload(BaseModel):
+    global_data: Dict[str, Any]
+    assets_data: Dict[str, Any]
+
+# --- PROMPT AGENTE ALPHA HUNTER ---
+SYSTEM_PROMPT = """
+Sei il CAPO TRADER di un Hedge Fund Algoritmico.
+Il tuo obiettivo è generare ALPHA (profitto), non solo evitare rischi.
+
+FILOSOFIA DI TRADING:
+1. Non cercare la perfezione: i mercati sono caotici, non servono conferme al 100%.
+2. Pesa le probabilità: se alcuni segnali sono contrari al trend principale, puoi valutare scalp contro-trend.
+3. Timeframe Mastery:
+   - Se il 4H è confuso ma il 15m mostra un setup pulito -> valuta uno SCALP.
+   - Se il 4H è direzionale e il 15m è allineato -> valuta uno SWING con più size.
+4. Gestione Posizioni:
+   - Se hai posizioni aperte che stanno invalidando la tesi -> NON ESITARE A DARE ORDINE "CLOSE".
+
+FORMATO OUTPUT JSON (TASSATIVO):
+Devi fornire un oggetto JSON con:
+- "reasoning_chain": Una spiegazione strategica (Pensiero ad alta voce).
+- "analysis_summary": Sintesi operativa brevissima.
+- "decisions": Una lista di oggetti decisione.
+
+Le azioni valide sono: "OPEN_LONG", "OPEN_SHORT", "HOLD", "CLOSE".
+"""
+
+@app.post("/decide_batch")
+def decide_batch(payload: AnalysisPayload):
+    logger.info("🧠 MASTER AI: Valutazione opportunità in corso...")
+
+    # Log sintetico per debug
     try:
-        response = requests.post(url, json=payload, timeout=4)
-        if response.status_code == 200:
-            return response.json()
-        return {"error": "N/A"}
-    except:
-        return {"error": "Timeout"}
+        asset_list = list(payload.assets_data.keys())
+    except Exception:
+        asset_list = []
+    logger.info(f"Asset sotto esame: {asset_list}")
 
-def load_system_prompt():
-    try:
-        with open("formatted_system_prompt.txt", "r") as f: return f.read()
-    except: return "You are a crypto AI. Output JSON."
+    # Serializzazione efficiente
+    data_str = json.dumps(payload.dict(), separators=(",", ":"), ensure_ascii=False)
 
-def call_gpt_batch(prompt):
+    full_prompt = f"""
+Analizza i seguenti dati di mercato (globali + per asset).
+Cerca opportunità concrete (SCALP o SWING), senza paralisi da analisi.
+
+DATI:
+{data_str}
+
+Ricorda: Prima il ragionamento ('reasoning_chain'), poi la decisione.
+"""
+
     try:
         response = client.chat.completions.create(
-            model="gpt-5.1",
-            messages=[{"role": "user", "content": prompt}],
-            # Niente extra_body per evitare errori
-            response_format={
-                "type": "json_schema",
-                "json_schema": {
-                    "name": "portfolio_decision",
-                    "strict": True,
-                    "schema": {
-                        "type": "object",
-                        "properties": {
-                            "trades": {
-                                "type": "array",
-                                "items": {
-                                    "type": "object",
-                                    "properties": {
-                                        "symbol": {"type": "string", "enum": ["BTC", "ETH", "SOL"]},
-                                        "operation": {"type": "string", "enum": ["open", "close", "hold"]},
-                                        "direction": {"type": "string", "enum": ["long", "short"]},
-                                        "target_portion_of_balance": {"type": "number"},
-                                        "leverage": {"type": "number"},
-                                        "reason": {"type": "string"}
-                                    },
-                                    "required": ["symbol", "operation", "direction", "target_portion_of_balance", "leverage", "reason"],
-                                    "additionalProperties": False
-                                }
-                            }
-                        },
-                        "required": ["trades"],
-                        "additionalProperties": False
-                    }
-                }
-            }
+            model="gpt-5.1", # TUA CONFIGURAZIONE ESPLICITA
+            messages=[
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": full_prompt},
+            ],
+            response_format={"type": "json_object"},
+            temperature=0.5, # Bilanciamento creatività/logica
         )
-        return json.loads(response.choices[0].message.content)
+
+        resp_content = response.choices[0].message.content
+
+        try:
+            decision_json = json.loads(resp_content)
+        except json.JSONDecodeError as e:
+            logger.error(f"JSON non valido dall'AI: {e}")
+            raise HTTPException(status_code=502, detail="Risposta AI malformata")
+
+        reasoning_chain = decision_json.get("reasoning_chain", "Nessun ragionamento fornito.")
+        analysis_summary = decision_json.get("analysis_summary", "Nessuna sintesi.")
+        raw_decisions = decision_json.get("decisions", [])
+
+        # --- LOG DEL PENSIERO (Fondamentale per capire l'AI) ---
+        logger.info(f"\n🧠 STRATEGIA AI (GPT-5.1):\n{reasoning_chain[:1500]}...\n------------------------")
+
+        # Validazione decisioni con Pydantic (Clamping automatico)
+        decisions: List[Decision] = []
+        for d in raw_decisions:
+            try:
+                validated_d = Decision(**d)
+                decisions.append(validated_d)
+            except Exception as e:
+                logger.warning(f"⚠️ Decisione scartata per errore validazione: {e} | Dati: {d}")
+
+        return {
+            "analysis": analysis_summary,
+            "decisions": [d.model_dump() for d in decisions],
+            "full_thought": reasoning_chain # Utile per debug futuri
+        }
+
+    except HTTPException:
+        raise
     except Exception as e:
-        print(f"GPT Error: {e}")
-        return {"trades": [], "error": str(e)}
+        logger.error(f"Errore critico AI: {e}")
+        raise HTTPException(status_code=500, detail=f"Errore interno Master AI: {str(e)}")
 
-@app.post("/execute_batch_strategy")
-def execute_batch(req: BatchTradeRequest):
-    print(f"🧠 RIZZO MASTER: Safe Mode Analysis for {req.symbols}...")
-    
-    indicators_txt = ""
-    for sym in req.symbols:
-        clean_sym = sym.replace("USDT", "")
-        payload = {"symbol": clean_sym + "USDT"}
-        
-        # Raccolta Dati Tecnici (Leggeri)
-        tech = get_agent_data("Technical", AGENTS["technical"], payload)
-        fib = get_agent_data("Fibonacci", AGENTS["fibonacci"], payload)
-        gann = get_agent_data("Gann", AGENTS["gann"], payload)
-        
-        indicators_txt += f"""
-        === {clean_sym} DATA ===
-        TECHNICAL: {json.dumps(tech)}
-        FIBONACCI: {json.dumps(fib)}
-        GANN: {json.dumps(gann)}
-        ------------------------
-        """
-    
-    sent_payload = {"symbol": "BTCUSDT"} 
-    sentiment_json = get_agent_data("Sentiment", AGENTS["sentiment"], sent_payload)
-    
-    # MOCK FORECAST (Per evitare crash Prophet)
-    forecasts_txt = "Forecast data temporarily unavailable. Focus on Technicals."
-
-    msg_info = f"""<indicatori>\n{indicators_txt}\n</indicatori>\n\n
-    <sentiment>\n{json.dumps(sentiment_json)}\n</sentiment>\n\n
-    <forecast>\n{forecasts_txt}\n</forecast>\n\n"""
-
-    final_prompt = f"""
-    {load_system_prompt()}
-    
-    INSTRUCTIONS:
-    1. Analyze the technical data for ALL assets.
-    2. THINK DEEPLY about the setup.
-    3. Output a JSON list of decisions.
-    
-    PORTFOLIO: {json.dumps(req.portfolio)}
-    
-    {msg_info}
-    """
-
-    print("🚀 Sending Signal to GPT-5.1 (Safe Mode)...")
-    return call_gpt_batch(final_prompt)
 
 @app.get("/health")
-def health(): return {"status": "active"}
-
-# Endpoint fantasma per zittire i 404 della Dashboard
-@app.get("/latest_reasoning")
-def reason(): return {"status": "ok"}
+def health():
+    return {"status": "active", "mode": "ALPHA_HUNTER_SAFEGUARDED"}
