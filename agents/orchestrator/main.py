@@ -1,21 +1,14 @@
-import asyncio, httpx, time
+import asyncio, httpx, json
 from datetime import datetime
 
-# URL CORRETTI
 URLS = {
     "tech": "http://01_technical_analyzer:8000",
-    "fc": "http://08_forecaster_agent:8000",
-    "fib": "http://03_fibonacci_agent:8000",
-    "gann": "http://05_gann_analyzer_agent:8000",
-    "sent": "http://06_news_sentiment_agent:8000",
     "pos": "http://07_position_manager:8000",
     "ai": "http://04_master_ai_agent:8000"
 }
-
 SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
 
 async def manage_cycle():
-    """Controlla Stop Loss/Take Profit matematici (ATR)"""
     async with httpx.AsyncClient() as c:
         try: await c.post(f"{URLS['pos']}/manage_active_positions", timeout=5)
         except: pass
@@ -23,87 +16,88 @@ async def manage_cycle():
 async def analysis_cycle():
     print(f"\n[{datetime.now().strftime('%H:%M')}] 🧠 AI SCAN START")
     async with httpx.AsyncClient(timeout=60) as c:
-        # 1. Dati Portafoglio
+        
+        # 1. DATA COLLECTION
+        portfolio = {}
+        active_symbols = []
         try:
-            glob = await asyncio.gather(
+            # Fetch parallelo
+            r_bal, r_pos = await asyncio.gather(
                 c.get(f"{URLS['pos']}/get_wallet_balance"),
                 c.get(f"{URLS['pos']}/get_open_positions"),
                 return_exceptions=True
             )
-            portfolio = glob[0].json() if hasattr(glob[0], 'json') else {}
-            raw_pos = glob[1].json() if hasattr(glob[1], 'json') else {}
-            
-            # Parsing sicuro
-            active_symbols = raw_pos.get('active', [])
-            if isinstance(raw_pos, list): active_symbols = []
+            if hasattr(r_bal, 'json'): portfolio = r_bal.json()
+            if hasattr(r_pos, 'json'): 
+                d = r_pos.json()
+                active_symbols = d.get('active', []) if isinstance(d, dict) else []
             
             print(f"ℹ️  Wallet: {portfolio.get('equity', 0)}$ | Active: {active_symbols}")
-            
-            # MONEY SAVER: Se siamo pieni su tutti i simboli, inutile chiamare l'AI
-            if all(s in active_symbols for s in SYMBOLS):
-                print("💰 Tutte le posizioni occupate. Skip AI Analysis.")
-                return
 
-        except Exception as e: 
-            print(f"Error fetch global: {e}")
+        except Exception as e:
+            print(f"⚠️ Data Error: {e}")
             return
 
-        # 2. Analisi Tecnica Asset (Solo per quelli liberi)
-        assets = {}
-        for s in SYMBOLS:
-            if s in active_symbols: continue # Non analizziamo se siamo già dentro
-            
+        # 2. FILTER
+        scan_list = [s for s in SYMBOLS if s not in active_symbols]
+        if not scan_list:
+            print("💰 Full Portfolio. Skip.")
+            return
+
+        # 3. TECH ANALYSIS
+        assets_data = {}
+        for s in scan_list:
             try:
-                tech = (await c.post(f"{URLS['tech']}/analyze_multi_tf", json={"symbol": s})).json()
-                assets[s] = {"tech": tech}
+                t = (await c.post(f"{URLS['tech']}/analyze_multi_tf", json={"symbol": s})).json()
+                assets_data[s] = {"tech": t}
             except: pass
-
-        if not assets:
-            print("✅ Nessun asset libero da analizzare.")
-            return
-
-        # 3. Chiamata AI
-        payload = {
-            "global_data": {"portfolio": portfolio, "already_open": active_symbols}, 
-            "assets_data": assets
-        }
         
-        print(f"🚀 Asking Master AI about {list(assets.keys())}...")
+        if not assets_data: return
+
+        # 4. AI DECISION
+        print(f"🚀 Asking AI about {list(assets_data.keys())}...")
         try:
-            resp = await c.post(f"{URLS['ai']}/decide_batch", json=payload, timeout=120)
-            dec = resp.json()
-            print(f"🤖 Analysis: {dec.get('analysis')}")
+            resp = await c.post(f"{URLS['ai']}/decide_batch", json={
+                "global_data": {"portfolio": portfolio, "already_open": active_symbols},
+                "assets_data": assets_data
+            }, timeout=120)
             
-            for d in dec.get('decisions', []):
+            dec_data = resp.json()
+            analysis_text = dec_data.get('analysis', 'No text')
+            decisions_list = dec_data.get('decisions', [])
+
+            print(f"🤖 AI Says: {analysis_text}")
+            print(f"📋 AI Orders List: {decisions_list}") # DEBUG CRUCIALE
+
+            if not decisions_list:
+                print("⚠️ AI non ha generato ordini JSON nonostante l'analisi.")
+
+            # 5. EXECUTION
+            for d in decisions_list:
                 sym = d['symbol']
                 action = d['action']
                 
-                # --- MODIFICA FONDAMENTALE ---
                 if action == "CLOSE":
-                    # L'AI vorrebbe chiudere, ma noi GLIELO VIETIAMO.
-                    # Lasciamo correre i profitti (Let Winners Run).
-                    print(f"🛡️ AI voleva chiudere {sym} (Take Profit anticipato), ma AUTO-CLOSE è DISABILITATO. HOLDING.")
-                    continue 
-                # -----------------------------
-                
-                elif action in ["OPEN_LONG", "OPEN_SHORT"]:
-                    if sym in active_symbols: continue
-                    
-                    print(f"🔥 EXECUTING OPEN: {sym} {action}")
-                    await c.post(f"{URLS['pos']}/open_position", json={
+                    print(f"🛡️ Ignorato CLOSE su {sym} (Auto-Close Disabled)")
+                    continue
+
+                if action in ["OPEN_LONG", "OPEN_SHORT"]:
+                    print(f"🔥 EXECUTING {action} on {sym}...")
+                    res = await c.post(f"{URLS['pos']}/open_position", json={
                         "symbol": sym,
                         "side": action,
                         "leverage": d.get('leverage', 5),
-                        "size_pct": d.get('size_pct', 0.1)
+                        "size_pct": d.get('size_pct', 0.15)
                     })
+                    print(f"✅ Result: {res.json()}")
 
-        except Exception as e: print(f"AI Err: {e}")
+        except Exception as e: print(f"❌ AI/Exec Error: {e}")
 
 async def main_loop():
     while True:
-        await manage_cycle() # Gestione Stop Loss
-        await analysis_cycle() # Nuove entrate
-        await asyncio.sleep(900) # 15 min
+        await manage_cycle()
+        await analysis_cycle()
+        await asyncio.sleep(900)
 
 if __name__ == "__main__":
     asyncio.run(main_loop())

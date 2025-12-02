@@ -1,147 +1,110 @@
 import os
 import json
 import logging
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI
 from pydantic import BaseModel, field_validator
-from typing import Dict, Any, List, Literal
+from typing import Dict, Any, Literal, Optional
 from openai import OpenAI
 
-# Configurazione Logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("MasterAI")
 
 app = FastAPI()
-
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-if not OPENAI_API_KEY:
-    raise RuntimeError("OPENAI_API_KEY non impostata nell'ambiente")
-
 client = OpenAI(api_key=OPENAI_API_KEY)
 
-# --- MODELLI DATI E SICUREZZA ---
 class Decision(BaseModel):
     symbol: str
-    # AGGIUNTO "CLOSE" PER PERMETTERE ALL'AI DI USCIRE DAI TRADE
     action: Literal["OPEN_LONG", "OPEN_SHORT", "HOLD", "CLOSE"]
-    leverage: float
-    size_pct: float
+    leverage: float = 1.0  
+    size_pct: float = 0.0
     rationale: str
 
+    # Validator permissivi
     @field_validator("leverage")
-    @classmethod
-    def clamp_leverage(cls, v: float) -> float:
-        # SICUREZZA: Forza la leva tra 1x e 10x anche se l'AI sbaglia
-        if v < 1: return 1
-        if v > 10: return 10
-        return v
-
+    def clamp_lev(cls, v): return max(1.0, min(v, 10.0))
+    
     @field_validator("size_pct")
-    @classmethod
-    def clamp_size_pct(cls, v: float) -> float:
-        # SICUREZZA: Mai rischiare più del 20% del wallet su un singolo trade
-        if v < 0: return 0
-        if v > 0.2: return 0.2
-        return v
+    def clamp_size(cls, v): return max(0.05, min(v, 0.25)) # Min 5% - Max 25%
 
 class AnalysisPayload(BaseModel):
     global_data: Dict[str, Any]
     assets_data: Dict[str, Any]
 
-# --- PROMPT AGENTE ALPHA HUNTER ---
 SYSTEM_PROMPT = """
-Sei il CAPO TRADER di un Hedge Fund Algoritmico.
-Il tuo obiettivo è generare ALPHA (profitto), non solo evitare rischi.
+Sei un TRADER ALGORITMICO AGGRESSIVO.
+Il tuo compito non è solo analizzare, è ESEGUIRE.
 
-FILOSOFIA DI TRADING:
-1. Non cercare la perfezione: i mercati sono caotici, non servono conferme al 100%.
-2. Pesa le probabilità: se alcuni segnali sono contrari al trend principale, puoi valutare scalp contro-trend.
-3. Timeframe Mastery:
-   - Se il 4H è confuso ma il 15m mostra un setup pulito -> valuta uno SCALP.
-   - Se il 4H è direzionale e il 15m è allineato -> valuta uno SWING con più size.
-4. Gestione Posizioni:
-   - Se hai posizioni aperte che stanno invalidando la tesi -> NON ESITARE A DARE ORDINE "CLOSE".
+REGOLE CRITICHE:
+1. Se l'analisi è "Bullish" e non hai posizioni -> DEVI ordinare "OPEN_LONG".
+2. Se l'analisi è "Bearish" e non hai posizioni -> DEVI ordinare "OPEN_SHORT".
+3. NON dire "consiglio di aprire" senza mettere l'ordine nel JSON. FALLO.
+4. Leva consigliata: 5x - 7x per Scalp.
+5. Size consigliata: 0.15 (15% del wallet) per trade.
 
-FORMATO OUTPUT JSON (TASSATIVO):
-Devi fornire un oggetto JSON con:
-- "reasoning_chain": Una spiegazione strategica (Pensiero ad alta voce).
-- "analysis_summary": Sintesi operativa brevissima.
-- "decisions": Una lista di oggetti decisione.
-
-Le azioni valide sono: "OPEN_LONG", "OPEN_SHORT", "HOLD", "CLOSE".
+FORMATO RISPOSTA JSON OBBLIGATORIO:
+{
+  "analysis_summary": "Breve sintesi del perché",
+  "decisions": [
+    { 
+      "symbol": "ETHUSDT", 
+      "action": "OPEN_LONG", 
+      "leverage": 5.0, 
+      "size_pct": 0.15, 
+      "rationale": "RSI basso su supporto" 
+    }
+  ]
+}
 """
 
 @app.post("/decide_batch")
 def decide_batch(payload: AnalysisPayload):
-    logger.info("🧠 MASTER AI: Valutazione opportunità in corso...")
-
-    # Log sintetico per debug
     try:
-        asset_list = list(payload.assets_data.keys())
-    except Exception:
-        asset_list = []
-    logger.info(f"Asset sotto esame: {asset_list}")
-
-    # Serializzazione efficiente
-    data_str = json.dumps(payload.dict(), separators=(",", ":"), ensure_ascii=False)
-
-    full_prompt = f"""
-Analizza i seguenti dati di mercato (globali + per asset).
-Cerca opportunità concrete (SCALP o SWING), senza paralisi da analisi.
-
-DATI:
-{data_str}
-
-Ricorda: Prima il ragionamento ('reasoning_chain'), poi la decisione.
-"""
-
-    try:
-        response = client.chat.completions.create(
-            model="gpt-5.1", # TUA CONFIGURAZIONE ESPLICITA
-            messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": full_prompt},
-            ],
-            response_format={"type": "json_object"},
-            temperature=0.5, # Bilanciamento creatività/logica
-        )
-
-        resp_content = response.choices[0].message.content
-
-        try:
-            decision_json = json.loads(resp_content)
-        except json.JSONDecodeError as e:
-            logger.error(f"JSON non valido dall'AI: {e}")
-            raise HTTPException(status_code=502, detail="Risposta AI malformata")
-
-        reasoning_chain = decision_json.get("reasoning_chain", "Nessun ragionamento fornito.")
-        analysis_summary = decision_json.get("analysis_summary", "Nessuna sintesi.")
-        raw_decisions = decision_json.get("decisions", [])
-
-        # --- LOG DEL PENSIERO (Fondamentale per capire l'AI) ---
-        logger.info(f"\n🧠 STRATEGIA AI (GPT-5.1):\n{reasoning_chain[:1500]}...\n------------------------")
-
-        # Validazione decisioni con Pydantic (Clamping automatico)
-        decisions: List[Decision] = []
-        for d in raw_decisions:
-            try:
-                validated_d = Decision(**d)
-                decisions.append(validated_d)
-            except Exception as e:
-                logger.warning(f"⚠️ Decisione scartata per errore validazione: {e} | Dati: {d}")
-
-        return {
-            "analysis": analysis_summary,
-            "decisions": [d.model_dump() for d in decisions],
-            "full_thought": reasoning_chain # Utile per debug futuri
+        # Semplificazione dati per prompt
+        assets_summary = {}
+        for k, v in payload.assets_data.items():
+            t = v.get('tech', {})
+            assets_summary[k] = {
+                "price": t.get('price'),
+                "rsi_7": t.get('rsi'), # Usiamo RSI veloce
+                "trend": t.get('trend'),
+                "macd": t.get('macd_hist')
+            }
+            
+        prompt_data = {
+            "wallet_equity": payload.global_data.get('portfolio', {}).get('equity'),
+            "active_positions": payload.global_data.get('already_open', []),
+            "market_data": assets_summary
         }
 
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Errore critico AI: {e}")
-        raise HTTPException(status_code=500, detail=f"Errore interno Master AI: {str(e)}")
+        response = client.chat.completions.create(
+            model="gpt-5.1", 
+            messages=[
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": f"ANALIZZA E AGISCI: {json.dumps(prompt_data)}"},
+            ],
+            response_format={"type": "json_object"},
+            temperature=0.7, # Più creatività = più trade
+        )
 
+        content = response.choices[0].message.content
+        logger.info(f"AI Raw Response: {content}") # Debug nel log
+        
+        decision_json = json.loads(content)
+        
+        valid_decisions = []
+        for d in decision_json.get("decisions", []):
+            try: valid_decisions.append(Decision(**d))
+            except Exception as e: logger.warning(f"Invalid decision: {e}")
+
+        return {
+            "analysis": decision_json.get("analysis_summary", "No analysis"),
+            "decisions": [d.model_dump() for d in valid_decisions]
+        }
+
+    except Exception as e:
+        logger.error(f"AI Critical Error: {e}")
+        return {"analysis": "Error", "decisions": []}
 
 @app.get("/health")
-def health():
-    return {"status": "active", "mode": "ALPHA_HUNTER_SAFEGUARDED"}
+def health(): return {"status": "active"}
