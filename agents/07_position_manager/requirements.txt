@@ -1,3 +1,7 @@
 fastapi
 uvicorn
-pybit
+requests
+pydantic
+ccxt
+pandas
+numpy
