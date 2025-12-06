@@ -1,4 +1,6 @@
-streamlit
-requests
-pandas
-plotly
+streamlit==1.31.0
+pandas==2.2.0
+pybit==5.5.0
+python-dotenv==1.0.1
+plotly==5.18.0
+watchdog
