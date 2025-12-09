@@ -12,6 +12,10 @@ URLS = {
 }
 SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
 
+# Timing configuration
+MONITOR_CYCLE_SECONDS = 60  # Position monitoring every 60 seconds
+ANALYSIS_CYCLES_COUNT = 15  # Run full analysis every 15 cycles (15 minutes)
+
 # Reverse strategy configuration
 ENABLE_REVERSE = os.getenv('ENABLE_REVERSE_STRATEGY', 'true').lower() == 'true'
 REVERSE_LOSS_THRESHOLD_PCT = float(os.getenv('REVERSE_LOSS_THRESHOLD_PCT', '2.0'))
@@ -212,18 +216,18 @@ async def main_loop():
         # Always manage positions and check for reverses (every 60 seconds)
         await manage_cycle()
         
-        # Run full analysis cycle every 15 minutes (900 seconds / 60 = 15 iterations)
+        # Run full analysis cycle every ANALYSIS_CYCLES_COUNT iterations
         analysis_counter += 1
-        if analysis_counter >= 15:
+        if analysis_counter >= ANALYSIS_CYCLES_COUNT:
             await analysis_cycle()
             analysis_counter = 0
         
-        await asyncio.sleep(60)  # 60 second cycle
+        await asyncio.sleep(MONITOR_CYCLE_SECONDS)
 
 if __name__ == "__main__":
     print("🚀 Trading Orchestrator Starting...")
-    print(f"   - Position monitoring: every 60 seconds")
-    print(f"   - Full analysis: every 15 minutes")
+    print(f"   - Position monitoring: every {MONITOR_CYCLE_SECONDS} seconds")
+    print(f"   - Full analysis: every {ANALYSIS_CYCLES_COUNT * MONITOR_CYCLE_SECONDS} seconds ({ANALYSIS_CYCLES_COUNT} cycles)")
     print(f"   - Reverse strategy: {'ENABLED' if ENABLE_REVERSE else 'DISABLED'}")
     print(f"   - Reverse threshold: {REVERSE_LOSS_THRESHOLD_PCT}%")
     print(f"   - Recovery multiplier: {REVERSE_RECOVERY_MULTIPLIER}x")

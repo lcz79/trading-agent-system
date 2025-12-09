@@ -15,6 +15,7 @@ app = FastAPI()
 # --- CONFIGURAZIONE ---
 HISTORY_FILE = "equity_history.json"
 DB_PATH = os.getenv('DB_PATH', './data/trading_history.db')
+DATA_DIR = './data'  # Default data directory for database files
 API_KEY = os.getenv('BYBIT_API_KEY')
 API_SECRET = os.getenv('BYBIT_API_SECRET')
 IS_TESTNET = os.getenv('BYBIT_TESTNET', 'false').lower() == 'true'
@@ -35,8 +36,8 @@ def init_database():
     if db_dir and not os.path.exists(db_dir):
         os.makedirs(db_dir, exist_ok=True)
     elif not db_dir:
-        # If DB_PATH has no directory component, ensure current directory is writable
-        os.makedirs('./data', exist_ok=True)
+        # If DB_PATH has no directory component, ensure data directory exists
+        os.makedirs(DATA_DIR, exist_ok=True)
     
     with db_lock:
         conn = sqlite3.connect(DB_PATH)
@@ -476,7 +477,8 @@ def reverse_position(req: ReverseRequest):
         # Save to database
         close_time = datetime.now()
         # Note: open_time_ts from Bybit is in milliseconds, so we divide by 1000
-        duration_seconds = int((close_time.timestamp() - open_time_ts/1000)) if open_time_ts else 0
+        open_time_seconds = open_time_ts / 1000 if open_time_ts else 0
+        duration_seconds = int((close_time.timestamp() - open_time_seconds)) if open_time_seconds else 0
         
         save_closed_position({
             'symbol': raw_sym,
@@ -488,7 +490,7 @@ def reverse_position(req: ReverseRequest):
             'pnl': pnl,
             'pnl_percentage': pnl_pct,
             'duration_seconds': duration_seconds,
-            'open_time': datetime.fromtimestamp(open_time_ts/1000).isoformat() if open_time_ts else close_time.isoformat(),
+            'open_time': datetime.fromtimestamp(open_time_seconds).isoformat() if open_time_seconds else close_time.isoformat(),
             'close_time': close_time.isoformat(),
             'close_reason': 'REVERSE_STRATEGY',
             'was_reversed': True,
@@ -610,7 +612,8 @@ def close_position(req: CloseRequest):
         # Save to database
         close_time = datetime.now()
         # Note: open_time_ts from Bybit is in milliseconds, so we divide by 1000
-        duration_seconds = int((close_time.timestamp() - open_time_ts/1000)) if open_time_ts else 0
+        open_time_seconds = open_time_ts / 1000 if open_time_ts else 0
+        duration_seconds = int((close_time.timestamp() - open_time_seconds)) if open_time_seconds else 0
         
         save_closed_position({
             'symbol': raw_sym,
@@ -622,7 +625,7 @@ def close_position(req: CloseRequest):
             'pnl': pnl,
             'pnl_percentage': pnl_pct,
             'duration_seconds': duration_seconds,
-            'open_time': datetime.fromtimestamp(open_time_ts/1000).isoformat() if open_time_ts else close_time.isoformat(),
+            'open_time': datetime.fromtimestamp(open_time_seconds).isoformat() if open_time_seconds else close_time.isoformat(),
             'close_time': close_time.isoformat(),
             'close_reason': 'MANUAL_CLOSE',
             'was_reversed': False,

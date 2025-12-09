@@ -120,15 +120,24 @@ def decide_batch(payload: AnalysisPayload):
             "learning_insights": learning_insights
         }
 
-        response = client.chat.completions.create(
-            model=DEEPSEEK_MODEL, 
-            messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": f"ANALIZZA E DECIDI AUTONOMAMENTE: {json.dumps(prompt_data, indent=2)}"},
-            ],
-            response_format={"type": "json_object"},
-            temperature=0.7,
-        )
+        try:
+            response = client.chat.completions.create(
+                model=DEEPSEEK_MODEL, 
+                messages=[
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user", "content": f"ANALIZZA E DECIDI AUTONOMAMENTE: {json.dumps(prompt_data, indent=2)}"},
+                ],
+                response_format={"type": "json_object"},
+                temperature=0.7,
+            )
+        except Exception as api_error:
+            logger.error(f"DeepSeek API Error: {api_error}")
+            return {
+                "analysis": f"DeepSeek API call failed: {str(api_error)}",
+                "market_conditions": "API Error",
+                "risk_assessment": "Unable to assess - API unavailable",
+                "decisions": []
+            }
 
         content = response.choices[0].message.content
         logger.info(f"DeepSeek AI Raw Response: {content}") # Debug nel log
