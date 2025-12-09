@@ -697,7 +697,7 @@ with tab2:
             hovertemplate='<b>%{y} - Ora %{x}</b><br>PnL: $%{z:.2f}<extra></extra>',
             colorbar=dict(
                 title="PnL ($)",
-                titlefont=dict(color='#00f3ff', family='Orbitron'),
+                title_font=dict(color='#00f3ff', family='Orbitron'),
                 tickfont=dict(color='#00f3ff')
             )
         ))
