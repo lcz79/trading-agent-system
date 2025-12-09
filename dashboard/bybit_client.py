@@ -1,5 +1,5 @@
 from pybit.unified_trading import HTTP
-from datetime import datetime
+from datetime import datetime, timezone
 import pandas as pd
 from config import BYBIT_API_KEY, BYBIT_API_SECRET, BYBIT_TESTNET
 
@@ -56,21 +56,37 @@ class BybitClient:
             print(f"Error positions: {e}")
             return []
 
-    def get_closed_pnl(self, limit=20):
+    def get_closed_pnl(self, limit=20, start_date=None):
+        """
+        Recupera le posizioni chiuse con filtro data opzionale.
+        
+        Args:
+            limit: numero massimo di trade da recuperare
+            start_date: datetime con timezone - filtra solo trade dopo questa data
+                       Default: 9 dicembre 2025 00:00:00 UTC
+        """
         try:
+            # Se start_date non specificato, usa 9 dicembre 2025
+            if start_date is None:
+                start_date = datetime(2025, 12, 9, 0, 0, 0, tzinfo=timezone.utc)
+            
             response = self.session.get_closed_pnl(category="linear", limit=limit)
             if response['retCode'] == 0:
                 closed = []
                 for trade in response['result']['list']:
-                    closed.append({
-                        'Symbol': trade.get('symbol'),
-                        'Side': trade.get('side'),
-                        'Closed PnL': float(trade.get('closedPnl')),
-                        'Exit Time': datetime.fromtimestamp(int(trade.get('updatedTime'))/1000).strftime('%Y-%m-%d %H:%M:%S'),
-                        'ts': int(trade.get('updatedTime')),
-                        'exec_fee': abs(self.safe_float(trade.get('cumExecFee', 0))),  # Fee totale per il trade
-                        'fee': abs(self.safe_float(trade.get('cumExecFee', 0)))  # Alias per compatibilità
-                    })
+                    trade_ts = int(trade.get('updatedTime'))
+                    
+                    # Filtra solo trade dopo start_date
+                    if trade_ts >= start_date.timestamp() * 1000:
+                        closed.append({
+                            'Symbol': trade.get('symbol'),
+                            'Side': trade.get('side'),
+                            'Closed PnL': float(trade.get('closedPnl')),
+                            'Exit Time': datetime.fromtimestamp(trade_ts/1000).strftime('%Y-%m-%d %H:%M:%S'),
+                            'ts': trade_ts,
+                            'exec_fee': abs(self.safe_float(trade.get('cumExecFee', 0))),  # Fee totale per il trade
+                            'fee': abs(self.safe_float(trade.get('cumExecFee', 0)))  # Alias per compatibilità
+                        })
                 closed.sort(key=lambda x: x['ts'], reverse=True)
                 return closed
             return []

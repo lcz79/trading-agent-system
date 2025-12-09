@@ -8,3 +8,4 @@ data/
 *.db
 *_backup.py
 *_backup_*.py
+*_old_*.py

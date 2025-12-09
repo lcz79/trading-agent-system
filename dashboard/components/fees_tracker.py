@@ -2,7 +2,7 @@
 Component per tracciare e visualizzare commissioni trading Bybit
 """
 import streamlit as st
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict
 import sys
 import os
@@ -26,6 +26,7 @@ def safe_float(value, default=0.0):
 def get_trading_fees() -> Dict[str, float]:
     """
     Recupera commissioni da Bybit analizzando le posizioni chiuse.
+    Filtra solo trade dal 9 dicembre 2025 in poi.
     
     Returns:
         Dict con chiavi: today, week, month, total
@@ -38,8 +39,11 @@ def get_trading_fees() -> Dict[str, float]:
         week_start = today_start - timedelta(days=today_start.weekday())
         month_start = today_start.replace(day=1)
         
-        # Recupera closed PnL con fee breakdown - aumentiamo il limite per avere più dati
-        all_trades = client.get_closed_pnl(limit=200)
+        # Data minima filtro: 9 dicembre 2025
+        min_date = datetime(2025, 12, 9, 0, 0, 0, tzinfo=timezone.utc)
+        
+        # Recupera closed PnL con fee breakdown - con filtro data
+        all_trades = client.get_closed_pnl(limit=200, start_date=min_date)
         
         fees = {'today': 0.0, 'week': 0.0, 'month': 0.0, 'total': 0.0}
         
