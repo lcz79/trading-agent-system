@@ -13,6 +13,21 @@ app = FastAPI()
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 client = OpenAI(api_key=OPENAI_API_KEY)
 
+# Default parameters (fallback)
+DEFAULT_PARAMS = {
+    "rsi_overbought": 70,
+    "rsi_oversold": 30,
+    "default_leverage": 5,
+    "size_pct": 0.15,
+    "reverse_threshold": 2.0,
+    "atr_multiplier_sl": 2.0,
+    "atr_multiplier_tp": 3.0,
+    "min_rsi_for_long": 40,
+    "max_rsi_for_short": 60,
+}
+
+EVOLVED_PARAMS_FILE = "/data/evolved_params.json"
+
 class Decision(BaseModel):
     symbol: str
     action: Literal["OPEN_LONG", "OPEN_SHORT", "HOLD", "CLOSE"]
@@ -30,6 +45,24 @@ class Decision(BaseModel):
 class AnalysisPayload(BaseModel):
     global_data: Dict[str, Any]
     assets_data: Dict[str, Any]
+
+
+def get_evolved_params() -> Dict[str, Any]:
+    """Load evolved parameters from Learning Agent or use defaults"""
+    try:
+        if os.path.exists(EVOLVED_PARAMS_FILE):
+            with open(EVOLVED_PARAMS_FILE, 'r') as f:
+                data = json.load(f)
+                version = data.get('version', 'unknown')
+                logger.info(f"📚 Using evolved params {version}")
+                return data.get("params", DEFAULT_PARAMS.copy())
+        else:
+            logger.info("📚 No evolved params found, using defaults")
+            return DEFAULT_PARAMS.copy()
+    except Exception as e:
+        logger.warning(f"⚠️ Error loading evolved params: {e}")
+        return DEFAULT_PARAMS.copy()
+
 
 SYSTEM_PROMPT = """
 Sei un TRADER ALGORITMICO AGGRESSIVO.
@@ -60,6 +93,9 @@ FORMATO RISPOSTA JSON OBBLIGATORIO:
 @app.post("/decide_batch")
 def decide_batch(payload: AnalysisPayload):
     try:
+        # Load evolved parameters (hot-reload on each request)
+        params = get_evolved_params()
+        
         # Semplificazione dati per prompt
         assets_summary = {}
         for k, v in payload.assets_data.items():
@@ -76,11 +112,26 @@ def decide_batch(payload: AnalysisPayload):
             "active_positions": payload.global_data.get('already_open', []),
             "market_data": assets_summary
         }
+        
+        # Enhanced system prompt with evolved parameters
+        enhanced_system_prompt = SYSTEM_PROMPT + f"""
+
+PARAMETRI OTTIMIZZATI (dall'evoluzione automatica):
+- RSI Overbought (per short): {params.get('rsi_overbought', 70)}
+- RSI Oversold (per long): {params.get('rsi_oversold', 30)}
+- Leverage suggerito: {params.get('default_leverage', 5)}x
+- Size per trade: {params.get('size_pct', 0.15)*100:.0f}% del wallet
+- Soglia reverse: {params.get('reverse_threshold', 2.0)}%
+- Min RSI per long: {params.get('min_rsi_for_long', 40)}
+- Max RSI per short: {params.get('max_rsi_for_short', 60)}
+
+USA QUESTI PARAMETRI EVOLUTI nelle tue decisioni.
+"""
 
         response = client.chat.completions.create(
             model="gpt-5.1", 
             messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "system", "content": enhanced_system_prompt},
                 {"role": "user", "content": f"ANALIZZA E AGISCI: {json.dumps(prompt_data)}"},
             ],
             response_format={"type": "json_object"},

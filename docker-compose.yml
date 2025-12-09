@@ -26,6 +26,8 @@ services:
       - "8004:8000"
     env_file: .env
     restart: always
+    volumes:
+      - shared_data:/data
     networks:
       - trading-network
 
@@ -79,6 +81,24 @@ services:
     networks:
       - trading-network
 
+  10_learning_agent:
+    build: ./agents/10_learning_agent
+    container_name: 10_learning_agent
+    ports:
+      - "8010:8000"
+    environment:
+      - PYTHONUNBUFFERED=1
+      - EVOLUTION_INTERVAL_HOURS=48
+      - MIN_TRADES_FOR_EVOLUTION=5
+      - BACKTEST_IMPROVEMENT_THRESHOLD=0.5
+      - MAX_STRATEGY_ARCHIVE=20
+    env_file: .env
+    restart: always
+    volumes:
+      - shared_data:/data
+    networks:
+      - trading-network
+
   dashboard:
     build: ./dashboard
     container_name: dashboard
@@ -94,3 +114,6 @@ services:
 networks:
   trading-network:
     driver: bridge
+
+volumes:
+  shared_data:
