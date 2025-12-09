@@ -186,7 +186,8 @@ def check_ai_review_for_losing_positions():
                 continue
             
             # Calcola ROI
-            if side == 'long':
+            is_long = side in ['long', 'buy']
+            if is_long:
                 roi = (mark_price - entry_price) / entry_price
             else:
                 roi = (entry_price - mark_price) / entry_price
