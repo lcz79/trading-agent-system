@@ -2,3 +2,5 @@ fastapi
 uvicorn
 pydantic
 python-dotenv
+# Note: sqlite3 is part of Python's standard library (no pip install needed)
+

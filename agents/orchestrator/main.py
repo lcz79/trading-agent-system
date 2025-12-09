@@ -13,7 +13,7 @@ URLS = {
 SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
 
 # Reverse strategy configuration
-ENABLE_REVERSE = True
+ENABLE_REVERSE = os.getenv('ENABLE_REVERSE_STRATEGY', 'true').lower() == 'true'
 REVERSE_LOSS_THRESHOLD_PCT = float(os.getenv('REVERSE_LOSS_THRESHOLD_PCT', '2.0'))
 REVERSE_RECOVERY_MULTIPLIER = float(os.getenv('REVERSE_RECOVERY_MULTIPLIER', '1.5'))
 

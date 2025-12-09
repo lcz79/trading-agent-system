@@ -31,7 +31,12 @@ db_lock = Lock()
 # --- DATABASE INITIALIZATION ---
 def init_database():
     """Initialize SQLite database for closed positions tracking"""
-    os.makedirs(os.path.dirname(DB_PATH) if os.path.dirname(DB_PATH) else './data', exist_ok=True)
+    db_dir = os.path.dirname(DB_PATH)
+    if db_dir and not os.path.exists(db_dir):
+        os.makedirs(db_dir, exist_ok=True)
+    elif not db_dir:
+        # If DB_PATH has no directory component, ensure current directory is writable
+        os.makedirs('./data', exist_ok=True)
     
     with db_lock:
         conn = sqlite3.connect(DB_PATH)
@@ -470,6 +475,7 @@ def reverse_position(req: ReverseRequest):
         
         # Save to database
         close_time = datetime.now()
+        # Note: open_time_ts from Bybit is in milliseconds, so we divide by 1000
         duration_seconds = int((close_time.timestamp() - open_time_ts/1000)) if open_time_ts else 0
         
         save_closed_position({
@@ -603,6 +609,7 @@ def close_position(req: CloseRequest):
         
         # Save to database
         close_time = datetime.now()
+        # Note: open_time_ts from Bybit is in milliseconds, so we divide by 1000
         duration_seconds = int((close_time.timestamp() - open_time_ts/1000)) if open_time_ts else 0
         
         save_closed_position({

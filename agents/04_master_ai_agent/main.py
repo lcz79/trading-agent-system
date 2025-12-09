@@ -16,10 +16,18 @@ DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
 DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
 DEEPSEEK_BASE_URL = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
 
+# Validate configuration
+if not DEEPSEEK_API_KEY:
+    logger.error("DEEPSEEK_API_KEY is not set in environment variables!")
+    logger.error("Please set DEEPSEEK_API_KEY in your .env file")
+    raise ValueError("Missing DEEPSEEK_API_KEY - cannot initialize AI agent")
+
 client = OpenAI(
     api_key=DEEPSEEK_API_KEY,
     base_url=DEEPSEEK_BASE_URL
 )
+
+logger.info(f"DeepSeek AI initialized with model: {DEEPSEEK_MODEL}")
 
 class Decision(BaseModel):
     symbol: str
