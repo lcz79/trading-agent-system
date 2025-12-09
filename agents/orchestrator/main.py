@@ -58,8 +58,8 @@ async def analysis_cycle():
                 # Calcola perdita %
                 if side in ['long', 'buy']:
                     loss_pct = ((mark - entry) / entry) * 100
-                else:  # short
-                    loss_pct = ((entry - mark) / entry) * 100
+                else:  # short - loss when mark > entry
+                    loss_pct = -((mark - entry) / entry) * 100  # Inverted for shorts
                 
                 if loss_pct < -REVERSE_THRESHOLD:
                     positions_losing.append({
@@ -73,12 +73,11 @@ async def analysis_cycle():
             if positions_losing:
                 # Ci sono posizioni in perdita oltre la soglia
                 for pos_loss in positions_losing:
-                    print(f"        ⚠️ {pos_loss['symbol']} perde {pos_loss['loss_pct']:.2f}% - Chiamo DeepSeek per reverse analysis")
+                    print(f"        ⚠️ {pos_loss['symbol']} perde {pos_loss['loss_pct']:.2f}%")
                 
-                # Chiama DeepSeek solo per analisi reverse sulle posizioni in perdita
-                # TODO: Implementare logica reverse specifica se necessario
-                # Per ora skippiamo per non complicare
-                print("        🛡️ Reverse analysis disponibile ma non implementato in questa versione")
+                # TODO: Implementare logica reverse per chiudere/invertire posizioni in perdita
+                # Per ora monitoriamo solo, il trailing stop gestirà l'uscita
+                print(f"        ⚠️ {len(positions_losing)} posizione(i) in perdita critica rilevata(e)")
             else:
                 # Nessuna posizione in perdita critica
                 print("        ✅ Nessun allarme perdita - Skip analisi DeepSeek")
