@@ -42,13 +42,28 @@ class BybitClient:
                 positions = []
                 for pos in response['result']['list']:
                     if float(pos.get('size', 0)) > 0:
+                        entry_price = self.safe_float(pos.get('avgPrice', 0))
+                        mark_price = self.safe_float(pos.get('markPrice', pos.get('avgPrice', 0)))
+                        leverage = self.safe_float(pos.get('leverage', 1))
+                        side = pos.get('side', '').lower()
+
+                        # Calculate PnL % with leverage (matching Bybit ROI display)
+                        if entry_price > 0:
+                            if side in ['sell', 'short']:
+                                pnl_pct = ((entry_price - mark_price) / entry_price) * leverage * 100
+                            else:  # buy/long
+                                pnl_pct = ((mark_price - entry_price) / entry_price) * leverage * 100
+                        else:
+                            pnl_pct = 0
+                        
                         positions.append({
                             'Symbol': pos.get('symbol'),
                             'Side': pos.get('side'),
                             'Size': float(pos.get('size')),
                             'Entry Price': float(pos.get('avgPrice')),
                             'Unrealized PnL': float(pos.get('unrealisedPnl')),
-                            'PnL %': float(pos.get('unrealisedPnl')) / float(pos.get('positionValue')) * 100 if float(pos.get('positionValue')) > 0 else 0
+                            'PnL %': round(pnl_pct, 2),
+                            'Leverage': leverage
                         })
                 return positions
             return []

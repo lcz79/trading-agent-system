@@ -498,7 +498,9 @@ if wallet:
     
     with col4:
         pnl_color = "normal" if pnl >= 0 else "inverse"
-        st.metric("📊 PNL APERTO", f"${pnl:.2f}", delta=f"{pnl:.2f}", delta_color=pnl_color)
+        # Calculate PnL as percentage of total equity
+        pnl_pct_of_balance = (pnl / equity * 100) if equity > 0 else 0
+        st.metric("📊 PNL APERTO", f"${pnl:.2f} ({pnl_pct_of_balance:+.2f}%)", delta=f"{pnl:.2f}", delta_color=pnl_color)
     
     st.markdown("---")
 
