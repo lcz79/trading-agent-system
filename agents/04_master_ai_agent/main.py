@@ -278,7 +278,10 @@ async def analyze_reverse(payload: ReverseAnalysisRequest):
         async with httpx.AsyncClient(timeout=10.0) as client:
             # Technical Analysis
             try:
-                resp = await client.get(f"{AGENT_URLS['technical']}/analyze/{symbol}")
+                resp = await client.post(
+                    f"{AGENT_URLS['technical']}/analyze_multi_tf",
+                    json={"symbol": symbol}
+                )
                 if resp.status_code == 200:
                     agents_data['technical'] = resp.json()
                     logger.info(f"✅ Technical data received for {symbol}")
@@ -288,7 +291,10 @@ async def analyze_reverse(payload: ReverseAnalysisRequest):
             
             # Fibonacci Analysis
             try:
-                resp = await client.get(f"{AGENT_URLS['fibonacci']}/analyze/{symbol}")
+                resp = await client.post(
+                    f"{AGENT_URLS['fibonacci']}/analyze_fib",
+                    json={"symbol": symbol}
+                )
                 if resp.status_code == 200:
                     agents_data['fibonacci'] = resp.json()
                     logger.info(f"✅ Fibonacci data received for {symbol}")
@@ -298,7 +304,10 @@ async def analyze_reverse(payload: ReverseAnalysisRequest):
             
             # Gann Analysis
             try:
-                resp = await client.get(f"{AGENT_URLS['gann']}/analyze/{symbol}")
+                resp = await client.post(
+                    f"{AGENT_URLS['gann']}/analyze_gann",
+                    json={"symbol": symbol}
+                )
                 if resp.status_code == 200:
                     agents_data['gann'] = resp.json()
                     logger.info(f"✅ Gann data received for {symbol}")
@@ -308,7 +317,10 @@ async def analyze_reverse(payload: ReverseAnalysisRequest):
             
             # News Sentiment
             try:
-                resp = await client.get(f"{AGENT_URLS['news']}/sentiment/{symbol}")
+                resp = await client.post(
+                    f"{AGENT_URLS['news']}/analyze_sentiment",
+                    json={"symbol": symbol}
+                )
                 if resp.status_code == 200:
                     agents_data['news'] = resp.json()
                     logger.info(f"✅ News sentiment received for {symbol}")
@@ -318,7 +330,10 @@ async def analyze_reverse(payload: ReverseAnalysisRequest):
             
             # Forecaster
             try:
-                resp = await client.get(f"{AGENT_URLS['forecaster']}/forecast/{symbol}")
+                resp = await client.post(
+                    f"{AGENT_URLS['forecaster']}/forecast",
+                    json={"symbol": symbol}
+                )
                 if resp.status_code == 200:
                     agents_data['forecaster'] = resp.json()
                     logger.info(f"✅ Forecast data received for {symbol}")
