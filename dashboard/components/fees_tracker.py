@@ -90,13 +90,13 @@ def render_fees_section():
     col1, col2, col3, col4 = st.columns(4)
     
     with col1:
-        st.metric("Oggi", f"${fees['today']:.2f}")
+        st.metric("Oggi", f"${fees['today']:.4f}")
     
     with col2:
-        st.metric("Settimana", f"${fees['week']:.2f}")
+        st.metric("Settimana", f"${fees['week']:.4f}")
     
     with col3:
-        st.metric("Mese", f"${fees['month']:.2f}")
+        st.metric("Mese", f"${fees['month']:.4f}")
     
     with col4:
-        st.metric("Totale", f"${fees['total']:.2f}")
+        st.metric("Totale", f"${fees['total']:.4f}")
