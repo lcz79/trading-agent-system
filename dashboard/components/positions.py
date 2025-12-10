@@ -21,7 +21,7 @@ def render_open_positions(positions):
         return
     
     for pos in positions:
-        pnl = pos.get('unrealized_pnl', 0)
+        pnl = pos.get('pnl', pos.get('unrealized_pnl', 0))
         pnl_pct = pos.get('pnl_pct', 0)
         side_color = "#00ff41" if pos['side'] == "Buy" else "#ff004c"
         pnl_color = "profit" if pnl >= 0 else "loss"

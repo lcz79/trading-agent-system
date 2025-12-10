@@ -65,16 +65,28 @@ def get_wallet_data():
         if r2['retCode'] == 0:
             for p in r2['result']['list']:
                 if float(p['size']) > 0:
+                    entry_price = float(p['avgPrice'])
+                    mark_price = float(p['markPrice'])
+                    leverage = float(p['leverage'])
+                    side = p['side']
+
+                    # Calculate PnL % with leverage (matching Bybit ROI display)
+                    if side == "Sell":  # SHORT position
+                        pnl_pct = ((entry_price - mark_price) / entry_price) * leverage * 100
+                    else:  # LONG position (Buy)
+                        pnl_pct = ((mark_price - entry_price) / entry_price) * leverage * 100
+
                     pos.append({
                         "symbol": p['symbol'],
-                        "side": p['side'],
+                        "side": side,
                         "size": float(p['size']),
-                        "entry_price": float(p['avgPrice']),
-                        "leverage": float(p['leverage']),
+                        "entry_price": entry_price,
+                        "leverage": leverage,
                         "pnl": float(p['unrealisedPnl']),
+                        "pnl_pct": round(pnl_pct, 2),  # NEW FIELD
                         "stop_loss": float(p.get('stopLoss', 0)),
                         "take_profit": float(p.get('takeProfit', 0)),
-                        "mark_price": float(p['markPrice'])
+                        "mark_price": mark_price
                     })
     except: pass
     return bal, pos

@@ -96,13 +96,14 @@ async def analysis_cycle():
             mark = pos.get('mark_price', 0)
             side = pos.get('side', '').lower()
             symbol = pos.get('symbol', '')
+            leverage = float(pos.get('leverage', 1))
             
             if entry > 0 and mark > 0:
-                # Calcola perdita %
+                # Calcola perdita % CON LEVA (come mostrato su Bybit)
                 if side in ['long', 'buy']:
-                    loss_pct = ((mark - entry) / entry) * 100
-                else:  # short - loss when mark > entry
-                    loss_pct = -((mark - entry) / entry) * 100  # Inverted for shorts
+                    loss_pct = ((mark - entry) / entry) * leverage * 100
+                else:  # short - loss when mark > entry, profit when mark < entry
+                    loss_pct = -((mark - entry) / entry) * leverage * 100  # Negative sign because direction is reversed
                 
                 if loss_pct < -REVERSE_THRESHOLD:
                     positions_losing.append({
