@@ -1,5 +1,5 @@
 from pybit.unified_trading import HTTP
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import pandas as pd
 from config import BYBIT_API_KEY, BYBIT_API_SECRET, BYBIT_TESTNET
 
@@ -55,6 +55,68 @@ class BybitClient:
         except Exception as e:
             print(f"Error positions: {e}")
             return []
+
+    def get_execution_fees(self):
+        """
+        Recupera le commissioni trading dall'API executions di Bybit.
+        Filtra solo executions dal 9 dicembre 2025 in poi.
+        
+        Returns:
+            Dict con chiavi: today, week, month, total
+            Ogni valore è un float che rappresenta la somma delle commissioni per quel periodo.
+            In caso di errore, restituisce tutti i valori a 0.0
+        """
+        try:
+            # Data minima filtro: 9 dicembre 2025 00:00:00 UTC (REQUISITO BUSINESS)
+            min_date = datetime(2025, 12, 9, 0, 0, 0, tzinfo=timezone.utc)
+            min_timestamp_ms = int(min_date.timestamp() * 1000)
+            
+            # Calcola i timestamp per i periodi
+            now = datetime.now(timezone.utc)
+            today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+            week_start = today_start - timedelta(days=today_start.weekday())
+            month_start = today_start.replace(day=1)
+            
+            today_ts = int(today_start.timestamp() * 1000)
+            week_ts = int(week_start.timestamp() * 1000)
+            month_ts = int(month_start.timestamp() * 1000)
+            
+            # Chiama API executions
+            response = self.session.get_executions(category='linear', limit=200)
+            
+            if response.get('retCode') != 0:
+                return {'today': 0.0, 'week': 0.0, 'month': 0.0, 'total': 0.0}
+            
+            fees = {'today': 0.0, 'week': 0.0, 'month': 0.0, 'total': 0.0}
+            
+            # Processa ogni execution
+            executions = response.get('result', {}).get('list', [])
+            for execution in executions:
+                # Ottieni timestamp execution (in millisecondi)
+                exec_time_str = execution.get('execTime', '0')
+                exec_time_ms = int(exec_time_str)
+                
+                # Filtra solo executions dopo la data minima
+                if exec_time_ms < min_timestamp_ms:
+                    continue
+                
+                # Ottieni la fee (sempre positiva)
+                exec_fee = abs(self.safe_float(execution.get('execFee', 0)))
+                
+                # Aggrega per periodo
+                fees['total'] += exec_fee
+                if exec_time_ms >= month_ts:
+                    fees['month'] += exec_fee
+                if exec_time_ms >= week_ts:
+                    fees['week'] += exec_fee
+                if exec_time_ms >= today_ts:
+                    fees['today'] += exec_fee
+            
+            return fees
+            
+        except Exception as e:
+            print(f"Errore nel recupero delle commissioni: {e}")
+            return {'today': 0.0, 'week': 0.0, 'month': 0.0, 'total': 0.0}
 
     def get_closed_pnl(self, limit=20, start_date=None):
         """
