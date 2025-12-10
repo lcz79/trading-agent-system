@@ -112,6 +112,6 @@ def add_ai_decision(decision_data):
         'timestamp': datetime.now().isoformat(),
         **decision_data
     })
-    # Mantieni solo le ultime 50
-    decisions = decisions[-50:]
+    # Mantieni solo le ultime 100
+    decisions = decisions[-100:]
     save_json(AI_DECISIONS_FILE, decisions)

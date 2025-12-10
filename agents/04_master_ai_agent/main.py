@@ -84,8 +84,8 @@ def save_ai_decision(decision_data):
             'analysis_summary': decision_data.get('analysis_summary', '')
         })
         
-        # Mantieni solo le ultime 50 decisioni
-        decisions = decisions[-50:]
+        # Mantieni solo le ultime 100 decisioni
+        decisions = decisions[-100:]
         
         os.makedirs(os.path.dirname(AI_DECISIONS_FILE), exist_ok=True)
         with open(AI_DECISIONS_FILE, 'w') as f:
