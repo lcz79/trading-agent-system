@@ -127,13 +127,41 @@ async def analysis_cycle():
                 # Per ora monitoriamo solo, il trailing stop gestirà l'uscita automatica
                 print(f"        ⚠️ {len(positions_losing)} posizione(i) in perdita critica rilevata(e)")
             else:
-                # Nessuna posizione in perdita critica
-                print("        ✅ Nessun allarme perdita - Skip analisi DeepSeek")
+                # Controlla se tutte le posizioni sono realmente in profitto o se ci sono perdite minori
+                all_positions_status = []
+                all_in_profit = True
+                
+                for pos in position_details:
+                    entry = pos.get('entry_price', 0)
+                    mark = pos.get('mark_price', 0)
+                    side = pos.get('side', '').lower()
+                    symbol = pos.get('symbol', '').replace('USDT', '')
+                    leverage = float(pos.get('leverage', 1))
+                    
+                    if entry > 0 and mark > 0:
+                        # Calcola P&L % con leva
+                        if side in ['long', 'buy']:
+                            pnl_pct = ((mark - entry) / entry) * leverage * 100
+                        else:  # short
+                            pnl_pct = -((mark - entry) / entry) * leverage * 100
+                        
+                        all_positions_status.append(f"{symbol}: {pnl_pct:+.2f}%")
+                        if pnl_pct < 0:
+                            all_in_profit = False
+                
+                # Genera rationale in base allo stato reale
+                positions_str = " | ".join(all_positions_status)
+                if all_in_profit:
+                    rationale = f"Tutte le posizioni in profitto. {positions_str}. Nessuna azione richiesta. Continuo monitoraggio trailing stop."
+                else:
+                    rationale = f"Posizioni miste. {positions_str}. Nessuna in perdita critica. Continuo monitoraggio trailing stop."
+                
+                print(f"        ✅ Nessun allarme perdita - Skip analisi DeepSeek")
                 save_monitoring_decision(
                     positions_count=len(position_details),
                     max_positions=MAX_POSITIONS,
                     positions_details=position_details,
-                    reason="Tutte le posizioni in profitto. Nessuna azione richiesta. Continuo monitoraggio trailing stop."
+                    reason=rationale
                 )
             return
 

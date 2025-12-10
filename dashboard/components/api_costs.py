@@ -9,9 +9,8 @@ from typing import Dict
 
 
 # Path del file di log dei costi API
-# Nota: Usa /app/data/ perché il container dashboard accede al volume shared_data
-# montato in /app/data/, mentre gli agent containers usano /data/
-API_COSTS_FILE = "/app/data/api_costs.json"
+# Nota: Il volume shared_data è montato in /data/ per tutti i containers
+API_COSTS_FILE = "/data/api_costs.json"
 
 # DeepSeek pricing (basato su pricing pubblico DeepSeek)
 DEEPSEEK_INPUT_COST = 0.14 / 1_000_000  # $0.14 per 1M tokens input
