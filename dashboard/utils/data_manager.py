@@ -1,20 +1,29 @@
 import json
 import os
 from datetime import datetime
-from config import DATA_DIR, EQUITY_HISTORY_FILE, CLOSED_POSITIONS_FILE, AI_DECISIONS_FILE, STARTING_DATE, STARTING_BALANCE
+from config import DATA_DIR, EQUITY_HISTORY_FILE, CLOSED_POSITIONS_FILE, AI_DECISIONS_FILE, STARTING_DATE, STARTING_BALANCE, SHARED_DATA_DIR
 
 def ensure_data_dir():
     """Crea la directory data se non esiste"""
-    if not os.path. exists(DATA_DIR):
-        os. makedirs(DATA_DIR)
+    if not os.path.exists(DATA_DIR):
+        os.makedirs(DATA_DIR)
+
+def ensure_shared_data_dir():
+    """Assicura che la directory shared data esista (per sviluppo locale)"""
+    if not os.path.exists(SHARED_DATA_DIR):
+        try:
+            os.makedirs(SHARED_DATA_DIR)
+        except:
+            pass  # In Docker, la directory esiste già come volume mount
 
 def load_json(filepath, default=None):
     """Carica un file JSON"""
     ensure_data_dir()
+    ensure_shared_data_dir()
     if os.path.exists(filepath):
         try:
             with open(filepath, 'r') as f:
-                return json. load(f)
+                return json.load(f)
         except:
             return default if default else []
     return default if default else []

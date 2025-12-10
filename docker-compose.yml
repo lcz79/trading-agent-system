@@ -108,6 +108,8 @@ services:
       - PYTHONUNBUFFERED=1
     env_file: .env
     restart: always
+    volumes:
+      - shared_data:/data
     networks:
       - trading-network
 
