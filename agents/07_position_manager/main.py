@@ -265,14 +265,26 @@ def get_positions():
         for p in raw:
             if float(p.get('contracts') or 0) > 0:
                 sym = p['symbol'].split(':')[0].replace('/', '')
+                entry_price = float(p['entryPrice'])
+                mark_price = float(p.get('markPrice', p['entryPrice']))
+                leverage = float(p.get('leverage', 1))
+                side = p.get('side', '').lower()
+                
+                # Calculate PnL % with leverage (matching Bybit ROI display)
+                if side in ['short', 'sell']:
+                    pnl_pct = ((entry_price - mark_price) / entry_price) * leverage * 100
+                else:  # long/buy
+                    pnl_pct = ((mark_price - entry_price) / entry_price) * leverage * 100
+                
                 details.append({
                     "symbol": sym,
                     "side": p.get('side'),
                     "size": float(p['contracts']),
-                    "entry_price": float(p['entryPrice']),
-                    "mark_price": float(p.get('markPrice', p['entryPrice'])),
+                    "entry_price": entry_price,
+                    "mark_price": mark_price,
                     "pnl": float(p.get('unrealizedPnl') or 0),
-                    "leverage": p.get('leverage', 1)
+                    "pnl_pct": round(pnl_pct, 2),  # NEW FIELD with leverage
+                    "leverage": leverage
                 })
                 active.append(sym)
         return {"active": active, "details": details}
