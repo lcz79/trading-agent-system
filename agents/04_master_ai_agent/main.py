@@ -29,6 +29,7 @@ DEFAULT_PARAMS = {
 
 EVOLVED_PARAMS_FILE = "/data/evolved_params.json"
 API_COSTS_FILE = "/data/api_costs.json"
+AI_DECISIONS_FILE = "/data/ai_decisions.json"
 
 
 def log_api_call(tokens_in: int, tokens_out: int):
@@ -62,6 +63,37 @@ def log_api_call(tokens_in: int, tokens_out: int):
         logger.info(f"API call logged: {tokens_in} in, {tokens_out} out")
     except Exception as e:
         logger.error(f"Error logging API call: {e}")
+
+
+def save_ai_decision(decision_data):
+    """Salva la decisione AI per visualizzarla nella dashboard"""
+    try:
+        decisions = []
+        if os.path.exists(AI_DECISIONS_FILE):
+            with open(AI_DECISIONS_FILE, 'r') as f:
+                decisions = json.load(f)
+        
+        # Aggiungi nuova decisione
+        decisions.append({
+            'timestamp': datetime.now().isoformat(),
+            'symbol': decision_data.get('symbol'),
+            'action': decision_data.get('action'),  # OPEN_LONG, OPEN_SHORT, HOLD, CLOSE
+            'leverage': decision_data.get('leverage', 1),
+            'size_pct': decision_data.get('size_pct', 0),
+            'rationale': decision_data.get('rationale', ''),
+            'analysis_summary': decision_data.get('analysis_summary', '')
+        })
+        
+        # Mantieni solo le ultime 50 decisioni
+        decisions = decisions[-50:]
+        
+        os.makedirs(os.path.dirname(AI_DECISIONS_FILE), exist_ok=True)
+        with open(AI_DECISIONS_FILE, 'w') as f:
+            json.dump(decisions, f, indent=2)
+            
+        logger.info(f"AI decision saved: {decision_data.get('action')} on {decision_data.get('symbol')}")
+    except Exception as e:
+        logger.error(f"Error saving AI decision: {e}")
 
 
 class Decision(BaseModel):
@@ -188,8 +220,21 @@ USA QUESTI PARAMETRI EVOLUTI nelle tue decisioni.
         
         valid_decisions = []
         for d in decision_json.get("decisions", []):
-            try: valid_decisions.append(Decision(**d))
-            except Exception as e: logger.warning(f"Invalid decision: {e}")
+            try: 
+                valid_dec = Decision(**d)
+                valid_decisions.append(valid_dec)
+                
+                # Salva la decisione per la dashboard
+                save_ai_decision({
+                    'symbol': valid_dec.symbol,
+                    'action': valid_dec.action,
+                    'leverage': valid_dec.leverage,
+                    'size_pct': valid_dec.size_pct,
+                    'rationale': valid_dec.rationale,
+                    'analysis_summary': decision_json.get("analysis_summary", "")
+                })
+            except Exception as e: 
+                logger.warning(f"Invalid decision: {e}")
 
         return {
             "analysis": decision_json.get("analysis_summary", "No analysis"),

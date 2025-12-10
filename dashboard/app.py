@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from bybit_client import BybitClient
 from components.fees_tracker import render_fees_section, get_trading_fees
 from components.api_costs import render_api_costs_section, calculate_api_costs
+from components.ai_reasoning import render_ai_reasoning
 import numpy as np
 
 # --- COSTANTI ---
@@ -346,6 +347,100 @@ st.markdown("""
     ::-webkit-scrollbar-thumb:hover {
         background: linear-gradient(135deg, #00f3ff 0%, #bf00ff 100%);
         box-shadow: 0 0 20px rgba(0,243,255,0.8);
+    }
+    
+    /* AI Decision Cards */
+    .ai-decision-card {
+        background: linear-gradient(135deg, rgba(26,26,46,0.95) 0%, rgba(22,33,62,0.95) 100%);
+        border: 2px solid #bf00ff;
+        border-radius: 12px;
+        padding: 16px;
+        margin-bottom: 15px;
+        backdrop-filter: blur(10px);
+        transition: all 0.3s ease;
+        box-shadow: 0 0 15px rgba(191,0,255,0.3);
+    }
+    
+    .ai-decision-card:hover {
+        transform: translateY(-3px);
+        box-shadow: 0 5px 25px rgba(191,0,255,0.5);
+        border-color: #00f3ff;
+    }
+    
+    .decision-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 12px;
+        padding-bottom: 10px;
+        border-bottom: 1px solid rgba(0,243,255,0.3);
+    }
+    
+    .decision-time {
+        color: #00f3ff;
+        font-family: 'Rajdhani', sans-serif;
+        font-size: 14px;
+        font-weight: 600;
+        opacity: 0.8;
+    }
+    
+    .decision-action {
+        font-family: 'Orbitron', monospace;
+        font-size: 16px;
+        font-weight: 700;
+        letter-spacing: 1px;
+    }
+    
+    .decision-symbol {
+        font-family: 'Orbitron', monospace;
+        font-size: 16px;
+        font-weight: 700;
+    }
+    
+    .decision-reasoning {
+        color: #e0e0e0;
+        font-family: 'Rajdhani', sans-serif;
+        font-size: 15px;
+        line-height: 1.6;
+    }
+    
+    .decision-reasoning p {
+        margin: 8px 0;
+    }
+    
+    .section-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        font-family: 'Orbitron', monospace;
+        font-size: 24px;
+        font-weight: 700;
+        color: #00f3ff;
+        margin: 20px 0 15px 0;
+        padding: 12px 20px;
+        background: linear-gradient(90deg, rgba(0,243,255,0.2) 0%, transparent 100%);
+        border-left: 4px solid #00f3ff;
+        border-radius: 5px;
+        text-shadow: 0 0 10px #00f3ff;
+    }
+    
+    .ai-status {
+        color: #00ff9d;
+        font-size: 14px;
+        animation: pulse 2s ease-in-out infinite;
+    }
+    
+    .empty-state {
+        text-align: center;
+        padding: 40px;
+        color: #808080;
+        font-family: 'Rajdhani', sans-serif;
+    }
+    
+    .empty-icon {
+        font-size: 48px;
+        display: block;
+        margin-bottom: 16px;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -1004,10 +1099,9 @@ with tab3:
     else:
         st.markdown('<div class="info-box">ℹ️ Nessuno storico disponibile dal 9 dicembre 2025</div>', unsafe_allow_html=True)
 
-# --- AI REVIEW STATUS ---
+# --- AI DECISION LOG ---
 st.markdown("---")
-st.markdown('<div class="section-title">🤖 AI REVIEW STATUS</div>', unsafe_allow_html=True)
-st.markdown('<div class="info-box">ℹ️ Funzionalità in fase di integrazione - Mostrerà le ultime decisioni AI (HOLD/CLOSE/REVERSE)</div>', unsafe_allow_html=True)
+render_ai_reasoning()
 
 # --- FOOTER ---
 st.markdown("---")
