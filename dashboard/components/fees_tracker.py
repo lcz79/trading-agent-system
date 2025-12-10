@@ -2,7 +2,6 @@
 Component per tracciare e visualizzare commissioni trading Bybit
 """
 import streamlit as st
-from datetime import datetime, timedelta, timezone
 from typing import Dict
 import sys
 import os
@@ -10,16 +9,6 @@ import os
 # Aggiungi il path del dashboard per importare bybit_client
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from bybit_client import BybitClient
-
-
-def safe_float(value, default=0.0):
-    """Conversione sicura a float"""
-    if value is None or value == "":
-        return default
-    try:
-        return float(value)
-    except (ValueError, TypeError):
-        return default
 
 
 @st.cache_data(ttl=3600)  # Cache 1 ora
