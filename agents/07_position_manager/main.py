@@ -106,39 +106,81 @@ class OrderRequest(BaseModel):
 class CloseRequest(BaseModel):
     symbol: str
 
+# --- FUNZIONE PER FETCH POSIZIONI CON SL REALE ---
+def fetch_positions_with_sl():
+    """Fetch positions con Stop Loss reale da Bybit API V5"""
+    if not exchange:
+        return []
+    
+    try:
+        result = exchange.private_get_v5_position_list({
+            'category': 'linear',
+            'settleCoin': 'USDT'
+        })
+        
+        if result and result.get('retCode') == 0:
+            return result.get('result', {}).get('list', [])
+        else:
+            print(f"⚠️ Errore fetch_positions_with_sl: retCode={result.get('retCode')}")
+            return []
+    except Exception as e:
+        print(f"⚠️ Errore fetch_positions_with_sl: {e}")
+        return []
+
 # --- TRAILING LOGIC (FIXED) ---
 def check_and_update_trailing_stops():
     if not exchange: return
 
     try:
-        positions = exchange.fetch_positions(None, params={'category': 'linear'})
+        # Usa API V5 per ottenere Stop Loss reale
+        positions = fetch_positions_with_sl()
 
         for p in positions:
-            qty = float(p.get('contracts') or 0)
+            qty = float(p.get('size') or 0)
             if qty == 0: continue
 
-            symbol = p['symbol'] 
+            # Symbol è già nel formato corretto (es. "BTCUSDT")
+            symbol_raw = p.get('symbol', '')
             
-            # Ottieni ID di mercato per chiamate RAW
+            # Converti in formato ccxt (es. "BTC/USDT:USDT")
             try:
-                market_id = exchange.market(symbol)['id']
+                # Cerca il market corrispondente
+                symbol = None
+                for m in exchange.markets.values():
+                    if m.get('id') == symbol_raw and m.get('linear', False):
+                        symbol = m['symbol']
+                        break
+                
+                if not symbol:
+                    # Fallback: costruisci simbolo standard
+                    base = symbol_raw.replace('USDT', '')
+                    symbol = f"{base}/USDT:USDT"
             except:
-                market_id = symbol.replace('/', '').split(':')[0]
+                continue
 
             side_raw = (p.get('side') or '').lower()
             is_long = side_raw in ['long', 'buy']
             
-            entry_price = float(p['entryPrice'])
-            mark_price = float(p['markPrice'])
+            entry_price = float(p.get('avgPrice') or 0)
+            mark_price = float(p.get('markPrice') or 0)
+            leverage = float(p.get('leverage') or 1)
+            
+            # Leggi Stop Loss reale dalla risposta V5
             sl_current = float(p.get('stopLoss') or 0)
+            
+            if entry_price == 0:
+                continue
 
-            # 1) ROI in %
+            # 1) ROI raw (senza leva)
             if is_long:
-                roi_pct = (mark_price - entry_price) / entry_price
+                roi_raw = (mark_price - entry_price) / entry_price
             else:
-                roi_pct = (entry_price - mark_price) / entry_price
+                roi_raw = (entry_price - mark_price) / entry_price
+            
+            # 2) ROI con leva (come mostrato da Bybit)
+            roi_pct = roi_raw * leverage
 
-            # 2) Attivazione trailing
+            # 3) Attivazione trailing
             if roi_pct >= TRAILING_ACTIVATION_PCT:
                 new_sl_price = None
 
@@ -154,13 +196,13 @@ def check_and_update_trailing_stops():
                 if new_sl_price:
                     price_str = exchange.price_to_precision(symbol, new_sl_price)
 
-                    print(f"🏃 TRAILING STOP {symbol} ROI={roi_pct*100:.2f}% SL {sl_current} -> {price_str}")
+                    print(f"🏃 TRAILING STOP {symbol_raw} ROI={roi_pct*100:.2f}% (raw={roi_raw*100:.2f}% x{leverage}) SL {sl_current} -> {price_str}")
 
-                    # --- FIX: CHIAMATA DIRETTA V5 ---
+                    # --- CHIAMATA DIRETTA V5 ---
                     try:
                         req = {
                             "category": "linear",
-                            "symbol": market_id,
+                            "symbol": symbol_raw,  # Usa symbol raw (es. "BTCUSDT")
                             "stopLoss": price_str,
                             "positionIdx": 0
                         }
