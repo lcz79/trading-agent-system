@@ -24,6 +24,8 @@ AGENT_URLS = {
     "forecaster": "http://08_forecaster_agent:8000"
 }
 
+LEARNING_AGENT_URL = "http://10_learning_agent:8000"
+
 # Default parameters (fallback)
 DEFAULT_PARAMS = {
     "rsi_overbought": 70,
@@ -146,6 +148,28 @@ def get_evolved_params() -> Dict[str, Any]:
         return DEFAULT_PARAMS.copy()
 
 
+async def get_learning_insights():
+    """Ottieni insights dal Learning Agent"""
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            # Performance recenti
+            perf_resp = await client.get(f"{LEARNING_AGENT_URL}/performance")
+            perf_data = perf_resp.json() if perf_resp.status_code == 200 else {}
+            
+            # Parametri evoluti
+            params_resp = await client.get(f"{LEARNING_AGENT_URL}/current_params")
+            params_data = params_resp.json() if params_resp.status_code == 200 else {}
+            
+            return {
+                "performance": perf_data.get("performance", {}),
+                "evolved_params": params_data.get("params", {}),
+                "version": params_data.get("version", "unknown")
+            }
+    except Exception as e:
+        logger.warning(f"⚠️ Could not get learning insights: {e}")
+        return {}
+
+
 SYSTEM_PROMPT = """
 Sei un TRADER ALGORITMICO AGGRESSIVO.
 Il tuo compito non è solo analizzare, è ESEGUIRE.
@@ -173,10 +197,13 @@ FORMATO RISPOSTA JSON OBBLIGATORIO:
 """
 
 @app.post("/decide_batch")
-def decide_batch(payload: AnalysisPayload):
+async def decide_batch(payload: AnalysisPayload):
     try:
         # Load evolved parameters (hot-reload on each request)
         params = get_evolved_params()
+        
+        # Get learning insights from Learning Agent
+        learning_insights = await get_learning_insights()
         
         # Semplificazione dati per prompt
         assets_summary = {}
@@ -192,10 +219,26 @@ def decide_batch(payload: AnalysisPayload):
         prompt_data = {
             "wallet_equity": payload.global_data.get('portfolio', {}).get('equity'),
             "active_positions": payload.global_data.get('already_open', []),
-            "market_data": assets_summary
+            "market_data": assets_summary,
+            "learning_insights": learning_insights
         }
         
-        # Enhanced system prompt with evolved parameters
+        # Enhanced system prompt with evolved parameters and learning insights
+        insights_text = ""
+        if learning_insights:
+            perf = learning_insights.get("performance", {})
+            if perf:
+                insights_text = f"""
+
+INSIGHTS DAL LEARNING AGENT (v{learning_insights.get('version', 'unknown')}):
+- Trades recenti: {perf.get('total_trades', 0)}
+- Win rate: {perf.get('win_rate', 0)*100:.1f}%
+- PnL totale: {perf.get('total_pnl', 0):.2f}%
+- Max drawdown: {perf.get('max_drawdown', 0):.2f}%
+
+CONSIDERA questi dati di performance recenti nelle tue decisioni.
+"""
+        
         enhanced_system_prompt = SYSTEM_PROMPT + f"""
 
 PARAMETRI OTTIMIZZATI (dall'evoluzione automatica):
@@ -208,7 +251,7 @@ PARAMETRI OTTIMIZZATI (dall'evoluzione automatica):
 - Max RSI per short: {params.get('max_rsi_for_short', 60)}
 
 USA QUESTI PARAMETRI EVOLUTI nelle tue decisioni.
-"""
+{insights_text}"""
 
         response = client.chat.completions.create(
             model="gpt-5.1", 
