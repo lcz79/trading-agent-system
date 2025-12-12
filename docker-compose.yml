@@ -58,6 +58,8 @@ services:
       - "8007:8000"
     env_file: .env
     restart: always
+    volumes:
+      - shared_data:/data
     networks:
       - trading-network
 
