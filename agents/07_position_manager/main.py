@@ -7,6 +7,7 @@ import requests
 import httpx
 from decimal import Decimal, ROUND_DOWN
 from datetime import datetime
+from typing import Optional
 from fastapi import FastAPI
 from pydantic import BaseModel
 from threading import Thread, Lock
@@ -31,16 +32,17 @@ MASTER_AI_URL = os.getenv("MASTER_AI_URL", "http://04_master_ai_agent:8000")
 
 # --- LEARNING AGENT ---
 LEARNING_AGENT_URL = "http://10_learning_agent:8000"
+DEFAULT_SIZE_PCT = 0.15  # Default size percentage for learning when actual value unknown
 
 def normalize_symbol(symbol: str) -> str:
-    """Normalizza il simbolo rimuovendo separatori e suffissi"""
+    """Normalize symbol by removing separators and suffixes"""
     return symbol.replace("/", "").replace(":USDT", "")
 
 
 def record_closed_trade(symbol: str, side: str, entry_price: float, exit_price: float, 
                         pnl_pct: float, leverage: float, size_pct: float, 
-                        duration_minutes: int, market_conditions: dict = None):
-    """Invia il trade chiuso al Learning Agent per analisi"""
+                        duration_minutes: int, market_conditions: Optional[dict] = None):
+    """Send closed trade to Learning Agent for analysis"""
     try:
         with httpx.Client(timeout=5.0) as client:
             response = client.post(
@@ -66,8 +68,8 @@ def record_closed_trade(symbol: str, side: str, entry_price: float, exit_price: 
 
 def record_trade_for_learning(symbol: str, side: str, entry_price: float, exit_price: float,
                                leverage: float, duration_minutes: int, 
-                               market_conditions: dict = None):
-    """Helper per calcolare PnL e registrare il trade"""
+                               market_conditions: Optional[dict] = None):
+    """Helper to calculate PnL and record trade to Learning Agent"""
     try:
         # Normalizza symbol
         symbol_key = normalize_symbol(symbol)
@@ -109,9 +111,6 @@ reverse_cooldown_tracker = {}
 # --- COOLDOWN CONFIGURATION ---
 COOLDOWN_MINUTES = 5
 COOLDOWN_FILE = "/data/closed_cooldown.json"
-
-# --- LEARNING DEFAULTS ---
-DEFAULT_SIZE_PCT = 0.15  # Default size percentage for learning when actual value unknown
 
 file_lock = Lock()
 
