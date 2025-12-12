@@ -332,6 +332,63 @@ def execute_reverse(symbol, current_side, recovery_size_pct):
         return False
 
 
+def check_recent_closes_and_save_cooldown():
+    """Rileva posizioni chiuse da Bybit (SL/TP) e salva cooldown"""
+    if not exchange:
+        return
+    
+    try:
+        # Ottieni posizioni chiuse negli ultimi 10 minuti
+        res = exchange.private_get_v5_position_closed_pnl({
+            'category': 'linear',
+            'limit': 20
+        })
+        
+        if not res or res.get('retCode') != 0:
+            return
+        
+        items = res.get('result', {}).get('list', [])
+        current_time = time.time()
+        
+        # Carica cooldown esistenti
+        cooldowns = {}
+        if os.path.exists(COOLDOWN_FILE):
+            with open(COOLDOWN_FILE, 'r') as f:
+                cooldowns = json.load(f)
+        
+        for item in items:
+            # Controlla se chiusa negli ultimi 10 minuti
+            close_time_ms = int(item.get('updatedTime', 0))
+            close_time_sec = close_time_ms / 1000
+            
+            if (current_time - close_time_sec) > 600:  # Più di 10 minuti fa
+                continue
+            
+            symbol = item.get('symbol', '')  # es. "ETHUSDT"
+            side = item.get('side', '').lower()  # "Buy" o "Sell"
+            
+            # Converti side in long/short
+            direction = 'long' if side == 'buy' else 'short'
+            
+            # Crea chiave cooldown
+            symbol_key = symbol.replace("USDT", "").replace("PERP", "")
+            direction_key = f"{symbol}_{direction}"
+            
+            # Salva cooldown se non esiste già o è più vecchio
+            existing_time = cooldowns.get(direction_key, 0)
+            if close_time_sec > existing_time:
+                cooldowns[direction_key] = close_time_sec
+                cooldowns[symbol] = close_time_sec
+                print(f"💾 Cooldown auto-salvato per {direction_key} (chiusura Bybit)")
+        
+        # Salva file
+        with open(COOLDOWN_FILE, 'w') as f:
+            json.dump(cooldowns, f, indent=2)
+            
+    except Exception as e:
+        print(f"⚠️ Errore check chiusure recenti: {e}")
+
+
 def check_smart_reverse():
     """Sistema intelligente multi-livello per gestire posizioni in perdita"""
     if not ENABLE_AI_REVIEW or not exchange:
@@ -643,6 +700,7 @@ def close_position(req: CloseRequest): return {"status": "manual_only"}
 
 @app.post("/manage_active_positions")
 def manage():
+    check_recent_closes_and_save_cooldown()  # Rileva chiusure automatiche Bybit
     check_and_update_trailing_stops()
     check_smart_reverse()
     return {"status": "ok"}
