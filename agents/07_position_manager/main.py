@@ -204,6 +204,7 @@ def save_ai_decision(decision_data):
         
         decisions = decisions[-100:]  # Mantieni solo ultime 100
         
+        os.makedirs(os.path.dirname(AI_DECISIONS_FILE), exist_ok=True)
         with open(AI_DECISIONS_FILE, 'w') as f:
             json.dump(decisions, f, indent=2)
     except Exception as e:
