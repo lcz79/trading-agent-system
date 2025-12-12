@@ -41,6 +41,9 @@ reverse_cooldown_tracker = {}
 COOLDOWN_MINUTES = 5
 COOLDOWN_FILE = "/data/closed_cooldown.json"
 
+# --- AI DECISIONS FILE ---
+AI_DECISIONS_FILE = "/data/ai_decisions.json"
+
 file_lock = Lock()
 
 exchange = None
@@ -178,6 +181,33 @@ def check_and_update_trailing_stops():
         print(f"⚠️ Trailing logic error: {e}")
 
 # --- SMART REVERSE SYSTEM ---
+
+def save_ai_decision(decision_data):
+    """Salva la decisione AI per visualizzarla nella dashboard"""
+    try:
+        decisions = []
+        if os.path.exists(AI_DECISIONS_FILE):
+            with open(AI_DECISIONS_FILE, 'r') as f:
+                decisions = json.load(f)
+        
+        decisions.append({
+            'timestamp': datetime.now().isoformat(),
+            'symbol': decision_data.get('symbol'),
+            'action': decision_data.get('action'),
+            'leverage': decision_data.get('leverage', 0),
+            'size_pct': decision_data.get('size_pct', 0),
+            'rationale': decision_data.get('rationale', ''),
+            'analysis_summary': decision_data.get('analysis_summary', ''),
+            'roi_pct': decision_data.get('roi_pct', 0),
+            'source': 'position_manager'  # Per distinguere dalla fonte
+        })
+        
+        decisions = decisions[-100:]  # Mantieni solo ultime 100
+        
+        with open(AI_DECISIONS_FILE, 'w') as f:
+            json.dump(decisions, f, indent=2)
+    except Exception as e:
+        print(f"⚠️ Error saving AI decision: {e}")
 
 def request_reverse_analysis(symbol, position_data):
     """Chiama Master AI per analisi reverse"""
@@ -496,6 +526,17 @@ def check_smart_reverse():
                     print(f"🤖 AI REVERSE DECISION for {symbol}: {action} (confidence: {confidence}%)")
                     print(f"   Rationale: {rationale}")
                     
+                    # Salva decisione AI per dashboard
+                    save_ai_decision({
+                        'symbol': symbol.replace("/", "").replace(":USDT", ""),
+                        'action': action,
+                        'rationale': rationale,
+                        'analysis_summary': f"REVERSE TRIGGER | ROI: {roi*100:.2f}% | Confidence: {confidence}%",
+                        'roi_pct': roi * 100,
+                        'leverage': leverage,
+                        'size_pct': recovery_size_pct * 100 if action == "REVERSE" else 0
+                    })
+                    
                     if action == "REVERSE":
                         print(f"🔄 Eseguo REVERSE per {symbol} con size {recovery_size_pct*100:.1f}%")
                         if execute_reverse(symbol, side, recovery_size_pct):
@@ -530,8 +571,20 @@ def check_smart_reverse():
                 if analysis:
                     action = analysis.get("action", "HOLD")
                     rationale = analysis.get("rationale", "No rationale")
+                    confidence = analysis.get("confidence", 0)
                     print(f"📊 AI RACCOMANDA: {action}")
                     print(f"   Rationale: {rationale}")
+                    
+                    # Salva decisione AI per dashboard
+                    save_ai_decision({
+                        'symbol': symbol.replace("/", "").replace(":USDT", ""),
+                        'action': action,
+                        'rationale': rationale,
+                        'analysis_summary': f"AI REVIEW | ROI: {roi*100:.2f}% | Confidence: {confidence}%",
+                        'roi_pct': roi * 100,
+                        'leverage': leverage,
+                        'size_pct': 0
+                    })
                 else:
                     print(f"⚠️ Analisi AI fallita per {symbol}")
                 
