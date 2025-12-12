@@ -37,6 +37,10 @@ REVERSE_COOLDOWN_MINUTES = 30
 REVERSE_LEVERAGE = 5.0  # Leva per posizioni reverse
 reverse_cooldown_tracker = {}
 
+# --- COOLDOWN CONFIGURATION ---
+COOLDOWN_MINUTES = 5
+COOLDOWN_FILE = "/data/closed_cooldown.json"
+
 file_lock = Lock()
 
 exchange = None
@@ -229,6 +233,27 @@ def execute_close_position(symbol):
             symbol, 'market', close_side, size,
             params={'category': 'linear', 'reduceOnly': True}
         )
+        
+        # Salva cooldown per symbol + direzione
+        try:
+            symbol_key = symbol.replace("/", "").replace(":USDT", "")
+            cooldowns = {}
+            if os.path.exists(COOLDOWN_FILE):
+                with open(COOLDOWN_FILE, 'r') as f:
+                    cooldowns = json.load(f)
+            
+            # Salva con direzione specifica
+            direction_key = f"{symbol_key}_{side}"
+            cooldowns[direction_key] = time.time()
+            # Mantieni anche per compatibilità
+            cooldowns[symbol_key] = time.time()
+            
+            with open(COOLDOWN_FILE, 'w') as f:
+                json.dump(cooldowns, f, indent=2)
+            
+            print(f"💾 Cooldown salvato per {direction_key}")
+        except Exception as e:
+            print(f"⚠️ Errore salvataggio cooldown: {e}")
         
         print(f"✅ Posizione {symbol} chiusa con successo")
         return True
@@ -519,6 +544,55 @@ def open_position(order: OrderRequest):
         if not target_market: target_market = exchange.market(raw_sym)
         sym = target_market['symbol']
         
+        # Determina la direzione richiesta
+        is_long_request = 'buy' in order.side.lower() or 'long' in order.side.lower()
+        requested_side = 'long' if is_long_request else 'short'
+        symbol_key = sym.replace("/", "").replace(":USDT", "")
+        
+        # CONTROLLO 1: Verifica posizioni esistenti
+        try:
+            positions = exchange.fetch_positions([sym], params={'category': 'linear'})
+            for p in positions:
+                contracts = float(p.get('contracts', 0))
+                if contracts > 0:
+                    existing_side = p.get('side', '').lower()
+                    
+                    if existing_side == requested_side:
+                        # Stessa direzione → BLOCCA
+                        print(f"⚠️ SKIP: Già esiste posizione {existing_side.upper()} su {sym}")
+                        return {
+                            "status": "skipped", 
+                            "msg": f"Posizione {existing_side} già aperta su {sym}",
+                            "existing_side": existing_side
+                        }
+                    else:
+                        # Direzione opposta → REVERSE permesso
+                        print(f"🔄 REVERSE PERMESSO: {existing_side} → {requested_side} su {sym}")
+        except Exception as e:
+            print(f"⚠️ Errore check posizioni esistenti: {e}")
+        
+        # CONTROLLO 2: Verifica cooldown per symbol + direzione
+        try:
+            if os.path.exists(COOLDOWN_FILE):
+                with open(COOLDOWN_FILE, 'r') as f:
+                    cooldowns = json.load(f)
+                
+                # Chiave specifica per symbol + direzione (es: ETH_long, BTC_short)
+                cooldown_key = f"{symbol_key}_{requested_side}"
+                last_close_time = cooldowns.get(cooldown_key, 0)
+                elapsed = time.time() - last_close_time
+                
+                if elapsed < (COOLDOWN_MINUTES * 60):
+                    minutes_left = COOLDOWN_MINUTES - (elapsed / 60)
+                    print(f"⏳ COOLDOWN: {sym} {requested_side} - ancora {minutes_left:.1f} minuti")
+                    return {
+                        "status": "cooldown",
+                        "msg": f"Cooldown attivo per {sym} {requested_side}",
+                        "minutes_left": round(minutes_left, 1)
+                    }
+        except Exception as e:
+            print(f"⚠️ Errore check cooldown: {e}")
+        
         # 1. Leva
         try: exchange.set_leverage(int(order.leverage), sym, params={'category': 'linear'})
         except: pass
@@ -545,7 +619,7 @@ def open_position(order: OrderRequest):
 
         # 4. SL Iniziale
         sl_pct = order.sl_pct if order.sl_pct > 0 else DEFAULT_INITIAL_SL_PCT
-        is_long = 'buy' in order.side.lower() or 'long' in order.side.lower()
+        is_long = requested_side == 'long'
         side = 'buy' if is_long else 'sell'
         
         sl_price = price * (1 - sl_pct) if is_long else price * (1 + sl_pct)
