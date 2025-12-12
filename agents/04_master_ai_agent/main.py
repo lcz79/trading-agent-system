@@ -20,8 +20,7 @@ AGENT_URLS = {
     "technical": "http://01_technical_analyzer:8000",
     "fibonacci": "http://03_fibonacci_agent:8000",
     "gann": "http://05_gann_analyzer_agent:8000",
-    "news": "http://06_news_sentiment_agent:8000",
-    "forecaster": "http://08_forecaster_agent:8000"
+    "news": "http://06_news_sentiment_agent:8000"
 }
 
 # Default parameters (fallback)
@@ -327,19 +326,6 @@ async def analyze_reverse(payload: ReverseAnalysisRequest):
             except Exception as e:
                 logger.warning(f"⚠️ News analyzer failed: {e}")
                 agents_data['news'] = {}
-            
-            # Forecaster
-            try:
-                resp = await client.post(
-                    f"{AGENT_URLS['forecaster']}/forecast",
-                    json={"symbol": symbol}
-                )
-                if resp.status_code == 200:
-                    agents_data['forecaster'] = resp.json()
-                    logger.info(f"✅ Forecast data received for {symbol}")
-            except Exception as e:
-                logger.warning(f"⚠️ Forecaster failed: {e}")
-                agents_data['forecaster'] = {}
         
         # Calcola recovery size usando la formula specificata
         pnl_dollars = position.get('pnl_dollars', 0)
@@ -368,8 +354,7 @@ async def analyze_reverse(payload: ReverseAnalysisRequest):
             "technical_analysis": agents_data.get('technical', {}),
             "fibonacci_analysis": agents_data.get('fibonacci', {}),
             "gann_analysis": agents_data.get('gann', {}),
-            "news_sentiment": agents_data.get('news', {}),
-            "forecast": agents_data.get('forecaster', {})
+            "news_sentiment": agents_data.get('news', {})
         }
         
         system_prompt = """Sei un TRADER ESPERTO che analizza posizioni in perdita.
@@ -384,7 +369,6 @@ CRITERI PER REVERSE (TUTTI devono essere soddisfatti):
 - RSI mostra chiaro over/undersold nella direzione opposta
 - Fibonacci/Gann mostrano supporto/resistenza forte
 - News/sentiment supportano la nuova direzione
-- Forecast prevede movimento nella direzione opposta
 
 CRITERI PER CLOSE:
 - Indicatori contrastanti, no chiara direzione
@@ -458,8 +442,7 @@ Analizza TUTTI gli indicatori e decidi: HOLD, CLOSE o REVERSE."""
                 "technical_available": bool(agents_data.get('technical')),
                 "fibonacci_available": bool(agents_data.get('fibonacci')),
                 "gann_available": bool(agents_data.get('gann')),
-                "news_available": bool(agents_data.get('news')),
-                "forecast_available": bool(agents_data.get('forecaster'))
+                "news_available": bool(agents_data.get('news'))
             }
         }
         
