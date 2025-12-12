@@ -143,11 +143,6 @@ def check_and_update_trailing_stops():
             else:
                 roi_raw = (entry_price - mark_price) / entry_price
             roi_pct = roi_raw * leverage
-                roi_raw = (entry_price - mark_price) / entry_price
-            roi_pct = roi_raw * leverage
-                roi_raw = (entry_price - mark_price) / entry_price
-            roi_pct = roi_raw * leverage
-
             # 2) Attivazione trailing
             if roi_pct >= TRAILING_ACTIVATION_PCT:
                 new_sl_price = None
