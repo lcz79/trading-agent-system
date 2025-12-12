@@ -333,7 +333,23 @@ def execute_reverse(symbol, current_side, recovery_size_pct):
 
 
 def check_recent_closes_and_save_cooldown():
-    """Rileva posizioni chiuse da Bybit (SL/TP) e salva cooldown"""
+    """
+    Rileva posizioni chiuse da Bybit (SL/TP) e salva cooldown
+    
+    Questa funzione previene la riapertura immediata di posizioni nella stessa direzione
+    quando Bybit chiude automaticamente una posizione tramite Stop Loss o Take Profit.
+    
+    Comportamento:
+    - Controlla le ultime 20 posizioni chiuse
+    - Salva cooldown per posizioni chiuse negli ultimi 10 minuti
+    - Usa chiave specifica per direzione (es: ETHUSDT_long, BTCUSDT_short)
+    - Permette REVERSE (direzione opposta) ma blocca stessa direzione per COOLDOWN_MINUTES
+    
+    Esempio:
+    - ETH LONG chiuso da SL → salva cooldown ETHUSDT_long
+    - Nuovo segnale LONG su ETH → ❌ bloccato (cooldown attivo)
+    - Nuovo segnale SHORT su ETH → ✅ permesso (reverse)
+    """
     if not exchange:
         return
     
@@ -357,7 +373,8 @@ def check_recent_closes_and_save_cooldown():
                 try:
                     with open(COOLDOWN_FILE, 'r') as f:
                         cooldowns = json.load(f)
-                except:
+                except (json.JSONDecodeError, IOError) as e:
+                    print(f"⚠️ Errore lettura cooldown file: {e}")
                     cooldowns = {}
         
         for item in items:
@@ -374,14 +391,14 @@ def check_recent_closes_and_save_cooldown():
             # Converti side in long/short
             direction = 'long' if side == 'buy' else 'short'
             
-            # Crea chiave cooldown
-            symbol_key = symbol.replace("USDT", "").replace("PERP", "")
+            # Crea chiave cooldown (usa symbol completo per consistenza)
             direction_key = f"{symbol}_{direction}"
             
             # Salva cooldown se non esiste già o è più vecchio
             existing_time = cooldowns.get(direction_key, 0)
             if close_time_sec > existing_time:
                 cooldowns[direction_key] = close_time_sec
+                # Salva anche con chiave symbol per backward compatibility
                 cooldowns[symbol] = close_time_sec
                 print(f"💾 Cooldown auto-salvato per {direction_key} (chiusura Bybit)")
         
@@ -390,8 +407,8 @@ def check_recent_closes_and_save_cooldown():
             try:
                 with open(COOLDOWN_FILE, 'w') as f:
                     json.dump(cooldowns, f, indent=2)
-            except:
-                pass
+            except IOError as e:
+                print(f"⚠️ Errore scrittura cooldown file: {e}")
             
     except Exception as e:
         print(f"⚠️ Errore check chiusure recenti: {e}")
