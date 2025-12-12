@@ -32,6 +32,11 @@ MASTER_AI_URL = os.getenv("MASTER_AI_URL", "http://04_master_ai_agent:8000")
 # --- LEARNING AGENT ---
 LEARNING_AGENT_URL = "http://10_learning_agent:8000"
 
+def normalize_symbol(symbol: str) -> str:
+    """Normalizza il simbolo rimuovendo separatori e suffissi"""
+    return symbol.replace("/", "").replace(":USDT", "")
+
+
 def record_closed_trade(symbol: str, side: str, entry_price: float, exit_price: float, 
                         pnl_pct: float, leverage: float, size_pct: float, 
                         duration_minutes: int, market_conditions: dict = None):
@@ -57,6 +62,40 @@ def record_closed_trade(symbol: str, side: str, entry_price: float, exit_price: 
                 print(f"📚 Trade recorded for learning: {symbol} {side} PnL={pnl_pct:.2f}%")
     except Exception as e:
         print(f"⚠️ Failed to record trade for learning: {e}")
+
+
+def record_trade_for_learning(symbol: str, side: str, entry_price: float, exit_price: float,
+                               leverage: float, duration_minutes: int, 
+                               market_conditions: dict = None):
+    """Helper per calcolare PnL e registrare il trade"""
+    try:
+        # Normalizza symbol
+        symbol_key = normalize_symbol(symbol)
+        
+        # Calcola PnL % con leva
+        is_long = side in ['long', 'buy']
+        if entry_price > 0:
+            if is_long:
+                pnl_raw = (exit_price - entry_price) / entry_price
+            else:
+                pnl_raw = (entry_price - exit_price) / entry_price
+            pnl_pct = pnl_raw * leverage * 100
+        else:
+            pnl_pct = 0
+        
+        record_closed_trade(
+            symbol=symbol_key,
+            side=side,
+            entry_price=entry_price,
+            exit_price=exit_price,
+            pnl_pct=pnl_pct,
+            leverage=leverage,
+            size_pct=DEFAULT_SIZE_PCT,
+            duration_minutes=duration_minutes,
+            market_conditions=market_conditions or {}
+        )
+    except Exception as e:
+        print(f"⚠️ Errore in record_trade_for_learning: {e}")
 
 # --- SMART REVERSE THRESHOLDS ---
 WARNING_THRESHOLD = -0.08
@@ -283,26 +322,17 @@ def execute_close_position(symbol):
         )
         
         # Record trade per learning
-        try:
-            # Normalizza symbol in modo consistente
-            symbol_key = symbol.replace("/", "").replace(":USDT", "")
-            # Nota: duration_minutes non disponibile per chiusure manuali
-            # Il Learning Agent userà solo i trade con durata valida per analisi temporali
-            duration_minutes = 0
-            
-            record_closed_trade(
-                symbol=symbol_key,
-                side=side,
-                entry_price=entry_price,
-                exit_price=mark_price,
-                pnl_pct=pnl_pct,
-                leverage=leverage,
-                size_pct=DEFAULT_SIZE_PCT,
-                duration_minutes=duration_minutes,
-                market_conditions={}
-            )
-        except Exception as e:
-            print(f"⚠️ Errore recording trade: {e}")
+        # Nota: duration_minutes non disponibile per chiusure manuali
+        # Il Learning Agent userà solo i trade con durata valida per analisi temporali
+        record_trade_for_learning(
+            symbol=symbol,
+            side=side,
+            entry_price=entry_price,
+            exit_price=mark_price,
+            leverage=leverage,
+            duration_minutes=0,
+            market_conditions={}
+        )
         
         # Salva cooldown per symbol + direzione
         try:
@@ -477,32 +507,18 @@ def check_recent_closes_and_save_cooldown():
                 try:
                     entry_price = float(item.get('avgEntryPrice', 0))
                     exit_price = float(item.get('avgExitPrice', 0))
-                    closed_pnl = float(item.get('closedPnl', 0))
                     leverage = float(item.get('leverage', 1))
-                    
-                    # Calcola PnL % approssimato
-                    if entry_price > 0:
-                        is_long = direction == 'long'
-                        if is_long:
-                            pnl_raw = (exit_price - entry_price) / entry_price
-                        else:
-                            pnl_raw = (entry_price - exit_price) / entry_price
-                        pnl_pct = pnl_raw * leverage * 100
-                    else:
-                        pnl_pct = 0
                     
                     # Calcola durata in minuti
                     created_time_ms = int(item.get('createdTime', close_time_ms))
                     duration_minutes = int((close_time_ms - created_time_ms) / 1000 / 60)
                     
-                    record_closed_trade(
+                    record_trade_for_learning(
                         symbol=symbol_raw,
                         side=direction,
                         entry_price=entry_price,
                         exit_price=exit_price,
-                        pnl_pct=pnl_pct,
                         leverage=leverage,
-                        size_pct=DEFAULT_SIZE_PCT,
                         duration_minutes=duration_minutes,
                         market_conditions={"closed_by": "bybit_sl_tp"}
                     )
