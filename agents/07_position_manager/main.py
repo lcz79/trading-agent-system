@@ -208,7 +208,7 @@ def check_and_update_trailing_stops():
             
             entry_price = float(p['entryPrice'])
             mark_price = float(p['markPrice'])
-            sl_current = float(p.get('stopLoss') or 0)
+            sl_current = float(p.get('info', {}).get('stopLoss') or p.get('stopLoss') or 0)
 
             # 1) ROI in % (con leva)
             leverage = float(p. get('leverage') or 1)
