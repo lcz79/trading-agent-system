@@ -136,11 +136,17 @@ def check_and_update_trailing_stops():
             mark_price = float(p['markPrice'])
             sl_current = float(p.get('stopLoss') or 0)
 
-            # 1) ROI in %
+            # 1) ROI in % (con leva)
+            leverage = float(p. get('leverage') or 1)
             if is_long:
-                roi_pct = (mark_price - entry_price) / entry_price
+                roi_raw = (mark_price - entry_price) / entry_price
             else:
-                roi_pct = (entry_price - mark_price) / entry_price
+                roi_raw = (entry_price - mark_price) / entry_price
+            roi_pct = roi_raw * leverage
+                roi_raw = (entry_price - mark_price) / entry_price
+            roi_pct = roi_raw * leverage
+                roi_raw = (entry_price - mark_price) / entry_price
+            roi_pct = roi_raw * leverage
 
             # 2) Attivazione trailing
             if roi_pct >= TRAILING_ACTIVATION_PCT:
