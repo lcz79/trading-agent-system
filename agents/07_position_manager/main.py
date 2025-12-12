@@ -350,11 +350,15 @@ def check_recent_closes_and_save_cooldown():
         items = res.get('result', {}).get('list', [])
         current_time = time.time()
         
-        # Carica cooldown esistenti
-        cooldowns = {}
-        if os.path.exists(COOLDOWN_FILE):
-            with open(COOLDOWN_FILE, 'r') as f:
-                cooldowns = json.load(f)
+        # Carica cooldown esistenti con lock
+        with file_lock:
+            cooldowns = {}
+            if os.path.exists(COOLDOWN_FILE):
+                try:
+                    with open(COOLDOWN_FILE, 'r') as f:
+                        cooldowns = json.load(f)
+                except:
+                    cooldowns = {}
         
         for item in items:
             # Controlla se chiusa negli ultimi 10 minuti
@@ -381,9 +385,13 @@ def check_recent_closes_and_save_cooldown():
                 cooldowns[symbol] = close_time_sec
                 print(f"💾 Cooldown auto-salvato per {direction_key} (chiusura Bybit)")
         
-        # Salva file
-        with open(COOLDOWN_FILE, 'w') as f:
-            json.dump(cooldowns, f, indent=2)
+        # Salva file con lock
+        with file_lock:
+            try:
+                with open(COOLDOWN_FILE, 'w') as f:
+                    json.dump(cooldowns, f, indent=2)
+            except:
+                pass
             
     except Exception as e:
         print(f"⚠️ Errore check chiusure recenti: {e}")
