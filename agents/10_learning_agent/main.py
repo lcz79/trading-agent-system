@@ -39,9 +39,9 @@ DEFAULT_PARAMS = {
     "max_rsi_for_short": 60,
 }
 
-# OpenAI client for DeepSeek
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-client = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
+# DeepSeek client
+DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
+client = OpenAI(api_key=DEEPSEEK_API_KEY, base_url="https://api.deepseek.com") if DEEPSEEK_API_KEY else None
 
 
 def log_api_call(tokens_in: int, tokens_out: int):
@@ -202,12 +202,12 @@ def calculate_performance(trades: List[Dict[str, Any]]) -> Dict[str, Any]:
 async def call_deepseek(prompt: str) -> str:
     """Call DeepSeek API for analysis"""
     if not client:
-        logger.warning("OpenAI client not configured")
+        logger.warning("DeepSeek client not configured")
         return "{}"
     
     try:
         response = client.chat.completions.create(
-            model=os.getenv("OPENAI_MODEL", "gpt-4o"),
+            model="deepseek-chat",
             messages=[
                 {"role": "system", "content": "You are an expert trading strategy analyst. Respond ONLY with valid JSON."},
                 {"role": "user", "content": prompt}

@@ -4,8 +4,10 @@ import json
 import time
 import math
 import requests
+import httpx
 from decimal import Decimal, ROUND_DOWN
 from datetime import datetime
+from typing import Optional
 from fastapi import FastAPI
 from pydantic import BaseModel
 from threading import Thread, Lock
@@ -27,6 +29,75 @@ DEFAULT_INITIAL_SL_PCT = 0.04    # Stop Loss Iniziale
 ENABLE_AI_REVIEW = os.getenv("ENABLE_AI_REVIEW", "true").lower() == "true"
 AI_REVIEW_LOSS_THRESHOLD = 0.03  # Attiva review se perdita > 3%
 MASTER_AI_URL = os.getenv("MASTER_AI_URL", "http://04_master_ai_agent:8000")
+
+# --- LEARNING AGENT ---
+LEARNING_AGENT_URL = "http://10_learning_agent:8000"
+DEFAULT_SIZE_PCT = 0.15  # Default size percentage for learning when actual value unknown
+
+def normalize_symbol(symbol: str) -> str:
+    """Normalize symbol by removing separators and suffixes"""
+    return symbol.replace("/", "").replace(":USDT", "")
+
+
+def record_closed_trade(symbol: str, side: str, entry_price: float, exit_price: float, 
+                        pnl_pct: float, leverage: float, size_pct: float, 
+                        duration_minutes: int, market_conditions: Optional[dict] = None):
+    """Send closed trade to Learning Agent for analysis"""
+    try:
+        with httpx.Client(timeout=5.0) as client:
+            response = client.post(
+                f"{LEARNING_AGENT_URL}/record_trade",
+                json={
+                    "timestamp": datetime.now().isoformat(),
+                    "symbol": symbol,
+                    "side": side,
+                    "entry_price": entry_price,
+                    "exit_price": exit_price,
+                    "pnl_pct": pnl_pct,
+                    "leverage": leverage,
+                    "size_pct": size_pct,
+                    "duration_minutes": duration_minutes,
+                    "market_conditions": market_conditions or {}
+                }
+            )
+            if response.status_code == 200:
+                print(f"📚 Trade recorded for learning: {symbol} {side} PnL={pnl_pct:.2f}%")
+    except Exception as e:
+        print(f"⚠️ Failed to record trade for learning: {e}")
+
+
+def record_trade_for_learning(symbol: str, side: str, entry_price: float, exit_price: float,
+                               leverage: float, duration_minutes: int, 
+                               market_conditions: Optional[dict] = None):
+    """Helper to calculate PnL and record trade to Learning Agent"""
+    try:
+        # Normalizza symbol
+        symbol_key = normalize_symbol(symbol)
+        
+        # Calcola PnL % con leva
+        is_long = side in ['long', 'buy']
+        if entry_price > 0:
+            if is_long:
+                pnl_raw = (exit_price - entry_price) / entry_price
+            else:
+                pnl_raw = (entry_price - exit_price) / entry_price
+            pnl_pct = pnl_raw * leverage * 100
+        else:
+            pnl_pct = 0
+        
+        record_closed_trade(
+            symbol=symbol_key,
+            side=side,
+            entry_price=entry_price,
+            exit_price=exit_price,
+            pnl_pct=pnl_pct,
+            leverage=leverage,
+            size_pct=DEFAULT_SIZE_PCT,
+            duration_minutes=duration_minutes,
+            market_conditions=market_conditions or {}
+        )
+    except Exception as e:
+        print(f"⚠️ Errore in record_trade_for_learning: {e}")
 
 # --- SMART REVERSE THRESHOLDS ---
 WARNING_THRESHOLD = -0.08
@@ -254,16 +325,43 @@ def execute_close_position(symbol):
             print(f"⚠️ Nessuna posizione aperta per {symbol}")
             return False
         
+        # Cattura dati pre-chiusura per learning
+        entry_price = float(position.get('entryPrice', 0))
+        mark_price = float(position.get('markPrice', entry_price))
+        leverage = float(position.get('leverage', 1))
+        side = position.get('side', '').lower()
+        unrealized_pnl = float(position.get('unrealizedPnl', 0))
+        
+        # Calcola PnL % con leva (matching Bybit ROI)
+        is_long = side in ['long', 'buy']
+        if is_long:
+            pnl_raw = (mark_price - entry_price) / entry_price if entry_price > 0 else 0
+        else:
+            pnl_raw = (entry_price - mark_price) / entry_price if entry_price > 0 else 0
+        pnl_pct = pnl_raw * leverage * 100
+        
         # Chiudi la posizione
         size = float(position.get('contracts'))
-        side = position.get('side', '').lower()
-        close_side = 'sell' if side in ['long', 'buy'] else 'buy'
+        close_side = 'sell' if is_long else 'buy'
         
         print(f"🔒 Chiudo posizione {symbol}: {side} size={size}")
         
         exchange.create_order(
             symbol, 'market', close_side, size,
             params={'category': 'linear', 'reduceOnly': True}
+        )
+        
+        # Record trade per learning
+        # Nota: duration_minutes non disponibile per chiusure manuali
+        # Il Learning Agent userà solo i trade con durata valida per analisi temporali
+        record_trade_for_learning(
+            symbol=symbol,
+            side=side,
+            entry_price=entry_price,
+            exit_price=mark_price,
+            leverage=leverage,
+            duration_minutes=0,
+            market_conditions={}
         )
         
         # Salva cooldown per symbol + direzione
@@ -417,22 +515,45 @@ def check_recent_closes_and_save_cooldown():
             if (current_time - close_time_sec) > 600:  # Più di 10 minuti fa
                 continue
             
-            symbol = item.get('symbol', '')  # es. "ETHUSDT"
+            # Symbol già normalizzato da Bybit (es. "ETHUSDT")
+            symbol_raw = item.get('symbol', '')
             side = item.get('side', '').lower()  # "Buy" o "Sell"
             
             # Converti side in long/short
             direction = 'long' if side == 'buy' else 'short'
             
             # Crea chiave cooldown (usa symbol completo per consistenza)
-            direction_key = f"{symbol}_{direction}"
+            direction_key = f"{symbol_raw}_{direction}"
             
             # Salva cooldown se non esiste già o è più vecchio
             existing_time = cooldowns.get(direction_key, 0)
             if close_time_sec > existing_time:
                 cooldowns[direction_key] = close_time_sec
                 # Salva anche con chiave symbol per backward compatibility
-                cooldowns[symbol] = close_time_sec
+                cooldowns[symbol_raw] = close_time_sec
                 print(f"💾 Cooldown auto-salvato per {direction_key} (chiusura Bybit)")
+                
+                # Record trade per learning (chiusura automatica Bybit)
+                try:
+                    entry_price = float(item.get('avgEntryPrice', 0))
+                    exit_price = float(item.get('avgExitPrice', 0))
+                    leverage = float(item.get('leverage', 1))
+                    
+                    # Calcola durata in minuti
+                    created_time_ms = int(item.get('createdTime', close_time_ms))
+                    duration_minutes = int((close_time_ms - created_time_ms) / 1000 / 60)
+                    
+                    record_trade_for_learning(
+                        symbol=symbol_raw,
+                        side=direction,
+                        entry_price=entry_price,
+                        exit_price=exit_price,
+                        leverage=leverage,
+                        duration_minutes=duration_minutes,
+                        market_conditions={"closed_by": "bybit_sl_tp"}
+                    )
+                except Exception as e:
+                    print(f"⚠️ Errore recording auto-closed trade: {e}")
         
         # Salva file con lock
         with file_lock:
