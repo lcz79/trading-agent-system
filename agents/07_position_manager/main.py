@@ -71,6 +71,9 @@ reverse_cooldown_tracker = {}
 COOLDOWN_MINUTES = 5
 COOLDOWN_FILE = "/data/closed_cooldown.json"
 
+# --- LEARNING DEFAULTS ---
+DEFAULT_SIZE_PCT = 0.15  # Default size percentage for learning when actual value unknown
+
 file_lock = Lock()
 
 exchange = None
@@ -281,11 +284,11 @@ def execute_close_position(symbol):
         
         # Record trade per learning
         try:
+            # Normalizza symbol in modo consistente
             symbol_key = symbol.replace("/", "").replace(":USDT", "")
-            # Stima durata (non abbiamo il timestamp di apertura qui, usa 0 come placeholder)
+            # Nota: duration_minutes non disponibile per chiusure manuali
+            # Il Learning Agent userà solo i trade con durata valida per analisi temporali
             duration_minutes = 0
-            # Stima size_pct (non abbiamo il wallet balance al momento dell'apertura)
-            size_pct = 0.15  # default
             
             record_closed_trade(
                 symbol=symbol_key,
@@ -294,7 +297,7 @@ def execute_close_position(symbol):
                 exit_price=mark_price,
                 pnl_pct=pnl_pct,
                 leverage=leverage,
-                size_pct=size_pct,
+                size_pct=DEFAULT_SIZE_PCT,
                 duration_minutes=duration_minutes,
                 market_conditions={}
             )
@@ -452,21 +455,22 @@ def check_recent_closes_and_save_cooldown():
             if (current_time - close_time_sec) > 600:  # Più di 10 minuti fa
                 continue
             
-            symbol = item.get('symbol', '')  # es. "ETHUSDT"
+            # Symbol già normalizzato da Bybit (es. "ETHUSDT")
+            symbol_raw = item.get('symbol', '')
             side = item.get('side', '').lower()  # "Buy" o "Sell"
             
             # Converti side in long/short
             direction = 'long' if side == 'buy' else 'short'
             
             # Crea chiave cooldown (usa symbol completo per consistenza)
-            direction_key = f"{symbol}_{direction}"
+            direction_key = f"{symbol_raw}_{direction}"
             
             # Salva cooldown se non esiste già o è più vecchio
             existing_time = cooldowns.get(direction_key, 0)
             if close_time_sec > existing_time:
                 cooldowns[direction_key] = close_time_sec
                 # Salva anche con chiave symbol per backward compatibility
-                cooldowns[symbol] = close_time_sec
+                cooldowns[symbol_raw] = close_time_sec
                 print(f"💾 Cooldown auto-salvato per {direction_key} (chiusura Bybit)")
                 
                 # Record trade per learning (chiusura automatica Bybit)
@@ -492,13 +496,13 @@ def check_recent_closes_and_save_cooldown():
                     duration_minutes = int((close_time_ms - created_time_ms) / 1000 / 60)
                     
                     record_closed_trade(
-                        symbol=symbol,
+                        symbol=symbol_raw,
                         side=direction,
                         entry_price=entry_price,
                         exit_price=exit_price,
                         pnl_pct=pnl_pct,
                         leverage=leverage,
-                        size_pct=0.15,  # default, non abbiamo il dato esatto
+                        size_pct=DEFAULT_SIZE_PCT,
                         duration_minutes=duration_minutes,
                         market_conditions={"closed_by": "bybit_sl_tp"}
                     )
