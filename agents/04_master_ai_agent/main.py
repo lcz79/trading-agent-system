@@ -12,8 +12,8 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("MasterAI")
 
 app = FastAPI()
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-client = OpenAI(api_key=OPENAI_API_KEY)
+DEEPSEEK_API_KEY = os. getenv("DEEPSEEK_API_KEY")
+client = OpenAI(api_key=DEEPSEEK_API_KEY, base_url="https://api.deepseek.com")
 
 # Agent URLs for reverse analysis
 AGENT_URLS = {
@@ -151,7 +151,7 @@ def get_evolved_params() -> Dict[str, Any]:
 async def get_learning_insights():
     """Ottieni insights dal Learning Agent"""
     try:
-        async with httpx.AsyncClient(timeout=5.0) as client:
+        async with httpx.AsyncClient(timeout=5.0) as http_client:
             # Performance recenti
             perf_resp = await client.get(f"{LEARNING_AGENT_URL}/performance")
             perf_data = perf_resp.json() if perf_resp.status_code == 200 else {}
@@ -254,7 +254,7 @@ USA QUESTI PARAMETRI EVOLUTI nelle tue decisioni.
 {insights_text}"""
 
         response = client.chat.completions.create(
-            model="gpt-5.1", 
+            model="deepseek-chat", 
             messages=[
                 {"role": "system", "content": enhanced_system_prompt},
                 {"role": "user", "content": f"ANALIZZA E AGISCI: {json.dumps(prompt_data)}"},
@@ -318,10 +318,10 @@ async def analyze_reverse(payload: ReverseAnalysisRequest):
         # Raccolta dati da tutti gli agenti
         agents_data = {}
         
-        async with httpx.AsyncClient(timeout=10.0) as client:
+        async with httpx.AsyncClient(timeout=10.0) as http_client:
             # Technical Analysis
             try:
-                resp = await client.post(
+                resp = await http_client.post(
                     f"{AGENT_URLS['technical']}/analyze_multi_tf",
                     json={"symbol": symbol}
                 )
@@ -334,7 +334,7 @@ async def analyze_reverse(payload: ReverseAnalysisRequest):
             
             # Fibonacci Analysis
             try:
-                resp = await client.post(
+                resp = await http_client.post(
                     f"{AGENT_URLS['fibonacci']}/analyze_fib",
                     json={"symbol": symbol}
                 )
@@ -347,7 +347,7 @@ async def analyze_reverse(payload: ReverseAnalysisRequest):
             
             # Gann Analysis
             try:
-                resp = await client.post(
+                resp = await http_client.post(
                     f"{AGENT_URLS['gann']}/analyze_gann",
                     json={"symbol": symbol}
                 )
@@ -360,7 +360,7 @@ async def analyze_reverse(payload: ReverseAnalysisRequest):
             
             # News Sentiment
             try:
-                resp = await client.post(
+                resp = await http_client.post(
                     f"{AGENT_URLS['news']}/analyze_sentiment",
                     json={"symbol": symbol}
                 )
@@ -373,7 +373,7 @@ async def analyze_reverse(payload: ReverseAnalysisRequest):
             
             # Forecaster
             try:
-                resp = await client.post(
+                resp = await http_client.post(
                     f"{AGENT_URLS['forecaster']}/forecast",
                     json={"symbol": symbol}
                 )
@@ -459,7 +459,7 @@ Recovery size calcolato: {recovery_size_pct:.2f} ({recovery_size_pct*100:.1f}%)
 Analizza TUTTI gli indicatori e decidi: HOLD, CLOSE o REVERSE."""
         
         response = client.chat.completions.create(
-            model="gpt-5.1",
+            model="deepseek-chat",
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt}
