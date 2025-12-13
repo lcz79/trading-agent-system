@@ -1,7 +1,11 @@
 import pandas as pd
+import logging
 from fastapi import FastAPI
 from pydantic import BaseModel
 from pybit.unified_trading import HTTP
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("FibonacciAgent")
 
 app = FastAPI()
 session = HTTP()
@@ -15,16 +19,25 @@ def get_market_structure(symbol):
     try:
         # Scarichiamo candele a 4 ORE (240 min) per trend solidi
         resp = session.get_kline(category="linear", symbol=symbol, interval="240", limit=200)
-        if resp['retCode'] != 0: return None
+        if not resp or resp.get('retCode') != 0: 
+            return None
         
-        data = resp['result']['list']
+        result = resp.get('result')
+        if not result:
+            return None
+            
+        data = result.get('list')
+        if not data:
+            return None
+            
         # [ts, open, high, low, close, ...]
         df = pd.DataFrame(data, columns=['ts', 'open', 'high', 'low', 'close', 'vol', 'turnover'])
         df['high'] = df['high'].astype(float)
         df['low'] = df['low'].astype(float)
         df['close'] = df['close'].astype(float)
         return df
-    except:
+    except Exception as e:
+        logger.warning(f"Bybit API error for {symbol}: {e}")
         return None
 
 @app.post("/analyze_fib")

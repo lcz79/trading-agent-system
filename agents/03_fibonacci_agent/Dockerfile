@@ -2,10 +2,10 @@ FROM python:3.10-slim
 
 WORKDIR /app
 
-# Installiamo i compilatori base per evitare errori con Pandas/Numpy
+# Build dependencies for pandas/numpy
 RUN apt-get update && apt-get install -y \
-    gcc \
-    g++ \
+    build-essential \
+    gfortran \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .

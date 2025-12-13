@@ -1,16 +1,17 @@
-FROM python:3.9-slim
+FROM python:3.10-slim
 
 WORKDIR /app
 
-# Installa le dipendenze di sistema
-RUN apt-get update && apt-get install -y gcc && rm -rf /var/lib/apt/lists/*
+# System dependencies for compilation
+RUN apt-get update && apt-get install -y \
+    gcc \
+    && rm -rf /var/lib/apt/lists/*
 
-# Copia i requisiti e installa
+# Copy and install requirements
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
-RUN pip install --no-cache-dir textblob
 
-# Scarica i corpora di textblob (necessari per l'analisi)
+# Download textblob corpora (required for analysis)
 RUN python -m textblob.download_corpora
 
 COPY . .

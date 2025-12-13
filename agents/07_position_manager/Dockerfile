@@ -2,14 +2,19 @@ FROM python:3.10-slim
 
 WORKDIR /app
 
-# Copia il file dei requisiti
+# Build dependencies for ccxt/pandas/numpy
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy requirements file
 COPY requirements.txt .
 
-# Installa le dipendenze (incluso ccxt, pandas, numpy)
+# Install dependencies (including ccxt, pandas, numpy)
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copia il resto del codice
+# Copy application code
 COPY . .
 
-# Avvia l'applicazione
+# Start the application
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]

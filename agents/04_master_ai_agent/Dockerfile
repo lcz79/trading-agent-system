@@ -2,9 +2,11 @@ FROM python:3.10-slim
 
 WORKDIR /app
 
-# Dipendenze per Prophet
+# Dependencies for Prophet and numerical computing
 RUN apt-get update && apt-get install -y \
     build-essential \
+    gfortran \
+    libopenblas-dev \
     libgomp1 \
     && rm -rf /var/lib/apt/lists/*
 

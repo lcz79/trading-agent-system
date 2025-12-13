@@ -1,8 +1,12 @@
 import os
+import logging
 import requests
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from textblob import TextBlob
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("NewsSentimentAgent")
 
 app = FastAPI()
 
@@ -20,20 +24,27 @@ def fetch_news(symbol):
         if not NEWS_API_KEY: raise Exception("No Key")
         response = requests.get(url, timeout=5)
         if response.status_code == 200:
-            articles = response.json().get("articles", [])
-            return [a["title"] for a in articles[:5]]
-    except:
-        pass
+            data = response.json()
+            articles = data.get("articles", []) if data else []
+            return [a.get("title", "") for a in articles[:5] if a.get("title")]
+    except Exception as e:
+        logger.warning(f"News API error for {symbol}: {e}")
     return []
 
 def get_fear_and_greed():
     # Recupera il vero Fear & Greed Index dal web
     try:
         r = requests.get("https://api.alternative.me/fng/", timeout=5)
-        data = r.json()
-        return int(data['data'][0]['value']), data['data'][0]['value_classification']
-    except:
-        return 50, "Neutral"
+        if r.status_code == 200:
+            data = r.json()
+            if data and data.get('data') and len(data['data']) > 0:
+                value = data['data'][0].get('value')
+                classification = data['data'][0].get('value_classification', 'Neutral')
+                if value:
+                    return int(value), classification
+    except Exception as e:
+        logger.warning(f"Fear & Greed API error: {e}")
+    return 50, "Neutral"
 
 @app.post("/analyze_sentiment")
 def analyze_sentiment(req: SentimentRequest):

@@ -18,9 +18,17 @@ def analyze(req: GannRequest):
     try:
         # 1. Prendiamo i dati giornalieri per trovare il ciclo mensile
         resp = session.get_kline(category="linear", symbol=symbol, interval="D", limit=60)
-        if resp['retCode'] != 0: return {"error": "Bybit API Error"}
+        if not resp or resp.get('retCode') != 0: 
+            return {"error": "Bybit API Error"}
         
-        data = resp['result']['list']
+        result = resp.get('result')
+        if not result:
+            return {"error": "No result from Bybit"}
+            
+        data = result.get('list')
+        if not data:
+            return {"error": "No data from Bybit"}
+            
         df = pd.DataFrame(data, columns=['ts', 'open', 'high', 'low', 'close', 'vol', 'turnover'])
         df['low'] = df['low'].astype(float)
         df['close'] = df['close'].astype(float)
