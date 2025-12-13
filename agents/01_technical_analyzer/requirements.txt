@@ -6,12 +6,11 @@ ccxt>=4.1.0,<5.0.0
 pandas>=2.0.0,<3.0.0
 numpy>=1.24.0,<2.0.0
 ta>=0.11.0,<1.0.0
-tradingview-screener==0.4.1
+tradingview-screener==2.4.1
 prophet==1.1.5
 yfinance==0.2.32
 matplotlib==3.8.2
 python-dotenv==1.0.0
-hyperliquid-python-sdk==0.3.3
 eth-account==0.10.0
-toonify==0.3.5
+toonify==1.5.1
 psycopg2-binary==2.9.9
