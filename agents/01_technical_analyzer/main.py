@@ -10,9 +10,10 @@ class TechRequest(BaseModel):
 
 @app.post("/analyze_multi_tf")
 def analyze_endpoint(req: TechRequest):
-    data = analyzer.get_complete_analysis(req.symbol)
-    if not data:
-        return {"symbol": req.symbol, "error": "Analysis Failed", "price": 0, "rsi": 50}
+    """Endpoint per analisi multi-timeframe"""
+    data = analyzer.get_multi_tf_analysis(req.symbol)
+    if not data or not data.get("timeframes"):
+        return {"symbol": req.symbol, "error": "Multi-TF Analysis Failed", "timeframes": {}}
     return data
 
 @app.get("/health")
@@ -22,6 +23,6 @@ def health(): return {"status": "active"}
 def analyze_multi_tf_endpoint(req: TechRequest):
     """Endpoint per analisi multi-timeframe completa"""
     data = analyzer.get_multi_tf_analysis(req.symbol)
-    if not data or not data. get("timeframes"):
-        return {"symbol": req.symbol, "error": "Multi-TF Analysis Failed"}
+    if not data or not data.get("timeframes"):
+        return {"symbol": req.symbol, "error": "Multi-TF Analysis Failed", "timeframes": {}}
     return data
