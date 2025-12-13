@@ -844,7 +844,7 @@ def check_smart_reverse():
                         "symbol": sym_id,
                         "action": action,
                         "rationale":  rationale,
-                        "analysis_summary": f"AI REVIEW | ROI:  {roi*100:. 2f}% | Confidence: {confidence:.0f}%",
+                        "analysis_summary": f"AI REVIEW | ROI:  {roi*100:.2f}% | Confidence: {confidence:.0f}%",
                         "roi_pct":  roi * 100,
                         "leverage": leverage,
                         "size_pct": 0,
