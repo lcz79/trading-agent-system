@@ -1,7 +1,11 @@
 import pandas as pd
+import logging
 from fastapi import FastAPI
 from pydantic import BaseModel
 from pybit.unified_trading import HTTP
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("FibonacciAgent")
 
 app = FastAPI()
 session = HTTP()
@@ -32,7 +36,8 @@ def get_market_structure(symbol):
         df['low'] = df['low'].astype(float)
         df['close'] = df['close'].astype(float)
         return df
-    except Exception:
+    except Exception as e:
+        logger.warning(f"Bybit API error for {symbol}: {e}")
         return None
 
 @app.post("/analyze_fib")

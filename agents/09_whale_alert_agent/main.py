@@ -1,5 +1,11 @@
-import os, httpx, time
+import os
+import logging
+import httpx
+import time
 from fastapi import FastAPI
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("WhaleAlertAgent")
 
 app = FastAPI()
 KEY = os.getenv("WHALE_ALERT_API_KEY")
@@ -22,7 +28,8 @@ async def whales():
                     if t.get('symbol') in ['BTC','ETH','SOL'] and t.get('amount_usd')
                 ])
                 return {"summary": summary if summary else "Quiet"}
-    except Exception:
+    except Exception as e:
+        logger.warning(f"Whale Alert API error: {e}")
         pass
     return {"summary": "API Error"}
 

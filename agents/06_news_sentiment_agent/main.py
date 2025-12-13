@@ -1,8 +1,12 @@
 import os
+import logging
 import requests
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from textblob import TextBlob
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("NewsSentimentAgent")
 
 app = FastAPI()
 
@@ -23,7 +27,8 @@ def fetch_news(symbol):
             data = response.json()
             articles = data.get("articles", []) if data else []
             return [a.get("title", "") for a in articles[:5] if a.get("title")]
-    except Exception:
+    except Exception as e:
+        logger.warning(f"News API error for {symbol}: {e}")
         pass
     return []
 
@@ -38,7 +43,8 @@ def get_fear_and_greed():
                 classification = data['data'][0].get('value_classification', 'Neutral')
                 if value:
                     return int(value), classification
-    except Exception:
+    except Exception as e:
+        logger.warning(f"Fear & Greed API error: {e}")
         pass
     return 50, "Neutral"
 
