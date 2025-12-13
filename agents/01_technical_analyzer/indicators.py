@@ -21,9 +21,29 @@ class CryptoTechnicalAnalysisBybit:
 
         try:
             resp = self.session.get_kline(category="linear", symbol=symbol, interval=bybit_interval, limit=limit)
-            if resp['retCode'] != 0: raise Exception(resp['retMsg'])
             
-            raw_data = resp['result']['list']
+            # Safely check response code
+            ret_code = resp.get('retCode')
+            if ret_code is None:
+                print(f"Error fetching {symbol}: Missing retCode in response")
+                return pd.DataFrame()
+            
+            if ret_code != 0:
+                ret_msg = resp.get('retMsg', 'Unknown error')
+                print(f"Error fetching {symbol}: API returned code {ret_code}, message: {ret_msg}")
+                return pd.DataFrame()
+            
+            # Safely extract result data
+            result = resp.get('result')
+            if not result:
+                print(f"Error fetching {symbol}: Missing result in response")
+                return pd.DataFrame()
+            
+            raw_data = result.get('list')
+            if not raw_data or not isinstance(raw_data, list) or len(raw_data) == 0:
+                print(f"Error fetching {symbol}: No data in result.list")
+                return pd.DataFrame()
+            
             df = pd.DataFrame(raw_data, columns=['ts', 'open', 'high', 'low', 'close', 'vol', 'turnover'])
             
             for col in ['open', 'high', 'low', 'close', 'vol']:
@@ -33,6 +53,9 @@ class CryptoTechnicalAnalysisBybit:
             df.rename(columns={'vol': 'volume'}, inplace=True)
             df = df.iloc[::-1].reset_index(drop=True)
             return df
+        except KeyError as e:
+            print(f"Error fetching {symbol}: Missing key in response - {e}")
+            return pd.DataFrame()
         except Exception as e:
             print(f"Error fetching {symbol}: {e}")
             return pd.DataFrame()
@@ -114,10 +137,10 @@ class CryptoTechnicalAnalysisBybit:
                 
                 last = df.iloc[-1]
                 trend = "BULLISH" if last["close"] > last["ema_50"] else "BEARISH"
-                macd_trend = "POSITIVE" if macd_line. iloc[-1] > macd_sig. iloc[-1] else "NEGATIVE"
+                macd_trend = "POSITIVE" if macd_line.iloc[-1] > macd_sig.iloc[-1] else "NEGATIVE"
                 
                 if len(macd_hist) >= 3:
-                    macd_momentum = "RISING" if macd_hist. iloc[-1] > macd_hist. iloc[-3] else "FALLING"
+                    macd_momentum = "RISING" if macd_hist.iloc[-1] > macd_hist.iloc[-3] else "FALLING"
                 else: 
                     macd_momentum = "NEUTRAL"
                 
@@ -135,7 +158,7 @@ class CryptoTechnicalAnalysisBybit:
                 print(f"Error analyzing {ticker} on {tf}: {e}")
                 continue
         
-        tf_1d = result["timeframes"]. get("1d", {})
+        tf_1d = result["timeframes"].get("1d", {})
         tf_4h = result["timeframes"].get("4h", {})
         tf_1h = result["timeframes"].get("1h", {})
         tf_15m = result["timeframes"].get("15m", {})
