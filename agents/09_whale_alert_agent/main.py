@@ -30,7 +30,6 @@ async def whales():
                 return {"summary": summary if summary else "Quiet"}
     except Exception as e:
         logger.warning(f"Whale Alert API error: {e}")
-        pass
     return {"summary": "API Error"}
 
 if __name__=="__main__":

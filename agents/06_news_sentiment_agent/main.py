@@ -29,7 +29,6 @@ def fetch_news(symbol):
             return [a.get("title", "") for a in articles[:5] if a.get("title")]
     except Exception as e:
         logger.warning(f"News API error for {symbol}: {e}")
-        pass
     return []
 
 def get_fear_and_greed():
@@ -45,7 +44,6 @@ def get_fear_and_greed():
                     return int(value), classification
     except Exception as e:
         logger.warning(f"Fear & Greed API error: {e}")
-        pass
     return 50, "Neutral"
 
 @app.post("/analyze_sentiment")
