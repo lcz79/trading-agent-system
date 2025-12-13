@@ -8,15 +8,23 @@ KEY = os.getenv("WHALE_ALERT_API_KEY")
 async def whales():
     if not KEY: return {"summary": "No Key"}
     try:
-        async with httpx.AsyncClient() as c:
+        async with httpx.AsyncClient(timeout=10.0) as c:
             r = await c.get(
                 "https://api.whale-alert.io/v1/transactions",
                 params={"api_key": KEY, "min_value": 10000000, "start": int(time.time())-3600, "limit": 5}
             )
-            txs = r.json().get("transactions", [])
-            summary = ", ".join([f"{t['symbol']} ${t['amount_usd']//1000000}M" for t in txs if t['symbol'] in ['BTC','ETH','SOL']])
-            return {"summary": summary if summary else "Quiet"}
-    except: return {"summary": "API Error"}
+            if r.status_code == 200:
+                data = r.json()
+                txs = data.get("transactions", []) if data else []
+                summary = ", ".join([
+                    f"{t.get('symbol', 'UNKNOWN')} ${t.get('amount_usd', 0)//1000000}M" 
+                    for t in txs 
+                    if t.get('symbol') in ['BTC','ETH','SOL'] and t.get('amount_usd')
+                ])
+                return {"summary": summary if summary else "Quiet"}
+    except Exception:
+        pass
+    return {"summary": "API Error"}
 
 if __name__=="__main__":
     import uvicorn
