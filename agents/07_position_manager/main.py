@@ -843,12 +843,24 @@ def check_smart_reverse():
                     save_ai_decision({
                         "symbol": sym_id,
                         "action": action,
-                        "rationale": rationale,
-                        "analysis_summary": f"AI REVIEW | ROI: {roi*100:.2f}% | Confidence: {confidence:.0f}%",
-                        "roi_pct": roi * 100,
+                        "rationale":  rationale,
+                        "analysis_summary": f"AI REVIEW | ROI:  {roi*100:. 2f}% | Confidence: {confidence:.0f}%",
+                        "roi_pct":  roi * 100,
                         "leverage": leverage,
                         "size_pct": 0,
                     })
+
+                    # Esegui l'azione raccomandata dall'AI
+                    if action == "REVERSE":
+                        recovery_size_pct = to_float(analysis.get("size_pct"), 0.5)
+                        print(f"🔄 Eseguo REVERSE per {symbol} con size {recovery_size_pct*100:.1f}%")
+                        if execute_reverse(symbol, side_dir, recovery_size_pct):
+                            reverse_cooldown_tracker[sym_id] = now
+                    elif action == "CLOSE": 
+                        print(f"🔒 Eseguo CLOSE per {symbol}")
+                        execute_close_position(symbol)
+                    else:
+                        print(f"✋ HOLD - Mantengo posizione {symbol}")
                 else:
                     print(f"⚠️ Analisi AI fallita per {symbol}")
 
