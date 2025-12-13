@@ -95,3 +95,67 @@ class CryptoTechnicalAnalysisBybit:
                 "pivot_pp": round(pp["pp"], 2)
             }
         }
+    def get_multi_tf_analysis(self, ticker: str) -> Dict:
+        """Analisi su 4 timeframe: 15m, 1H, 4H, 1D"""
+        timeframes = ["15m", "1h", "4h", "1d"]
+        result = {"symbol":  ticker, "timeframes": {}}
+        
+        for tf in timeframes:
+            try:
+                df = self.fetch_ohlcv(ticker, tf, limit=100)
+                if df.empty:
+                    continue
+                
+                df["ema_20"] = self.calculate_ema(df["close"], 20)
+                df["ema_50"] = self.calculate_ema(df["close"], 50)
+                macd_line, macd_sig, macd_hist = self.calculate_macd(df["close"])
+                df["rsi_14"] = self.calculate_rsi(df["close"], 14)
+                df["atr_14"] = self.calculate_atr(df["high"], df["low"], df["close"], 14)
+                
+                last = df.iloc[-1]
+                trend = "BULLISH" if last["close"] > last["ema_50"] else "BEARISH"
+                macd_trend = "POSITIVE" if macd_line. iloc[-1] > macd_sig. iloc[-1] else "NEGATIVE"
+                
+                if len(macd_hist) >= 3:
+                    macd_momentum = "RISING" if macd_hist. iloc[-1] > macd_hist. iloc[-3] else "FALLING"
+                else: 
+                    macd_momentum = "NEUTRAL"
+                
+                result["timeframes"][tf] = {
+                    "price": round(float(last["close"]), 2),
+                    "trend":  trend,
+                    "rsi": round(float(last["rsi_14"]), 2),
+                    "macd": macd_trend,
+                    "macd_momentum": macd_momentum,
+                    "ema_20": round(float(last["ema_20"]), 2),
+                    "ema_50": round(float(last["ema_50"]), 2),
+                    "atr":  round(float(last["atr_14"]), 4)
+                }
+            except Exception as e: 
+                print(f"Error analyzing {ticker} on {tf}: {e}")
+                continue
+        
+        tf_1d = result["timeframes"]. get("1d", {})
+        tf_4h = result["timeframes"].get("4h", {})
+        tf_1h = result["timeframes"].get("1h", {})
+        tf_15m = result["timeframes"].get("15m", {})
+        
+        result["summary"] = {
+            "regime": tf_1d.get("trend", "UNKNOWN"),
+            "regime_rsi": tf_1d.get("rsi", 50),
+            "bias": tf_4h.get("trend", "UNKNOWN"),
+            "bias_rsi": tf_4h.get("rsi", 50),
+            "bias_macd": tf_4h.get("macd", "NEUTRAL"),
+            "confirm": tf_1h.get("trend", "UNKNOWN"),
+            "confirm_rsi": tf_1h.get("rsi", 50),
+            "confirm_macd": tf_1h.get("macd", "NEUTRAL"),
+            "confirm_macd_momentum": tf_1h.get("macd_momentum", "NEUTRAL"),
+            "entry_trend": tf_15m.get("trend", "UNKNOWN"),
+            "entry_rsi": tf_15m.get("rsi", 50),
+            "entry_price": tf_15m.get("price", 0),
+            "entry_atr": tf_15m.get("atr", 0)
+        }
+        
+        result["summary"]["tf_aligned"] = (tf_4h.get("trend") == tf_1h.get("trend"))
+        
+        return result

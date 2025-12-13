@@ -178,7 +178,7 @@ async def analysis_cycle():
         assets_data = {}
         for s in scan_list:
             try:
-                t = (await c.post(f"{URLS['tech']}/analyze_multi_tf", json={"symbol": s})).json()
+                t = (await c.post(f"{URLS['tech']}/analyze_multi_tf_full", json={"symbol": s})).json()
                 assets_data[s] = {"tech": t}
             except: pass
         
