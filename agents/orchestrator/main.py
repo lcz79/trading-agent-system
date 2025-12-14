@@ -16,7 +16,10 @@ CYCLE_INTERVAL = 60  # Secondi tra ogni ciclo di controllo (era 900)
 
 AI_DECISIONS_FILE = "/data/ai_decisions.json"
 
-# File lock per operazioni thread-safe
+# File lock per operazioni thread-safe all'interno di questo container
+# NOTA: threading.Lock protegge solo all'interno di questo processo.
+# Per lock tra container diversi sarebbe necessario fcntl.flock o lock distribuito.
+# Dato il pattern di accesso (scritture non frequenti), questo è accettabile.
 file_lock = Lock()
 
 def save_monitoring_decision(positions_count: int, max_positions: int, positions_details: list, reason: str):
