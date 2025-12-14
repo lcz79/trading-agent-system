@@ -40,6 +40,10 @@ TECHNICAL_ANALYZER_URL = os.getenv("TECHNICAL_ANALYZER_URL", "http://01_technica
 FALLBACK_TRAILING_PCT = float(os.getenv("FALLBACK_TRAILING_PCT", "0.025"))  # 2.5%
 DEFAULT_INITIAL_SL_PCT = float(os.getenv("DEFAULT_INITIAL_SL_PCT", "0.04"))  # 4%
 
+# --- BREAK-EVEN PROTECTION ---
+BREAKEVEN_ACTIVATION_PCT = float(os.getenv("BREAKEVEN_ACTIVATION_PCT", "0.02"))  # 2% ROI
+BREAKEVEN_MARGIN_PCT = float(os.getenv("BREAKEVEN_MARGIN_PCT", "0.001"))  # 0.1% margine
+
 # --- PARAMETRI AI REVIEW / REVERSE ---
 ENABLE_AI_REVIEW = os.getenv("ENABLE_AI_REVIEW", "true").lower() == "true"
 MASTER_AI_URL = os.getenv("MASTER_AI_URL", "http://04_master_ai_agent:8000").strip()
@@ -344,8 +348,12 @@ def get_atr_for_symbol(symbol: str) -> Tuple[Optional[float], Optional[float]]:
             r = client.post(f"{TECHNICAL_ANALYZER_URL}/analyze_multi_tf", json={"symbol": clean_id})
             if r.status_code == 200:
                 d = r.json()
-                if d.get("atr") and d.get("price"):
-                    return float(d["atr"]), float(d["price"])
+                # FIX: estrarre da timeframes.15m
+                tf_15m = d.get("timeframes", {}).get("15m", {})
+                atr = tf_15m.get("atr")
+                price = tf_15m.get("price")
+                if atr and price:
+                    return float(atr), float(price)
     except Exception:
         pass
     return None, None
@@ -414,10 +422,26 @@ def check_and_update_trailing_stops():
 
             if side_dir == "long":
                 target_sl = mark_price * (1 - trailing_distance)
+                
+                # BREAK-EVEN PROTECTION: se in profitto sufficiente, SL minimo = entry + margine
+                if roi >= BREAKEVEN_ACTIVATION_PCT:
+                    min_sl = entry_price * (1 + BREAKEVEN_MARGIN_PCT)
+                    if target_sl < min_sl:
+                        target_sl = min_sl
+                        print(f"🛡️ BREAK-EVEN PROTECTION {symbol}: SL alzato a {target_sl:.2f} (entry+margin)")
+                
                 if sl_current == 0.0 or target_sl > sl_current:
                     new_sl_price = target_sl
-            else:
+            else:  # short
                 target_sl = mark_price * (1 + trailing_distance)
+                
+                # BREAK-EVEN PROTECTION per short
+                if roi >= BREAKEVEN_ACTIVATION_PCT:
+                    max_sl = entry_price * (1 - BREAKEVEN_MARGIN_PCT)
+                    if target_sl > max_sl:
+                        target_sl = max_sl
+                        print(f"🛡️ BREAK-EVEN PROTECTION {symbol}: SL abbassato a {target_sl:.2f} (entry-margin)")
+                
                 if sl_current == 0.0 or target_sl < sl_current:
                     new_sl_price = target_sl
 
