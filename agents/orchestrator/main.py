@@ -7,6 +7,8 @@ URLS = {
     "ai": "http://04_master_ai_agent:8000"
 }
 SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
+DISABLED_SYMBOLS = os.getenv("DISABLED_SYMBOLS", "").split(",")  # Comma-separated list of disabled symbols
+DISABLED_SYMBOLS = [s.strip() for s in DISABLED_SYMBOLS if s.strip()]  # Clean up empty strings
 
 # --- CONFIGURAZIONE OTTIMIZZAZIONE ---
 MAX_POSITIONS = 3  # Numero massimo posizioni contemporanee
@@ -141,7 +143,7 @@ async def analysis_cycle():
                         "leverage": pl['leverage'],
                         "size": pl.get('size', 0),
                         "pnl": pl.get('pnl', 0),
-                        "is_disabled": False  # TODO: Implementare logica simboli disabilitati
+                        "is_disabled": pl['symbol'] in DISABLED_SYMBOLS
                     })
                 
                 mgmt_resp = await c.post(
