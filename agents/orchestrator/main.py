@@ -1,5 +1,6 @@
 import asyncio, httpx, json, os
 from datetime import datetime
+from threading import Lock
 
 URLS = {
     "tech": "http://01_technical_analyzer:8000",
@@ -15,45 +16,52 @@ CYCLE_INTERVAL = 60  # Secondi tra ogni ciclo di controllo (era 900)
 
 AI_DECISIONS_FILE = "/data/ai_decisions.json"
 
+# File lock per operazioni thread-safe all'interno di questo container
+# NOTA: threading.Lock protegge solo all'interno di questo processo.
+# Per lock tra container diversi sarebbe necessario fcntl.flock o lock distribuito.
+# Dato il pattern di accesso (scritture non frequenti), questo è accettabile.
+file_lock = Lock()
+
 def save_monitoring_decision(positions_count: int, max_positions: int, positions_details: list, reason: str):
     """Salva la decisione di monitoraggio per la dashboard"""
-    try:
-        decisions = []
-        if os.path.exists(AI_DECISIONS_FILE):
-            with open(AI_DECISIONS_FILE, 'r') as f:
-                decisions = json.load(f)
-        
-        # Crea un summary delle posizioni
-        positions_summary = []
-        for p in positions_details:
-            pnl_pct = (p.get('pnl', 0) / (p.get('entry_price', 1) * p.get('size', 1))) * 100 if p.get('entry_price') else 0
-            positions_summary.append({
-                'symbol': p.get('symbol'),
-                'side': p.get('side'),
-                'pnl': p.get('pnl'),
-                'pnl_pct': round(pnl_pct, 2)
-            })
-        
-        decisions.append({
-            'timestamp': datetime.now().isoformat(),
-            'symbol': 'PORTFOLIO',
-            'action': 'HOLD',
-            'leverage': 0,
-            'size_pct': 0,
-            'rationale': reason,
-            'analysis_summary': f"Monitoraggio: {positions_count}/{max_positions} posizioni attive",
-            'positions': positions_summary
-        })
-        
-        # Mantieni solo le ultime 100 decisioni
-        decisions = decisions[-100:]
-        
-        os.makedirs(os.path.dirname(AI_DECISIONS_FILE), exist_ok=True)
-        with open(AI_DECISIONS_FILE, 'w') as f:
-            json.dump(decisions, f, indent=2)
+    with file_lock:
+        try:
+            decisions = []
+            if os.path.exists(AI_DECISIONS_FILE):
+                with open(AI_DECISIONS_FILE, 'r') as f:
+                    decisions = json.load(f)
             
-    except Exception as e:
-        print(f"⚠️ Error saving monitoring decision: {e}")
+            # Crea un summary delle posizioni
+            positions_summary = []
+            for p in positions_details:
+                pnl_pct = (p.get('pnl', 0) / (p.get('entry_price', 1) * p.get('size', 1))) * 100 if p.get('entry_price') else 0
+                positions_summary.append({
+                    'symbol': p.get('symbol'),
+                    'side': p.get('side'),
+                    'pnl': p.get('pnl'),
+                    'pnl_pct': round(pnl_pct, 2)
+                })
+            
+            decisions.append({
+                'timestamp': datetime.now().isoformat(),
+                'symbol': 'PORTFOLIO',
+                'action': 'HOLD',
+                'leverage': 0,
+                'size_pct': 0,
+                'rationale': reason,
+                'analysis_summary': f"Monitoraggio: {positions_count}/{max_positions} posizioni attive",
+                'positions': positions_summary
+            })
+            
+            # Mantieni solo le ultime 100 decisioni
+            decisions = decisions[-100:]
+            
+            os.makedirs(os.path.dirname(AI_DECISIONS_FILE), exist_ok=True)
+            with open(AI_DECISIONS_FILE, 'w') as f:
+                json.dump(decisions, f, indent=2)
+                
+        except Exception as e:
+            print(f"⚠️ Error saving monitoring decision: {e}")
 
 async def manage_cycle():
     async with httpx.AsyncClient() as c:
