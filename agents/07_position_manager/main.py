@@ -91,6 +91,52 @@ def to_float(x: Any, default: float = 0.0) -> float:
     except Exception:
         return default
 
+def extract_usdt_coin_data_from_bybit(balance_response: dict) -> Optional[dict]:
+    """
+    Estrae i dati coin-level USDT dalla risposta raw Bybit.
+    Per account UNIFIED, parse info.result.list[0].coin per trovare USDT.
+    
+    Returns dict con: walletBalance, equity, totalPositionIM, totalOrderIM, locked, availableToWithdraw
+    o None se non trovato.
+    """
+    try:
+        info = balance_response.get("info", {})
+        if not info:
+            return None
+        
+        result = info.get("result", {})
+        if not result:
+            return None
+        
+        # In UNIFIED account: result.list[0] contiene l'account, poi result.list[0].coin[] contiene le coin
+        account_list = result.get("list", [])
+        if not account_list or not isinstance(account_list, list):
+            return None
+        
+        # Primo account (dovrebbe essere l'account UNIFIED)
+        account = account_list[0] if len(account_list) > 0 else {}
+        
+        # Cerca coin USDT
+        coins = account.get("coin", [])
+        if not coins or not isinstance(coins, list):
+            return None
+        
+        for coin in coins:
+            if coin.get("coin") == "USDT":
+                return {
+                    "walletBalance": to_float(coin.get("walletBalance"), 0.0),
+                    "equity": to_float(coin.get("equity"), 0.0),
+                    "totalPositionIM": to_float(coin.get("totalPositionIM"), 0.0),
+                    "totalOrderIM": to_float(coin.get("totalOrderIM"), 0.0),
+                    "locked": to_float(coin.get("locked"), 0.0),
+                    "availableToWithdraw": to_float(coin.get("availableToWithdraw"), 0.0),
+                }
+        
+        return None
+    except Exception as e:
+        print(f"⚠️ Errore parsing Bybit raw data: {e}")
+        return None
+
 def symbol_base(symbol: str) -> str:
     """
     Estrae l'asset base: "BTC" da:
@@ -901,14 +947,96 @@ def check_smart_reverse():
 # =========================================================
 @app.get("/get_wallet_balance")
 def get_balance():
+    """
+    Ritorna bilancio wallet con supporto Bybit UNIFIED accounts.
+    
+    Quando USDT.free è None/missing (tipico in UNIFIED), calcola available_for_new_trades
+    usando i dati raw Bybit: walletBalance - totalPositionIM - totalOrderIM - locked - buffer.
+    """
     if not exchange:
-        return {"equity": 0, "available": 0}
+        return {
+            "equity": 0,
+            "available": 0,
+            "available_for_new_trades": 0,
+            "available_source": "no_exchange",
+            "components": {}
+        }
+    
     try:
         bal = exchange.fetch_balance(params={"type": "swap"})
         u = bal.get("USDT", {}) or {}
-        return {"equity": to_float(u.get("total"), 0.0), "available": to_float(u.get("free"), 0.0)}
-    except Exception:
-        return {"equity": 0, "available": 0}
+        
+        equity = to_float(u.get("total"), 0.0)
+        available = to_float(u.get("free"), 0.0)
+        
+        # Buffer per sicurezza (evita margin call)
+        buffer = 10.0
+        
+        # Caso normale: USDT.free è disponibile e valido
+        if available > 0:
+            available_for_new_trades = max(0.0, available - buffer)
+            return {
+                "equity": equity,
+                "available": available,
+                "available_for_new_trades": available_for_new_trades,
+                "available_source": "ccxt_free",
+                "components": {
+                    "buffer": buffer,
+                    "free": available
+                }
+            }
+        
+        # Caso UNIFIED: USDT.free è None/0 ma total > 0
+        # Proviamo a estrarre dati raw Bybit
+        if equity > 0:
+            usdt_coin_data = extract_usdt_coin_data_from_bybit(bal)
+            
+            if usdt_coin_data:
+                wallet_balance = usdt_coin_data.get("walletBalance", 0.0)
+                total_position_im = usdt_coin_data.get("totalPositionIM", 0.0)
+                total_order_im = usdt_coin_data.get("totalOrderIM", 0.0)
+                locked = usdt_coin_data.get("locked", 0.0)
+                
+                # Calcola disponibile per nuovi trade
+                # Formula: walletBalance - totalPositionIM - totalOrderIM - locked - buffer
+                derived_available = wallet_balance - total_position_im - total_order_im - locked - buffer
+                available_for_new_trades = max(0.0, derived_available)
+                
+                print(f"💰 UNIFIED wallet: equity={equity:.2f}, derived_available={derived_available:.2f}")
+                
+                return {
+                    "equity": equity,
+                    "available": available,  # Keep original (may be 0 or None)
+                    "available_for_new_trades": available_for_new_trades,
+                    "available_source": "bybit_unified_im_derived",
+                    "components": {
+                        "walletBalance": wallet_balance,
+                        "totalPositionIM": total_position_im,
+                        "totalOrderIM": total_order_im,
+                        "locked": locked,
+                        "buffer": buffer,
+                        "derived_available": derived_available
+                    }
+                }
+        
+        # Fallback: nessun dato disponibile
+        return {
+            "equity": equity,
+            "available": available,
+            "available_for_new_trades": 0.0,
+            "available_source": "insufficient_data",
+            "components": {}
+        }
+        
+    except Exception as e:
+        print(f"❌ Errore get_wallet_balance: {e}")
+        return {
+            "equity": 0,
+            "available": 0,
+            "available_for_new_trades": 0,
+            "available_source": "error",
+            "components": {}
+        }
 
 @app.get("/get_open_positions")
 def get_positions():

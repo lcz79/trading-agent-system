@@ -456,6 +456,7 @@ Considera anche:
 - Pattern storicamente perdente
 - Mercato troppo incerto/volatile
 - Performance sistema in forte drawdown
+- **MARGINE INSUFFICIENTE**: available_for_new_trades < 10.0 USDT (BLOCCANTE)
 
 ## OUTPUT JSON OBBLIGATORIO
 {
@@ -514,8 +515,25 @@ async def decide_batch(payload: AnalysisPayload):
                 }
         
         # 6. Costruisci prompt con TUTTO il contesto
+        portfolio = payload.global_data.get('portfolio', {})
+        wallet_equity = portfolio.get('equity', 0)
+        wallet_available = portfolio.get('available', 0)
+        wallet_available_for_new_trades = portfolio.get('available_for_new_trades', wallet_available)
+        wallet_source = portfolio.get('available_source', 'unknown')
+        
+        # Hard constraint: se margine insufficiente, blocca nuove aperture
+        margin_threshold = 10.0
+        can_open_new_positions = wallet_available_for_new_trades >= margin_threshold
+        
         prompt_data = {
-            "wallet_equity": payload.global_data.get('portfolio', {}).get('equity'),
+            "wallet": {
+                "equity": wallet_equity,
+                "available": wallet_available,
+                "available_for_new_trades": wallet_available_for_new_trades,
+                "available_source": wallet_source,
+                "can_open_new_positions": can_open_new_positions,
+                "margin_threshold": margin_threshold
+            },
             "active_positions": already_open,
             "market_data": enriched_assets_data,
             "recent_closes": recent_closes,
@@ -525,6 +543,16 @@ async def decide_batch(payload: AnalysisPayload):
         }
         
         # 7. Costruisci contesto per DeepSeek
+        margin_text = ""
+        if not can_open_new_positions:
+            margin_text = f"""
+
+## ⚠️ MARGINE INSUFFICIENTE - NUOVE APERTURE BLOCCATE
+- Available for new trades: {wallet_available_for_new_trades:.2f} USDT
+- Soglia minima: {margin_threshold:.2f} USDT
+- Fonte dati: {wallet_source}
+- **AZIONE RICHIESTA**: Ritorna solo HOLD per tutti gli asset. Non aprire nuove posizioni.
+"""
         cooldown_text = ""
         if recent_closes:
             cooldown_text = "\n\n## CHIUSURE RECENTI (ultimi 15 minuti)\n"
@@ -551,7 +579,7 @@ async def decide_batch(payload: AnalysisPayload):
             for pattern in learning_insights['losing_patterns']:
                 learning_text += f"- {pattern}\n"
         
-        enhanced_system_prompt = SYSTEM_PROMPT + cooldown_text + performance_text + learning_text
+        enhanced_system_prompt = SYSTEM_PROMPT + margin_text + cooldown_text + performance_text + learning_text
         
         response = client.chat.completions.create(
             model="deepseek-chat", 
@@ -579,6 +607,24 @@ async def decide_batch(payload: AnalysisPayload):
         for d in decision_json.get("decisions", []):
             try: 
                 valid_dec = Decision(**d)
+                
+                # HARD CONSTRAINT: blocca OPEN_LONG/OPEN_SHORT se margine insufficiente
+                if not can_open_new_positions and valid_dec.action in ["OPEN_LONG", "OPEN_SHORT"]:
+                    logger.warning(
+                        f"🚫 Blocked {valid_dec.action} on {valid_dec.symbol}: "
+                        f"insufficient margin (available={wallet_available_for_new_trades:.2f}, threshold={margin_threshold})"
+                    )
+                    # Converti in HOLD con rationale chiaro
+                    valid_dec.action = "HOLD"
+                    valid_dec.leverage = 0
+                    valid_dec.size_pct = 0
+                    valid_dec.rationale = (
+                        f"Blocked: insufficient free margin "
+                        f"(available_for_new_trades={wallet_available_for_new_trades:.2f}, "
+                        f"threshold={margin_threshold}). "
+                        f"Original: {valid_dec.rationale}"
+                    )
+                
                 valid_decisions.append(valid_dec)
                 
                 # Salva la decisione per la dashboard

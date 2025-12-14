@@ -329,9 +329,18 @@ async def analysis_cycle():
             for d in decisions_list:
                 sym = d['symbol']
                 action = d['action']
+                rationale = d.get('rationale', '')
                 
                 if action == "CLOSE":
                     print(f"        🛡️ Ignorato CLOSE su {sym} (Auto-Close Disabled)")
+                    continue
+                
+                # Log HOLD dovuto a margine insufficiente
+                if action == "HOLD" and "insufficient" in rationale.lower() and "margin" in rationale.lower():
+                    available_for_new = portfolio.get('available_for_new_trades', portfolio.get('available', 0))
+                    available_source = portfolio.get('available_source', 'unknown')
+                    print(f"        🚫 HOLD on {sym}: {rationale}")
+                    print(f"           Wallet: available={available_for_new:.2f} USDT (source: {available_source})")
                     continue
 
                 if action in ["OPEN_LONG", "OPEN_SHORT"]:
