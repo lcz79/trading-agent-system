@@ -47,7 +47,9 @@ RECENT_CLOSES_FILE = "/data/recent_closes.json"
 TRADING_HISTORY_FILE = "/data/trading_history.json"
 
 # Configuration constants
-LOSS_THRESHOLD_PCT = -5  # Percentuale di perdita per considerare un trade "perdente"
+# Possono essere sovrascritti da variabili d'ambiente se necessario
+LOSS_THRESHOLD_PCT = float(os.getenv("LOSS_THRESHOLD_PCT", "-5"))  # Soglia perdita trade
+MAX_RECENT_LOSSES = int(os.getenv("MAX_RECENT_LOSSES", "10"))  # Numero max perdite recenti
 
 # Cooldown configuration
 COOLDOWN_MINUTES = 15
@@ -101,6 +103,7 @@ def save_close_event(symbol: str, side: str, reason: str):
         "reason": reason
     })
     # Mantieni solo ultime 24 ore - usa confronto stringhe per efficienza
+    # Nota: datetime.isoformat() produce formato ordinabile (ISO 8601)
     cutoff_ts = (now - timedelta(hours=24)).isoformat()
     closes = [c for c in closes if c.get("timestamp", "") > cutoff_ts]
     save_json_file(RECENT_CLOSES_FILE, closes)
@@ -114,6 +117,8 @@ def load_recent_closes(minutes: int = COOLDOWN_MINUTES) -> List[dict]:
     cutoff_ts = cutoff.isoformat()
     
     # Ottimizzazione: confronta stringhe ISO invece di parsing
+    # Funziona perché datetime.isoformat() produce formato ordinabile lessicograficamente
+    # Es: "2024-01-15T10:30:00" < "2024-01-15T11:30:00"
     recent = [c for c in closes if c.get("timestamp", "") > cutoff_ts]
     return recent
 
@@ -295,7 +300,7 @@ async def get_learning_insights():
             
             # Carica trading history per pattern analysis
             trading_history = load_json_file(TRADING_HISTORY_FILE, [])
-            recent_losses = [t for t in trading_history if t.get('pnl_pct', 0) < LOSS_THRESHOLD_PCT][-10:]
+            recent_losses = [t for t in trading_history if t.get('pnl_pct', 0) < LOSS_THRESHOLD_PCT][-MAX_RECENT_LOSSES:]
             
             # Identifica losing patterns
             losing_patterns = []
