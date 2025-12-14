@@ -42,7 +42,7 @@ DEFAULT_INITIAL_SL_PCT = float(os.getenv("DEFAULT_INITIAL_SL_PCT", "0.04"))  # 4
 
 # --- BREAK-EVEN PROTECTION ---
 BREAKEVEN_ACTIVATION_PCT = float(os.getenv("BREAKEVEN_ACTIVATION_PCT", "0.02"))  # 2% ROI
-BREAKEVEN_MARGIN_PCT = float(os.getenv("BREAKEVEN_MARGIN_PCT", "0.001"))  # 0.1% margine
+BREAKEVEN_MARGIN_PCT = float(os.getenv("BREAKEVEN_MARGIN_PCT", "0.001"))  # 0.1% margin
 
 # --- PARAMETRI AI REVIEW / REVERSE ---
 ENABLE_AI_REVIEW = os.getenv("ENABLE_AI_REVIEW", "true").lower() == "true"
