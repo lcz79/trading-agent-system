@@ -50,6 +50,8 @@ TRADING_HISTORY_FILE = "/data/trading_history.json"
 # Possono essere sovrascritti da variabili d'ambiente se necessario
 LOSS_THRESHOLD_PCT = float(os.getenv("LOSS_THRESHOLD_PCT", "-5"))  # Soglia perdita trade
 MAX_RECENT_LOSSES = int(os.getenv("MAX_RECENT_LOSSES", "10"))  # Numero max perdite recenti
+MIN_CONFIRMATIONS_REQUIRED = 3  # Numero minimo di conferme per aprire una posizione
+CONFIDENCE_THRESHOLD_LOW = 50  # Soglia confidenza bassa per blocco automatico
 
 # Cooldown configuration
 COOLDOWN_MINUTES = 15
@@ -219,10 +221,10 @@ def enforce_decision_consistency(decision_dict: dict) -> dict:
     
     # 4. Inferisci blocked_by se action=HOLD con bassa confidence
     if action == 'HOLD' and not decision_dict.get('blocked_by'):
-        if confidence < 50:
+        if confidence < CONFIDENCE_THRESHOLD_LOW:
             decision_dict['blocked_by'] = ['LOW_CONFIDENCE']
             logger.info(f"✅ Inferito blocked_by=['LOW_CONFIDENCE'] per HOLD con confidence={confidence}")
-        elif not decision_dict.get('setup_confirmations') or len(decision_dict.get('setup_confirmations', [])) < 3:
+        elif not decision_dict.get('setup_confirmations') or len(decision_dict.get('setup_confirmations', [])) < MIN_CONFIRMATIONS_REQUIRED:
             decision_dict['blocked_by'] = ['CONFLICTING_SIGNALS']
             logger.info(f"✅ Inferito blocked_by=['CONFLICTING_SIGNALS'] per HOLD con poche conferme")
     
@@ -319,6 +321,17 @@ def save_ai_decision(decision_data):
         logger.error(f"Error saving AI decision: {e}")
 
 
+# Blocker reasons for structured decisions
+BLOCKER_REASONS = Literal[
+    "INSUFFICIENT_MARGIN",
+    "MAX_POSITIONS",
+    "COOLDOWN",
+    "DRAWDOWN_GUARD",
+    "PATTERN_LOSING",
+    "CONFLICTING_SIGNALS",
+    "LOW_CONFIDENCE"
+]
+
 class Decision(BaseModel):
     symbol: str
     action: Literal["OPEN_LONG", "OPEN_SHORT", "HOLD", "CLOSE"]
@@ -330,7 +343,7 @@ class Decision(BaseModel):
     risk_factors: Optional[List[str]] = None
     # New structured fields for coherence
     setup_confirmations: Optional[List[str]] = None
-    blocked_by: Optional[List[Literal["INSUFFICIENT_MARGIN", "MAX_POSITIONS", "COOLDOWN", "DRAWDOWN_GUARD", "PATTERN_LOSING", "CONFLICTING_SIGNALS", "LOW_CONFIDENCE"]]] = None
+    blocked_by: Optional[List[BLOCKER_REASONS]] = None
     direction_considered: Optional[Literal["LONG", "SHORT", "NONE"]] = None
 
 class AnalysisPayload(BaseModel):
