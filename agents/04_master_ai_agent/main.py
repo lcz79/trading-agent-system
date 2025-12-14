@@ -46,6 +46,9 @@ AI_DECISIONS_FILE = "/data/ai_decisions.json"
 RECENT_CLOSES_FILE = "/data/recent_closes.json"
 TRADING_HISTORY_FILE = "/data/trading_history.json"
 
+# Configuration constants
+LOSS_THRESHOLD_PCT = -5  # Percentuale di perdita per considerare un trade "perdente"
+
 # Cooldown configuration
 COOLDOWN_MINUTES = 15
 
@@ -90,15 +93,16 @@ def save_json_file(filepath: str, data: Any):
 def save_close_event(symbol: str, side: str, reason: str):
     """Salva evento di chiusura per cooldown"""
     closes = load_json_file(RECENT_CLOSES_FILE, [])
+    now = datetime.now()
     closes.append({
-        "timestamp": datetime.now().isoformat(),
+        "timestamp": now.isoformat(),
         "symbol": symbol,
         "side": side,
         "reason": reason
     })
-    # Mantieni solo ultime 24 ore
-    cutoff = datetime.now() - timedelta(hours=24)
-    closes = [c for c in closes if datetime.fromisoformat(c["timestamp"]) > cutoff]
+    # Mantieni solo ultime 24 ore - usa confronto stringhe per efficienza
+    cutoff_ts = (now - timedelta(hours=24)).isoformat()
+    closes = [c for c in closes if c.get("timestamp", "") > cutoff_ts]
     save_json_file(RECENT_CLOSES_FILE, closes)
     logger.info(f"💾 Cooldown salvato: {symbol} {side} - {reason}")
 
@@ -107,7 +111,10 @@ def load_recent_closes(minutes: int = COOLDOWN_MINUTES) -> List[dict]:
     """Carica chiusure negli ultimi N minuti"""
     closes = load_json_file(RECENT_CLOSES_FILE, [])
     cutoff = datetime.now() - timedelta(minutes=minutes)
-    recent = [c for c in closes if datetime.fromisoformat(c["timestamp"]) > cutoff]
+    cutoff_ts = cutoff.isoformat()
+    
+    # Ottimizzazione: confronta stringhe ISO invece di parsing
+    recent = [c for c in closes if c.get("timestamp", "") > cutoff_ts]
     return recent
 
 
@@ -288,7 +295,7 @@ async def get_learning_insights():
             
             # Carica trading history per pattern analysis
             trading_history = load_json_file(TRADING_HISTORY_FILE, [])
-            recent_losses = [t for t in trading_history if t.get('pnl_pct', 0) < -5][-10:]
+            recent_losses = [t for t in trading_history if t.get('pnl_pct', 0) < LOSS_THRESHOLD_PCT][-10:]
             
             # Identifica losing patterns
             losing_patterns = []
@@ -397,7 +404,7 @@ Il tuo obiettivo è MASSIMIZZARE I PROFITTI minimizzando i rischi.
 
 ## CONFERME NECESSARIE PER APRIRE (almeno 3 su 5)
 - ✅ Trend concorde su almeno 2 timeframe (15m, 1h, 4h)
-- ✅ RSI in zona estrema (<30 per long, >70 per short) O in direzione del trend
+- ✅ RSI in zona di ipervenduto/ipercomprato appropriata per la direzione del trade
 - ✅ Prezzo vicino a livello chiave (Fibonacci o Gann)
 - ✅ Sentiment/news non contrario
 - ✅ Forecast concorde con la direzione
@@ -409,11 +416,16 @@ Il tuo obiettivo è MASSIMIZZARE I PROFITTI minimizzando i rischi.
   EVITA quel pattern
 
 ## GESTIONE RISCHIO DINAMICA
-Decidi TU leva e size in base alla tua confidenza:
-- Confidenza 90%+: leverage fino a 10x, size fino a 25%
-- Confidenza 70-89%: leverage 5-7x, size 15-20%
-- Confidenza 50-69%: leverage 3-5x, size 10-15%
-- Confidenza <50%: NON APRIRE (HOLD)
+Decidi TU leva e size in base alla tua confidenza e alle condizioni di mercato:
+- Alta confidenza (90%+): considera leverage più alto e size maggiore
+- Media confidenza (70-89%): usa leverage moderato e size standard
+- Bassa confidenza (50-69%): riduci leverage e size
+- Confidenza insufficiente (<50%): NON APRIRE (HOLD)
+
+Considera anche:
+- Volatilità del mercato (alta volatilità → leverage più basso)
+- Numero di conferme (più conferme → maggiore fiducia)
+- Performance recente del sistema (se in drawdown → più conservativo)
 
 ## QUANDO NON APRIRE (HOLD)
 - Indicatori contrastanti
@@ -421,6 +433,7 @@ Decidi TU leva e size in base alla tua confidenza:
 - Appena chiusa posizione simile
 - Pattern storicamente perdente
 - Mercato troppo incerto/volatile
+- Performance sistema in forte drawdown
 
 ## OUTPUT JSON OBBLIGATORIO
 {
