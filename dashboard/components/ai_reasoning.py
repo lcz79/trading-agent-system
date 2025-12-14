@@ -63,6 +63,11 @@ def render_ai_reasoning():
         size_pct = decision.get('size_pct', 0)
         analysis_summary = html.escape(decision.get('analysis_summary', ''))
         
+        # New structured fields
+        setup_confirmations = decision.get('setup_confirmations', [])
+        blocked_by = decision.get('blocked_by', [])
+        direction_considered = decision.get('direction_considered', 'NONE')
+        
         # Gestione speciale per decisioni PORTFOLIO
         if symbol == 'PORTFOLIO':
             positions = decision.get('positions', [])
@@ -78,6 +83,17 @@ def render_ai_reasoning():
                     positions_html += f'<li><strong>{pos_symbol}</strong> ({pos_side}): <span style="color: {pnl_color};">${pos_pnl:.2f} ({pos_pnl_pct:+.2f}%)</span></li>'
                 positions_html += '</ul></div>'
             
+            # Renderizza blocked_by e direction se presenti
+            blocked_html = ''
+            if blocked_by:
+                blocked_reasons = ', '.join(html.escape(str(b)) for b in blocked_by)
+                blocked_html = f'<p><strong style="color: #ff6b6b;">🚫 Blocked By:</strong> {blocked_reasons}</p>'
+            
+            direction_html = ''
+            if direction_considered and direction_considered != 'NONE':
+                direction_color = '#00ff41' if direction_considered == 'LONG' else '#ff004c'
+                direction_html = f'<p><strong style="color: #00d4ff;">🎯 Direction Considered:</strong> <span style="color: {direction_color};">{html.escape(direction_considered)}</span></p>'
+            
             st.markdown(f"""
             <div class="ai-decision-card">
                 <div class="decision-header">
@@ -90,12 +106,32 @@ def render_ai_reasoning():
                 <div class="decision-reasoning">
                     <p><strong style="color: #00ff9d;">💡 Rationale:</strong> {rationale}</p>
                     {f'<p><strong style="color: #ff6b9d;">📊 Status:</strong> {analysis_summary}</p>' if analysis_summary else ''}
+                    {blocked_html}
+                    {direction_html}
                     {positions_html}
                 </div>
             </div>
             """, unsafe_allow_html=True)
         else:
             # Decisione normale su singolo asset
+            # Renderizza setup_confirmations se presenti
+            setup_conf_html = ''
+            if setup_confirmations:
+                setup_items = ''.join(f'<li>{html.escape(conf)}</li>' for conf in setup_confirmations)
+                setup_conf_html = f'<div style="margin-top: 10px;"><strong style="color: #00ff9d;">✅ Setup Confirmations:</strong><ul style="margin: 5px 0; padding-left: 20px;">{setup_items}</ul></div>'
+            
+            # Renderizza blocked_by se presente
+            blocked_html = ''
+            if blocked_by:
+                blocked_reasons = ', '.join(html.escape(str(b)) for b in blocked_by)
+                blocked_html = f'<p><strong style="color: #ff6b6b;">🚫 Blocked By:</strong> {blocked_reasons}</p>'
+            
+            # Renderizza direction_considered se presente
+            direction_html = ''
+            if direction_considered and direction_considered != 'NONE':
+                direction_color = '#00ff41' if direction_considered == 'LONG' else '#ff004c'
+                direction_html = f'<p><strong style="color: #00d4ff;">🎯 Direction Considered:</strong> <span style="color: {direction_color};">{html.escape(direction_considered)}</span></p>'
+            
             st.markdown(f"""
             <div class="ai-decision-card">
                 <div class="decision-header">
@@ -108,6 +144,9 @@ def render_ai_reasoning():
                 <div class="decision-reasoning">
                     <p><strong style="color: #00ff9d;">💡 Rationale:</strong> {rationale}</p>
                     {f'<p><strong style="color: #ff6b9d;">📊 Analysis:</strong> {analysis_summary}</p>' if analysis_summary else ''}
+                    {direction_html}
+                    {blocked_html}
+                    {setup_conf_html}
                     {f'<p><strong style="color: #ffa500;">⚡ Leverage:</strong> {leverage}x | <strong style="color: #ffa500;">📈 Size:</strong> {size_pct*100:.1f}%</p>' if action in ['OPEN_LONG', 'OPEN_SHORT'] else ''}
                 </div>
             </div>

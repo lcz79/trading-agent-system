@@ -184,6 +184,70 @@ def normalize_position_side(side_raw: str) -> Optional[str]:
     return None
 
 
+def enforce_decision_consistency(decision_dict: dict) -> dict:
+    """
+    Applica guardrail per garantire coerenza nella decisione AI.
+    Post-processa il JSON per:
+    1. Garantire che direction_considered sia coerente con action
+    2. Garantire che blocked_by sia presente se action=HOLD con bassa confidence
+    3. Separare setup_confirmations da risk_factors
+    4. Validare che rationale non contenga contraddizioni
+    """
+    action = decision_dict.get('action', 'HOLD')
+    confidence = decision_dict.get('confidence', 50)
+    
+    # 1. Inferisci direction_considered da action se mancante
+    if not decision_dict.get('direction_considered'):
+        if action == 'OPEN_LONG':
+            decision_dict['direction_considered'] = 'LONG'
+        elif action == 'OPEN_SHORT':
+            decision_dict['direction_considered'] = 'SHORT'
+        else:
+            decision_dict['direction_considered'] = 'NONE'
+    
+    # 2. Valida coerenza action vs direction_considered
+    direction = decision_dict.get('direction_considered', 'NONE')
+    if action == 'OPEN_LONG' and direction != 'LONG':
+        logger.warning(f"⚠️ Incoerenza rilevata: OPEN_LONG ma direction={direction}, corretto a LONG")
+        decision_dict['direction_considered'] = 'LONG'
+    elif action == 'OPEN_SHORT' and direction != 'SHORT':
+        logger.warning(f"⚠️ Incoerenza rilevata: OPEN_SHORT ma direction={direction}, corretto a SHORT")
+        decision_dict['direction_considered'] = 'SHORT'
+    
+    # 3. Se setup_confirmations non è presente, usa confirmations (backward compat)
+    if not decision_dict.get('setup_confirmations') and decision_dict.get('confirmations'):
+        decision_dict['setup_confirmations'] = decision_dict['confirmations']
+    
+    # 4. Inferisci blocked_by se action=HOLD con bassa confidence
+    if action == 'HOLD' and not decision_dict.get('blocked_by'):
+        if confidence < 50:
+            decision_dict['blocked_by'] = ['LOW_CONFIDENCE']
+            logger.info(f"✅ Inferito blocked_by=['LOW_CONFIDENCE'] per HOLD con confidence={confidence}")
+        elif not decision_dict.get('setup_confirmations') or len(decision_dict.get('setup_confirmations', [])) < 3:
+            decision_dict['blocked_by'] = ['CONFLICTING_SIGNALS']
+            logger.info(f"✅ Inferito blocked_by=['CONFLICTING_SIGNALS'] per HOLD con poche conferme")
+    
+    # 5. Se ci sono blocked_by, action DEVE essere HOLD (o CLOSE se posizione aperta)
+    if decision_dict.get('blocked_by') and action not in ['HOLD', 'CLOSE']:
+        logger.warning(f"⚠️ Incoerenza: blocked_by presente ma action={action}, forzato a HOLD")
+        decision_dict['action'] = 'HOLD'
+        decision_dict['leverage'] = 1.0
+        decision_dict['size_pct'] = 0.0
+    
+    # 6. Valida rationale per contraddizioni comuni
+    rationale = decision_dict.get('rationale', '').lower()
+    if action == 'OPEN_SHORT':
+        # Non dovrebbe menzionare "long setup" o "buy" come setup considerato
+        if any(phrase in rationale for phrase in ['long setup', 'aprire long', 'opening long', 'setup long']):
+            logger.warning(f"⚠️ Rationale per OPEN_SHORT menziona 'long setup', potrebbe essere incoerente")
+    elif action == 'OPEN_LONG':
+        # Non dovrebbe menzionare "short setup" o "sell" come setup considerato
+        if any(phrase in rationale for phrase in ['short setup', 'aprire short', 'opening short', 'setup short']):
+            logger.warning(f"⚠️ Rationale per OPEN_LONG menziona 'short setup', potrebbe essere incoerente")
+    
+    return decision_dict
+
+
 def log_api_call(tokens_in: int, tokens_out: int):
     """
     Logga una chiamata API per il tracking dei costi DeepSeek.
@@ -237,7 +301,11 @@ def save_ai_decision(decision_data):
             'confidence': decision_data.get('confidence'),
             'confirmations': decision_data.get('confirmations', []),
             'risk_factors': decision_data.get('risk_factors', []),
-            'source': decision_data.get('source', 'master_ai')
+            'source': decision_data.get('source', 'master_ai'),
+            # New structured fields
+            'setup_confirmations': decision_data.get('setup_confirmations', []),
+            'blocked_by': decision_data.get('blocked_by', []),
+            'direction_considered': decision_data.get('direction_considered', 'NONE')
         })
         
         # Mantieni solo le ultime 100 decisioni
@@ -261,6 +329,10 @@ class Decision(BaseModel):
     confidence: Optional[int] = None
     confirmations: Optional[List[str]] = None
     risk_factors: Optional[List[str]] = None
+    # New structured fields for coherence
+    setup_confirmations: Optional[List[str]] = None
+    blocked_by: Optional[List[Literal["INSUFFICIENT_MARGIN", "MAX_POSITIONS", "COOLDOWN", "DRAWDOWN_GUARD", "PATTERN_LOSING", "CONFLICTING_SIGNALS", "LOW_CONFIDENCE"]]] = None
+    direction_considered: Optional[Literal["LONG", "SHORT", "NONE"]] = None
 
 class AnalysisPayload(BaseModel):
     global_data: Dict[str, Any]
@@ -416,13 +488,13 @@ SYSTEM_PROMPT = """
 Sei un TRADER PROFESSIONISTA con 20 anni di esperienza sui mercati crypto.
 Il tuo obiettivo è MASSIMIZZARE I PROFITTI minimizzando i rischi.
 
-## COME RAGIONARE
+## PROCESSO DECISIONALE STRUTTURATO
 
 1. **ANALIZZA TUTTI I DATI** - Non basarti su un solo indicatore
-2. **CERCA CONFERME MULTIPLE** - Almeno 3 segnali concordi per aprire
-3. **RISPETTA IL CONTESTO** - Se hai appena chiuso una posizione, non riaprirla subito
-4. **IMPARA DAGLI ERRORI** - Guarda lo storico e non ripetere gli stessi pattern perdenti
-5. **ADATTA IL RISCHIO** - Leva e size devono riflettere la tua confidenza
+2. **IDENTIFICA LA DIREZIONE** - Determina quale setup stai valutando (LONG, SHORT o NONE)
+3. **RACCOGLI CONFERME** - Elenca tutte le conferme per il setup specifico
+4. **APPLICA VINCOLI** - Verifica se ci sono blocchi (margin, positions, cooldown, drawdown, ecc.)
+5. **DECIDI AZIONE** - Se bloccato → HOLD, altrimenti segui le conferme
 
 ## CONFERME NECESSARIE PER APRIRE (almeno 3 su 5)
 - ✅ Trend concorde su almeno 2 timeframe (15m, 1h, 4h)
@@ -431,18 +503,36 @@ Il tuo obiettivo è MASSIMIZZARE I PROFITTI minimizzando i rischi.
 - ✅ Sentiment/news non contrario
 - ✅ Forecast concorde con la direzione
 
-## REGOLE DI COERENZA
-- Se una posizione è stata CHIUSA negli ultimi 15 minuti per "trend contrario", 
-  NON aprire nella stessa direzione sullo stesso asset
-- Se lo storico mostra perdite ripetute su un pattern (es. "long con RSI basso ma trend bearish"),
-  EVITA quel pattern
+## VINCOLI CHE BLOCCANO L'APERTURA
+- INSUFFICIENT_MARGIN: Margine disponibile insufficiente
+- MAX_POSITIONS: Massimo numero posizioni raggiunto
+- COOLDOWN: Posizione chiusa di recente nella stessa direzione
+- DRAWDOWN_GUARD: Sistema in drawdown eccessivo
+- PATTERN_LOSING: Pattern con storico di perdite
+- CONFLICTING_SIGNALS: Segnali contrastanti tra indicatori
+- LOW_CONFIDENCE: Confidenza < 50%
+
+## REGOLE DI COERENZA CRITICA
+- **DIREZIONE**: Se action è OPEN_SHORT, direction_considered DEVE essere "SHORT" e setup_confirmations devono essere per SHORT
+- **SEPARAZIONE**: NON mescolare risk factors con setup confirmations
+- **BLOCCO**: Se blocked_by è presente, action DEVE essere HOLD (o CLOSE se applicabile)
+- **RATIONALE**: Deve riflettere la logica strutturata: setup analizzato → conferme trovate → vincoli applicati → decisione
+
+Esempio CORRETTO per OPEN_SHORT:
+- direction_considered: "SHORT"
+- setup_confirmations: ["Trend bearish confermato su 1h e 4h", "RSI > 60 (zona ipercomprato)", "Resistenza Fibonacci rifiutata"]
+- blocked_by: [] (vuoto se non bloccato)
+- rationale: "Analizzato setup SHORT: trovate 3 conferme bearish. Nessun vincolo attivo. Apertura SHORT con leverage moderato."
+
+Esempio ERRATO da EVITARE:
+- action: "OPEN_SHORT" ma setup_confirmations contiene "BTC long setup con RSI basso" ❌
 
 ## GESTIONE RISCHIO DINAMICA
 Decidi TU leva e size in base alla tua confidenza e alle condizioni di mercato:
 - Alta confidenza (90%+): considera leverage più alto e size maggiore
 - Media confidenza (70-89%): usa leverage moderato e size standard
 - Bassa confidenza (50-69%): riduci leverage e size
-- Confidenza insufficiente (<50%): NON APRIRE (HOLD)
+- Confidenza insufficiente (<50%): NON APRIRE (HOLD) e usa blocked_by: ["LOW_CONFIDENCE"]
 
 Considera anche:
 - Volatilità del mercato (alta volatilità → leverage più basso)
@@ -457,7 +547,6 @@ Considera anche:
 - Mercato troppo incerto/volatile
 - Performance sistema in forte drawdown
 - **MARGINE INSUFFICIENTE**: available_for_new_trades < 10.0 USDT (BLOCCANTE)
-
 ## OUTPUT JSON OBBLIGATORIO
 {
   "analysis_summary": "Sintesi ragionata della situazione",
@@ -468,14 +557,17 @@ Considera anche:
       "leverage": 5.0,
       "size_pct": 0.15,
       "confidence": 75,
-      "rationale": "Spiegazione dettagliata",
-      "confirmations": ["lista conferme trovate"],
-      "risk_factors": ["lista rischi identificati"]
+      "rationale": "Spiegazione dettagliata seguendo processo strutturato",
+      "confirmations": ["lista conferme generali (backward compat)"],
+      "risk_factors": ["lista rischi identificati (backward compat)"],
+      "setup_confirmations": ["conferme specifiche per la direzione considerata"],
+      "blocked_by": ["INSUFFICIENT_MARGIN", "MAX_POSITIONS", "COOLDOWN", "DRAWDOWN_GUARD", "PATTERN_LOSING", "CONFLICTING_SIGNALS", "LOW_CONFIDENCE"],
+      "direction_considered": "LONG|SHORT|NONE"
     }
   ]
 }
 
-RICORDA: Meglio HOLD che un trade perdente. Non forzare mai.
+RICORDA: Meglio HOLD che un trade perdente. Non forzare mai. Mantieni coerenza tra direction_considered, setup_confirmations e action.
 """
 
 @app.post("/decide_batch")
@@ -534,6 +626,20 @@ async def decide_batch(payload: AnalysisPayload):
                 "can_open_new_positions": can_open_new_positions,
                 "margin_threshold": margin_threshold
             },
+        # Estrai informazioni sui vincoli dal payload
+        max_positions = payload.global_data.get('max_positions', 3)
+        positions_open_count = payload.global_data.get('positions_open_count', len(already_open))
+        wallet_info = payload.global_data.get('wallet', {})
+        drawdown_pct = payload.global_data.get('drawdown_pct', 0)
+        
+        prompt_data = {
+            "wallet_equity": payload.global_data.get('portfolio', {}).get('equity'),
+            "wallet_available": wallet_info.get('available', 0),
+            "wallet_available_for_trades": wallet_info.get('available_for_new_trades', 0),
+            "max_positions": max_positions,
+            "positions_open_count": positions_open_count,
+            "positions_remaining": max(0, max_positions - positions_open_count),
+            "drawdown_pct": drawdown_pct,
             "active_positions": already_open,
             "market_data": enriched_assets_data,
             "recent_closes": recent_closes,
@@ -553,12 +659,26 @@ async def decide_batch(payload: AnalysisPayload):
 - Fonte dati: {wallet_source}
 - **AZIONE RICHIESTA**: Ritorna solo HOLD per tutti gli asset. Non aprire nuove posizioni.
 """
+        # 7. Costruisci contesto per DeepSeek con informazioni sui vincoli
+        constraints_text = f"""
+## VINCOLI ATTUALI DEL SISTEMA
+- Posizioni aperte: {positions_open_count}/{max_positions}
+- Wallet disponibile: ${wallet_info.get('available', 0):.2f}
+- Wallet per nuovi trade: ${wallet_info.get('available_for_new_trades', 0):.2f}
+- Drawdown corrente: {drawdown_pct:.2f}%
+
+⚠️ IMPORTANTE: 
+- Se positions_open_count >= max_positions, usa blocked_by: ["MAX_POSITIONS"]
+- Se wallet_available_for_new_trades < $100, usa blocked_by: ["INSUFFICIENT_MARGIN"]
+- Se drawdown_pct < -10%, usa blocked_by: ["DRAWDOWN_GUARD"]
+"""
+        
         cooldown_text = ""
         if recent_closes:
             cooldown_text = "\n\n## CHIUSURE RECENTI (ultimi 15 minuti)\n"
             for close in recent_closes:
                 cooldown_text += f"- {close['symbol']} {close['side'].upper()} chiuso: {close['reason']}\n"
-            cooldown_text += "\n⚠️ NON riaprire queste posizioni nella stessa direzione!"
+            cooldown_text += "\n⚠️ NON riaprire queste posizioni nella stessa direzione! Se tentato, usa blocked_by: ['COOLDOWN']"
         
         performance_text = ""
         if performance.get('total_trades', 0) > 0:
@@ -580,6 +700,7 @@ async def decide_batch(payload: AnalysisPayload):
                 learning_text += f"- {pattern}\n"
         
         enhanced_system_prompt = SYSTEM_PROMPT + margin_text + cooldown_text + performance_text + learning_text
+        enhanced_system_prompt = SYSTEM_PROMPT + constraints_text + cooldown_text + performance_text + learning_text
         
         response = client.chat.completions.create(
             model="deepseek-chat", 
@@ -605,7 +726,10 @@ async def decide_batch(payload: AnalysisPayload):
         
         valid_decisions = []
         for d in decision_json.get("decisions", []):
-            try: 
+            try:
+                # Applica guardrail per garantire coerenza
+                d = enforce_decision_consistency(d)
+                
                 valid_dec = Decision(**d)
                 
                 # HARD CONSTRAINT: blocca OPEN_LONG/OPEN_SHORT se margine insufficiente
@@ -638,7 +762,10 @@ async def decide_batch(payload: AnalysisPayload):
                     'confidence': valid_dec.confidence,
                     'confirmations': valid_dec.confirmations or [],
                     'risk_factors': valid_dec.risk_factors or [],
-                    'source': 'master_ai'
+                    'source': 'master_ai',
+                    'setup_confirmations': valid_dec.setup_confirmations or [],
+                    'blocked_by': valid_dec.blocked_by or [],
+                    'direction_considered': valid_dec.direction_considered or 'NONE'
                 })
             except Exception as e: 
                 logger.warning(f"Invalid decision: {e}")

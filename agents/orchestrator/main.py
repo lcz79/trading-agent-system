@@ -310,8 +310,29 @@ async def analysis_cycle():
         # 5. AI DECISION
         print(f"        🤖 DeepSeek: Analizzando {list(assets_data.keys())}...")
         try:
+            # Prepara payload arricchito con informazioni su posizioni e wallet
+            enhanced_global_data = {
+                "portfolio": portfolio,
+                "already_open": active_symbols,
+                "max_positions": MAX_POSITIONS,
+                "positions_open_count": num_positions,
+                "wallet": {
+                    "equity": portfolio.get('equity', 0),
+                    "available": portfolio.get('available', 0),
+                    "available_for_new_trades": portfolio.get('available', 0) * 0.95  # 95% of available
+                }
+            }
+            
+            # Calcola drawdown se abbiamo dati sufficienti
+            if position_details:
+                total_pnl = sum(p.get('pnl', 0) for p in position_details)
+                equity = portfolio.get('equity', 1)
+                if equity > 0:
+                    drawdown_pct = (total_pnl / equity) * 100
+                    enhanced_global_data['drawdown_pct'] = drawdown_pct
+            
             resp = await c.post(f"{URLS['ai']}/decide_batch", json={
-                "global_data": {"portfolio": portfolio, "already_open": active_symbols},
+                "global_data": enhanced_global_data,
                 "assets_data": assets_data
             }, timeout=120)
             
