@@ -8,7 +8,7 @@ import json
 from datetime import datetime, timedelta
 
 # Add parent directory to path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'agents', '04_master_ai_agent'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'agents', '04_master_ai_agent'))
 
 # Set required env vars
 os.environ['DEEPSEEK_API_KEY'] = 'test-key-for-testing'
@@ -22,24 +22,33 @@ def test_cooldown_system():
     print("TEST 1: Sistema di Cooldown")
     print("="*60)
     
-    # Salva un evento di chiusura
-    print("\n1. Salvo chiusura ETHUSDT long...")
-    master_ai.save_close_event("ETHUSDT", "long", "Trend bearish su tutti TF")
-    
-    # Carica chiusure recenti
-    print("2. Carico chiusure recenti (ultimi 15 minuti)...")
-    recent = master_ai.load_recent_closes(15)
-    
-    assert len(recent) > 0, "❌ Nessuna chiusura trovata!"
-    print(f"   ✅ Trovate {len(recent)} chiusure recenti")
-    print(f"   Symbol: {recent[0]['symbol']}")
-    print(f"   Side: {recent[0]['side']}")
-    print(f"   Reason: {recent[0]['reason']}")
-    
-    # Test chiusure oltre il cooldown
-    print("\n3. Test chiusure oltre cooldown (ultimi 1 secondo)...")
-    very_recent = master_ai.load_recent_closes(minutes=0.016)  # ~1 secondo
-    print(f"   ✅ Chiusure nell'ultimo secondo: {len(very_recent)}")
+    # Use temp directory for testing
+    import tempfile
+    original_file = master_ai.RECENT_CLOSES_FILE
+    with tempfile.TemporaryDirectory() as tmpdir:
+        master_ai.RECENT_CLOSES_FILE = os.path.join(tmpdir, "recent_closes.json")
+        
+        # Salva un evento di chiusura
+        print("\n1. Salvo chiusura ETHUSDT long...")
+        master_ai.save_close_event("ETHUSDT", "long", "Trend bearish su tutti TF")
+        
+        # Carica chiusure recenti
+        print("2. Carico chiusure recenti (ultimi 15 minuti)...")
+        recent = master_ai.load_recent_closes(15)
+        
+        assert len(recent) > 0, "❌ Nessuna chiusura trovata!"
+        print(f"   ✅ Trovate {len(recent)} chiusure recenti")
+        print(f"   Symbol: {recent[0]['symbol']}")
+        print(f"   Side: {recent[0]['side']}")
+        print(f"   Reason: {recent[0]['reason']}")
+        
+        # Test chiusure oltre il cooldown
+        print("\n3. Test chiusure oltre cooldown (ultimi 1 secondo)...")
+        very_recent = master_ai.load_recent_closes(minutes=0.016)  # ~1 secondo
+        print(f"   ✅ Chiusure nell'ultimo secondo: {len(very_recent)}")
+        
+        # Restore original file
+        master_ai.RECENT_CLOSES_FILE = original_file
     
     print("\n✅ TEST 1 PASSED: Sistema cooldown funziona correttamente")
     return True
@@ -127,7 +136,7 @@ def test_system_prompt():
         "Confidenza",
         "HOLD",
         "REGOLE DI COERENZA",
-        "appena chiuso",
+        "PROCESSO DECISIONALE STRUTTURATO",
         "OUTPUT JSON OBBLIGATORIO",
     ]
     
@@ -158,12 +167,12 @@ def test_system_prompt():
 def test_decision_model():
     """Test 5: Modello Decision"""
     print("\n" + "="*60)
-    print("TEST 5: Modello Decision")
+    print("TEST 5: Modello Decision con nuovi campi strutturati")
     print("="*60)
     
-    print("\n1. Test creazione Decision con nuovi campi...")
+    print("\n1. Test creazione Decision con tutti i nuovi campi...")
     
-    # Test con tutti i campi
+    # Test con tutti i campi inclusi i nuovi
     decision_dict = {
         "symbol": "ETHUSDT",
         "action": "OPEN_LONG",
@@ -172,7 +181,10 @@ def test_decision_model():
         "rationale": "Trend bullish confermato",
         "confidence": 85,
         "confirmations": ["RSI < 30", "Trend 1h bullish", "Fibonacci support"],
-        "risk_factors": ["High volatility"]
+        "risk_factors": ["High volatility"],
+        "setup_confirmations": ["RSI oversold < 30", "Trend 1h e 4h bullish", "Supporto Fibonacci a 2800"],
+        "blocked_by": [],
+        "direction_considered": "LONG"
     }
     
     decision = master_ai.Decision(**decision_dict)
@@ -182,6 +194,9 @@ def test_decision_model():
     print(f"      Confidence: {decision.confidence}%")
     print(f"      Confirmations: {len(decision.confirmations or [])} items")
     print(f"      Risk factors: {len(decision.risk_factors or [])} items")
+    print(f"      Setup confirmations: {len(decision.setup_confirmations or [])} items")
+    print(f"      Blocked by: {decision.blocked_by}")
+    print(f"      Direction considered: {decision.direction_considered}")
     
     # Test senza campi opzionali
     print("\n2. Test Decision senza campi opzionali...")
@@ -192,8 +207,24 @@ def test_decision_model():
     )
     print(f"   ✅ Decision minimale creata")
     
+    # Test decision con blocked_by
+    print("\n3. Test Decision con blocked_by...")
+    blocked_decision = master_ai.Decision(
+        symbol="SOLUSDT",
+        action="HOLD",
+        rationale="Margine insufficiente per aprire posizione",
+        blocked_by=["INSUFFICIENT_MARGIN"],
+        direction_considered="SHORT",
+        setup_confirmations=["Trend bearish confermato", "RSI > 60"]
+    )
+    assert blocked_decision.blocked_by == ["INSUFFICIENT_MARGIN"], "❌ Blocked by non corretto!"
+    assert blocked_decision.direction_considered == "SHORT", "❌ Direction non corretta!"
+    print(f"   ✅ Decision bloccata creata correttamente")
+    print(f"      Blocked by: {blocked_decision.blocked_by}")
+    print(f"      Direction: {blocked_decision.direction_considered}")
+    
     # Verifica che non ci siano più validators restrittivi
-    print("\n3. Test leverage e size senza limiti forzati...")
+    print("\n4. Test leverage e size senza limiti forzati...")
     high_leverage_decision = master_ai.Decision(
         symbol="SOLUSDT",
         action="OPEN_SHORT",
@@ -205,7 +236,7 @@ def test_decision_model():
     assert high_leverage_decision.size_pct == 0.25, "❌ Size modificato!"
     print(f"   ✅ Leverage 10x e size 25% accettati senza modifiche")
     
-    print("\n✅ TEST 5 PASSED: Modello Decision corretto")
+    print("\n✅ TEST 5 PASSED: Modello Decision con nuovi campi corretto")
     return True
 
 
@@ -229,6 +260,78 @@ def test_agent_urls():
     return True
 
 
+def test_guardrails():
+    """Test 7: Guardrails per coerenza decisioni"""
+    print("\n" + "="*60)
+    print("TEST 7: Guardrails per coerenza decisioni")
+    print("="*60)
+    
+    print("\n1. Test inferenza direction_considered da action...")
+    decision_dict = {
+        "symbol": "ETHUSDT",
+        "action": "OPEN_SHORT",
+        "rationale": "Trend bearish",
+        "confidence": 75
+    }
+    result = master_ai.enforce_decision_consistency(decision_dict)
+    assert result['direction_considered'] == 'SHORT', "❌ Direction non inferita correttamente!"
+    print(f"   ✅ OPEN_SHORT -> direction_considered='SHORT'")
+    
+    print("\n2. Test correzione incoerenza direction...")
+    decision_dict = {
+        "symbol": "BTCUSDT",
+        "action": "OPEN_LONG",
+        "direction_considered": "SHORT",  # Incoerente!
+        "rationale": "Test",
+        "confidence": 60
+    }
+    result = master_ai.enforce_decision_consistency(decision_dict)
+    assert result['direction_considered'] == 'LONG', "❌ Direction non corretta!"
+    print(f"   ✅ OPEN_LONG con direction='SHORT' corretto a 'LONG'")
+    
+    print("\n3. Test inferenza blocked_by per bassa confidence...")
+    decision_dict = {
+        "symbol": "SOLUSDT",
+        "action": "HOLD",
+        "rationale": "Incerto",
+        "confidence": 40  # Bassa confidence
+    }
+    result = master_ai.enforce_decision_consistency(decision_dict)
+    assert 'LOW_CONFIDENCE' in result.get('blocked_by', []), "❌ Blocked by non inferito!"
+    print(f"   ✅ HOLD con confidence=40 -> blocked_by=['LOW_CONFIDENCE']")
+    
+    print("\n4. Test forzatura HOLD quando blocked_by presente...")
+    decision_dict = {
+        "symbol": "ETHUSDT",
+        "action": "OPEN_LONG",  # Inconsistente con blocked_by
+        "blocked_by": ["INSUFFICIENT_MARGIN"],
+        "rationale": "Voglio aprire ma non ho margine",
+        "confidence": 80,
+        "leverage": 5,
+        "size_pct": 0.2
+    }
+    result = master_ai.enforce_decision_consistency(decision_dict)
+    assert result['action'] == 'HOLD', "❌ Action non forzato a HOLD!"
+    assert result['leverage'] == 1.0, "❌ Leverage non azzerato!"
+    assert result['size_pct'] == 0.0, "❌ Size non azzerato!"
+    print(f"   ✅ OPEN_LONG con blocked_by forzato a HOLD")
+    
+    print("\n5. Test backward compatibility setup_confirmations...")
+    decision_dict = {
+        "symbol": "BTCUSDT",
+        "action": "OPEN_SHORT",
+        "confirmations": ["RSI > 70", "Trend bearish"],
+        "rationale": "Short setup",
+        "confidence": 85
+    }
+    result = master_ai.enforce_decision_consistency(decision_dict)
+    assert result.get('setup_confirmations') == ["RSI > 70", "Trend bearish"], "❌ Setup confirmations non copiato!"
+    print(f"   ✅ confirmations copiato a setup_confirmations per backward compat")
+    
+    print("\n✅ TEST 7 PASSED: Guardrails funzionano correttamente")
+    return True
+
+
 def run_all_tests():
     """Esegui tutti i test"""
     print("\n" + "="*60)
@@ -242,6 +345,7 @@ def run_all_tests():
         test_system_prompt,
         test_decision_model,
         test_agent_urls,
+        test_guardrails,
     ]
     
     passed = 0
