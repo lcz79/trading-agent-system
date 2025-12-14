@@ -2,6 +2,7 @@ import os
 import json
 import logging
 import httpx
+import asyncio
 from datetime import datetime, timedelta
 from fastapi import FastAPI
 from pydantic import BaseModel, field_validator
@@ -354,6 +355,22 @@ class ReverseAnalysisRequest(BaseModel):
     symbol: str
     current_position: Dict[str, Any]
 
+class PositionData(BaseModel):
+    """Dati di una singola posizione critica"""
+    symbol: str
+    side: str  # 'long' or 'short'
+    entry_price: float
+    mark_price: float
+    leverage: float
+    size: Optional[float] = None
+    pnl: Optional[float] = None
+    is_disabled: Optional[bool] = False  # Se il simbolo è disabilitato
+
+class ManageCriticalPositionsRequest(BaseModel):
+    """Richiesta per gestire posizioni critiche in perdita"""
+    positions: List[PositionData]
+    portfolio_snapshot: Optional[Dict[str, Any]] = None  # equity, free balance, etc.
+
 
 def get_evolved_params() -> Dict[str, Any]:
     """Load evolved parameters from Learning Agent or use defaults"""
@@ -535,6 +552,15 @@ Considera anche:
 - Numero di conferme (più conferme → maggiore fiducia)
 - Performance recente del sistema (se in drawdown → più conservativo)
 
+## QUANDO NON APRIRE (HOLD)
+- Indicatori contrastanti
+- Nessuna conferma multipla
+- Appena chiusa posizione simile
+- Pattern storicamente perdente
+- Mercato troppo incerto/volatile
+- Performance sistema in forte drawdown
+- **MARGINE INSUFFICIENTE**: available_for_new_trades < 10.0 USDT (BLOCCANTE)
+
 ## OUTPUT JSON OBBLIGATORIO
 {
   "analysis_summary": "Sintesi ragionata della situazione",
@@ -609,6 +635,25 @@ async def decide_batch(payload: AnalysisPayload):
             "positions_open_count": positions_open_count,
             "positions_remaining": max(0, max_positions - positions_open_count),
             "drawdown_pct": drawdown_pct,
+        portfolio = payload.global_data.get('portfolio', {})
+        wallet_equity = portfolio.get('equity', 0)
+        wallet_available = portfolio.get('available', 0)
+        wallet_available_for_new_trades = portfolio.get('available_for_new_trades', wallet_available)
+        wallet_source = portfolio.get('available_source', 'unknown')
+        
+        # Hard constraint: se margine insufficiente, blocca nuove aperture
+        margin_threshold = 10.0
+        can_open_new_positions = wallet_available_for_new_trades >= margin_threshold
+        
+        prompt_data = {
+            "wallet": {
+                "equity": wallet_equity,
+                "available": wallet_available,
+                "available_for_new_trades": wallet_available_for_new_trades,
+                "available_source": wallet_source,
+                "can_open_new_positions": can_open_new_positions,
+                "margin_threshold": margin_threshold
+            },
             "active_positions": already_open,
             "market_data": enriched_assets_data,
             "recent_closes": recent_closes,
@@ -631,6 +676,17 @@ async def decide_batch(payload: AnalysisPayload):
 - Se drawdown_pct < -10%, usa blocked_by: ["DRAWDOWN_GUARD"]
 """
         
+        # 7. Costruisci contesto per DeepSeek
+        margin_text = ""
+        if not can_open_new_positions:
+            margin_text = f"""
+
+## ⚠️ MARGINE INSUFFICIENTE - NUOVE APERTURE BLOCCATE
+- Available for new trades: {wallet_available_for_new_trades:.2f} USDT
+- Soglia minima: {margin_threshold:.2f} USDT
+- Fonte dati: {wallet_source}
+- **AZIONE RICHIESTA**: Ritorna solo HOLD per tutti gli asset. Non aprire nuove posizioni.
+"""
         cooldown_text = ""
         if recent_closes:
             cooldown_text = "\n\n## CHIUSURE RECENTI (ultimi 15 minuti)\n"
@@ -658,6 +714,7 @@ async def decide_batch(payload: AnalysisPayload):
                 learning_text += f"- {pattern}\n"
         
         enhanced_system_prompt = SYSTEM_PROMPT + constraints_text + cooldown_text + performance_text + learning_text
+        enhanced_system_prompt = SYSTEM_PROMPT + margin_text + cooldown_text + performance_text + learning_text
         
         response = client.chat.completions.create(
             model="deepseek-chat", 
@@ -688,6 +745,24 @@ async def decide_batch(payload: AnalysisPayload):
                 d = enforce_decision_consistency(d)
                 
                 valid_dec = Decision(**d)
+                
+                # HARD CONSTRAINT: blocca OPEN_LONG/OPEN_SHORT se margine insufficiente
+                if not can_open_new_positions and valid_dec.action in ["OPEN_LONG", "OPEN_SHORT"]:
+                    logger.warning(
+                        f"🚫 Blocked {valid_dec.action} on {valid_dec.symbol}: "
+                        f"insufficient margin (available={wallet_available_for_new_trades:.2f}, threshold={margin_threshold})"
+                    )
+                    # Converti in HOLD con rationale chiaro
+                    valid_dec.action = "HOLD"
+                    valid_dec.leverage = 0
+                    valid_dec.size_pct = 0
+                    valid_dec.rationale = (
+                        f"Blocked: insufficient free margin "
+                        f"(available_for_new_trades={wallet_available_for_new_trades:.2f}, "
+                        f"threshold={margin_threshold}). "
+                        f"Original: {valid_dec.rationale}"
+                    )
+                
                 valid_decisions.append(valid_dec)
                 
                 # Salva la decisione per la dashboard
@@ -944,6 +1019,284 @@ Analizza TUTTI gli indicatori e decidi: HOLD, CLOSE o REVERSE."""
             "rationale": f"Error during analysis: {str(e)}. Defaulting to HOLD for safety.",
             "recovery_size_pct": 0.15,
             "agents_data_summary": {}
+        }
+
+
+@app.post("/manage_critical_positions")
+async def manage_critical_positions(request: ManageCriticalPositionsRequest):
+    """
+    Gestione robusta di posizioni critiche in perdita.
+    
+    Usa fast path (portfolio snapshot + technical multi-timeframe), 
+    hard timeout su LLM, fallback deterministico.
+    Constraints: simboli disabilitati → mai REVERSE; preferisce CLOSE su REVERSE a meno che confirmations>=4.
+    
+    Returns:
+        {
+          "actions": [{"symbol": "BTCUSDT", "action": "CLOSE|REVERSE|HOLD", "score_breakdown": {...}, "loss_pct_with_leverage": -12.5}],
+          "meta": {"timeout_occurred": false, "processing_time_ms": 450}
+        }
+    """
+    start_time = datetime.now()
+    timeout_occurred = False
+    actions_result = []
+    
+    try:
+        logger.info(f"🔥 Managing {len(request.positions)} critical positions")
+        
+        # Fast path: ottieni dati tecnici per tutti i simboli in parallelo
+        async with httpx.AsyncClient(timeout=10.0) as http_client:
+            tech_tasks = []
+            for pos in request.positions:
+                task = http_client.post(
+                    f"{AGENT_URLS['technical']}/analyze_multi_tf_full",
+                    json={"symbol": pos.symbol}
+                )
+                tech_tasks.append(task)
+            
+            # Raccogli risultati tecnici
+            tech_results = await asyncio.gather(*tech_tasks, return_exceptions=True)
+            tech_data_map = {}
+            for i, pos in enumerate(request.positions):
+                if isinstance(tech_results[i], Exception):
+                    logger.warning(f"⚠️ Tech data failed for {pos.symbol}: {tech_results[i]}")
+                    tech_data_map[pos.symbol] = {}
+                else:
+                    try:
+                        tech_data_map[pos.symbol] = tech_results[i].json()
+                    except:
+                        tech_data_map[pos.symbol] = {}
+        
+        # Processa ogni posizione
+        for pos in request.positions:
+            # Calcola loss_pct_with_leverage in modo consistente
+            entry = pos.entry_price
+            mark = pos.mark_price
+            leverage = pos.leverage
+            side = pos.side.lower()
+            
+            if entry > 0 and mark > 0:
+                if side in ['long', 'buy']:
+                    loss_pct_with_leverage = ((mark - entry) / entry) * leverage * 100
+                else:  # short
+                    loss_pct_with_leverage = -((mark - entry) / entry) * leverage * 100
+            else:
+                loss_pct_with_leverage = 0.0
+            
+            logger.info(f"  📊 {pos.symbol} {side}: loss_pct_with_leverage={loss_pct_with_leverage:.2f}%")
+            
+            # Prepara prompt per LLM
+            tech_data = tech_data_map.get(pos.symbol, {})
+            
+            # Conta conferme tecniche per REVERSE
+            confirmations_count = 0
+            confirmations_list = []
+            
+            # Analizza dati tecnici per conferme
+            if tech_data:
+                # RSI oversold/overbought nella direzione opposta
+                rsi_1h = tech_data.get('timeframes', {}).get('1h', {}).get('rsi')
+                if rsi_1h:
+                    if side == 'long' and rsi_1h < 30:  # oversold for long = potential reverse to short
+                        confirmations_count += 1
+                        confirmations_list.append(f"RSI 1h oversold ({rsi_1h:.1f})")
+                    elif side == 'short' and rsi_1h > 70:  # overbought for short = potential reverse to long
+                        confirmations_count += 1
+                        confirmations_list.append(f"RSI 1h overbought ({rsi_1h:.1f})")
+                
+                # Trend opposto confermato
+                trend_1h = tech_data.get('timeframes', {}).get('1h', {}).get('trend')
+                if trend_1h:
+                    if (side == 'long' and trend_1h == 'bearish') or (side == 'short' and trend_1h == 'bullish'):
+                        confirmations_count += 1
+                        confirmations_list.append(f"Trend 1h opposto ({trend_1h})")
+                
+                # MACD inversione
+                macd_signal = tech_data.get('timeframes', {}).get('1h', {}).get('macd_signal')
+                if macd_signal:
+                    if (side == 'long' and macd_signal == 'bearish') or (side == 'short' and macd_signal == 'bullish'):
+                        confirmations_count += 1
+                        confirmations_list.append(f"MACD segnale opposto ({macd_signal})")
+                
+                # Volume trend
+                volume_trend = tech_data.get('timeframes', {}).get('1h', {}).get('volume_trend')
+                if volume_trend == 'increasing':
+                    confirmations_count += 1
+                    confirmations_list.append("Volume in aumento")
+            
+            logger.info(f"  ✅ Confirmations: {confirmations_count} - {confirmations_list}")
+            
+            # Sistema di punteggio
+            score_breakdown = {
+                "technical_score": confirmations_count * 25,  # Max 100 se 4 conferme
+                "loss_severity": min(100, abs(loss_pct_with_leverage) * 5),  # Quanto è grave la perdita
+                "trend_alignment": 50 if confirmations_count >= 2 else 0,
+                "volume_confirmation": 25 if "Volume in aumento" in confirmations_list else 0
+            }
+            
+            # Costruisci prompt per LLM con timeout
+            system_prompt = """Sei un trader esperto che analizza posizioni critiche in perdita.
+
+DECISIONI POSSIBILI:
+1. HOLD = Correzione temporanea, trend principale valido
+2. CLOSE = Incertezza, meglio chiudere
+3. REVERSE = Inversione di trend CONFERMATA da multipli indicatori
+
+CRITERI REVERSE (servono ALMENO 4 conferme):
+- RSI oversold/overbought direzione opposta
+- Trend opposto confermato
+- MACD segnale inversione
+- Volume in aumento
+
+Rispondi SOLO in formato JSON:
+{"action": "HOLD|CLOSE|REVERSE", "confidence": 0-100, "rationale": "breve spiegazione"}"""
+            
+            user_prompt = f"""POSIZIONE CRITICA:
+Symbol: {pos.symbol}
+Side: {side}
+Loss: {loss_pct_with_leverage:.2f}%
+Confirmations: {confirmations_count} - {confirmations_list}
+
+Technical data summary:
+{json.dumps(tech_data.get('timeframes', {}).get('1h', {}), indent=2)[:500]}
+
+DECIDI: HOLD, CLOSE o REVERSE"""
+            
+            # LLM call con timeout e fallback
+            decision_action = "CLOSE"  # Default fallback
+            decision_confidence = 50
+            decision_rationale = "Timeout o errore LLM, fallback a CLOSE per sicurezza"
+            
+            try:
+                # Hard timeout 20s
+                async def call_llm():
+                    return await asyncio.to_thread(
+                        lambda: client.chat.completions.create(
+                            model="deepseek-chat",
+                            messages=[
+                                {"role": "system", "content": system_prompt},
+                                {"role": "user", "content": user_prompt}
+                            ],
+                            response_format={"type": "json_object"},
+                            temperature=0.3
+                        )
+                    )
+                
+                response = await asyncio.wait_for(call_llm(), timeout=20.0)
+                
+                # Log API costs
+                if hasattr(response, 'usage') and response.usage:
+                    log_api_call(
+                        tokens_in=response.usage.prompt_tokens,
+                        tokens_out=response.usage.completion_tokens
+                    )
+                
+                content = response.choices[0].message.content
+                decision_data = json.loads(content)
+                
+                decision_action = decision_data.get("action", "CLOSE").upper()
+                decision_confidence = decision_data.get("confidence", 50)
+                decision_rationale = decision_data.get("rationale", "No rationale")
+                
+            except asyncio.TimeoutError:
+                logger.warning(f"⏱️ LLM timeout for {pos.symbol}, using fallback")
+                timeout_occurred = True
+            except Exception as e:
+                logger.warning(f"⚠️ LLM error for {pos.symbol}: {e}, using fallback")
+            
+            # Applica constraints
+            # 1. Se simbolo disabilitato, mai REVERSE
+            if pos.is_disabled and decision_action == "REVERSE":
+                logger.warning(f"⚠️ Symbol {pos.symbol} disabled, forcing CLOSE instead of REVERSE")
+                decision_action = "CLOSE"
+                decision_rationale = "Simbolo disabilitato, REVERSE non permesso. " + decision_rationale
+            
+            # 2. Preferisce CLOSE su REVERSE a meno che confirmations>=4
+            if decision_action == "REVERSE" and confirmations_count < 4:
+                logger.warning(f"⚠️ {pos.symbol} confirmations={confirmations_count}<4, downgrade REVERSE to CLOSE")
+                decision_action = "CLOSE"
+                decision_rationale = f"Solo {confirmations_count} conferme (<4), troppo rischioso per REVERSE. " + decision_rationale
+            
+            # Salva evento di chiusura se azione è CLOSE o REVERSE
+            if decision_action in ["CLOSE", "REVERSE"]:
+                save_close_event(
+                    symbol=pos.symbol,
+                    side=side,
+                    reason=f"{decision_action}: {decision_rationale[:100]}"
+                )
+            
+            actions_result.append({
+                "symbol": pos.symbol,
+                "action": decision_action,
+                "confidence": decision_confidence,
+                "rationale": decision_rationale,
+                "score_breakdown": score_breakdown,
+                "loss_pct_with_leverage": round(loss_pct_with_leverage, 2),
+                "confirmations_count": confirmations_count,
+                "confirmations": confirmations_list
+            })
+            
+            logger.info(f"  ✅ {pos.symbol}: {decision_action} (confidence={decision_confidence}%)")
+        
+        elapsed_ms = int((datetime.now() - start_time).total_seconds() * 1000)
+        
+        result = {
+            "actions": actions_result,
+            "meta": {
+                "timeout_occurred": timeout_occurred,
+                "processing_time_ms": elapsed_ms,
+                "total_positions": len(request.positions)
+            }
+        }
+        
+        logger.info(f"✅ Critical positions management complete: {elapsed_ms}ms, {len(actions_result)} actions")
+        
+        return result
+        
+    except Exception as e:
+        logger.error(f"❌ Critical positions management error: {e}")
+        elapsed_ms = int((datetime.now() - start_time).total_seconds() * 1000)
+        
+        # Fallback per tutte le posizioni
+        fallback_actions = []
+        for pos in request.positions:
+            entry = pos.entry_price
+            mark = pos.mark_price
+            leverage = pos.leverage
+            side = pos.side.lower()
+            
+            if entry > 0 and mark > 0:
+                if side in ['long', 'buy']:
+                    loss_pct = ((mark - entry) / entry) * leverage * 100
+                else:
+                    loss_pct = -((mark - entry) / entry) * leverage * 100
+            else:
+                loss_pct = 0.0
+            
+            fallback_actions.append({
+                "symbol": pos.symbol,
+                "action": "CLOSE",  # Fallback sicuro
+                "confidence": 0,
+                "rationale": f"Errore durante analisi: {str(e)}. Fallback a CLOSE per sicurezza.",
+                "score_breakdown": {
+                    "technical_score": 0,
+                    "loss_severity": min(100, abs(loss_pct) * 5),
+                    "trend_alignment": 0,
+                    "volume_confirmation": 0
+                },
+                "loss_pct_with_leverage": round(loss_pct, 2),
+                "confirmations_count": 0,
+                "confirmations": []
+            })
+        
+        return {
+            "actions": fallback_actions,
+            "meta": {
+                "timeout_occurred": True,
+                "processing_time_ms": elapsed_ms,
+                "total_positions": len(request.positions),
+                "error": str(e)
+            }
         }
 
 
