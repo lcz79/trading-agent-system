@@ -206,22 +206,14 @@ async def decide_batch(payload: AnalysisPayload):
         learning_insights = await get_learning_insights()
         
         # Semplificazione dati per prompt
-        # Semplificazione dati per prompt
         assets_summary = {}
         for k, v in payload.assets_data.items():
             t = v.get('tech', {})
-            # Estrai dati dalla struttura timeframes/summary
-            summary = t.get('summary', {})
-            tf_1h = t.get('timeframes', {}).get('1h', {})
-            tf_15m = t.get('timeframes', {}).get('15m', {})
             assets_summary[k] = {
-                "price": summary.get('entry_price') or tf_1h.get('price') or tf_15m.get('price'),
-                "rsi_7": tf_15m.get('rsi'),  # RSI veloce dal 15m
-                "rsi_1h": tf_1h.get('rsi'),  # RSI dal 1h
-                "trend": summary.get('bias') or tf_1h.get('trend'),
-                "macd": tf_1h.get('macd'),
-                "macd_momentum": tf_1h.get('macd_momentum'),
-                "tf_aligned": summary.get('tf_aligned', False)
+                "price": t.get('price'),
+                "rsi_7": t.get('rsi'), # Usiamo RSI veloce
+                "trend": t.get('trend'),
+                "macd": t.get('macd_hist')
             }
             
         prompt_data = {
