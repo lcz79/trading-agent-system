@@ -7,11 +7,14 @@ URLS = {
     "ai": "http://04_master_ai_agent:8000"
 }
 SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
+DISABLED_SYMBOLS = os.getenv("DISABLED_SYMBOLS", "").split(",")  # Comma-separated list of disabled symbols
+DISABLED_SYMBOLS = [s.strip() for s in DISABLED_SYMBOLS if s.strip()]  # Clean up empty strings
 
 # --- CONFIGURAZIONE OTTIMIZZAZIONE ---
 MAX_POSITIONS = 3  # Numero massimo posizioni contemporanee
 REVERSE_THRESHOLD = 2.0  # Percentuale perdita per trigger reverse analysis
 CYCLE_INTERVAL = 60  # Secondi tra ogni ciclo di controllo (era 900)
+DRY_RUN = os.getenv("DRY_RUN", "false").lower() == "true"  # Se true, logga solo azioni senza eseguirle
 
 AI_DECISIONS_FILE = "/data/ai_decisions.json"
 
@@ -88,6 +91,7 @@ async def analysis_cycle():
         print(f"\n[{datetime.now().strftime('%H:%M')}] 📊 Position check: {num_positions}/{MAX_POSITIONS} posizioni aperte")
         
         # 2. LOGICA OTTIMIZZAZIONE
+        # Inizializza positions_losing prima di usarla
         positions_losing = []
         
         # Controlla posizioni in perdita oltre la soglia
@@ -109,60 +113,171 @@ async def analysis_cycle():
                     positions_losing.append({
                         'symbol': symbol,
                         'loss_pct': loss_pct,
-                        'side': side
+                        'side': side,
+                        'entry_price': entry,
+                        'mark_price': mark,
+                        'leverage': leverage,
+                        'size': pos.get('size', 0),
+                        'pnl': pos.get('pnl', 0)
                     })
 
-        # CASO 1: Tutte le posizioni occupate (3/3)
-        if num_positions >= MAX_POSITIONS:
-            if positions_losing:
-                # Ci sono posizioni in perdita oltre la soglia
-                for pos_loss in positions_losing:
-                    print(f"        ⚠️ {pos_loss['symbol']} perde {pos_loss['loss_pct']:.2f}%")
+        # GESTIONE CRITICA POSIZIONI IN PERDITA
+        if positions_losing:
+            print(f"        🔥 CRITICAL: {len(positions_losing)} posizioni in perdita oltre soglia!")
+            for pos_loss in positions_losing:
+                print(f"        ⚠️ {pos_loss['symbol']} {pos_loss['side']}: {pos_loss['loss_pct']:.2f}%")
+            
+            # Chiama Master AI per gestione critica
+            try:
+                mgmt_start = datetime.now()
+                print(f"        📞 Calling Master AI /manage_critical_positions...")
                 
-                # TODO: Implementare logica reverse per chiudere/invertire posizioni in perdita
-                # Opzioni possibili:
-                # 1. Chiudere la posizione in perdita
-                # 2. Chiamare DeepSeek per analisi reverse (chiudere + aprire posizione opposta)
-                # 3. Ridurre leverage o size della posizione
-                # Per ora monitoriamo solo, il trailing stop gestirà l'uscita automatica
-                print(f"        ⚠️ {len(positions_losing)} posizione(i) in perdita critica rilevata(e)")
-            else:
-                # Controlla se tutte le posizioni sono realmente in profitto o se ci sono perdite minori
-                all_positions_status = []
-                all_in_profit = True
+                # Prepara richiesta per Master AI
+                critical_positions = []
+                for pl in positions_losing:
+                    critical_positions.append({
+                        "symbol": pl['symbol'],
+                        "side": pl['side'],
+                        "entry_price": pl['entry_price'],
+                        "mark_price": pl['mark_price'],
+                        "leverage": pl['leverage'],
+                        "size": pl.get('size', 0),
+                        "pnl": pl.get('pnl', 0),
+                        "is_disabled": pl['symbol'] in DISABLED_SYMBOLS
+                    })
                 
-                for pos in position_details:
-                    entry = pos.get('entry_price', 0)
-                    mark = pos.get('mark_price', 0)
-                    side = pos.get('side', '').lower()
-                    symbol = pos.get('symbol', '').replace('USDT', '')
-                    leverage = float(pos.get('leverage', 1))
-                    
-                    if entry > 0 and mark > 0:
-                        # Calcola P&L % con leva
-                        if side in ['long', 'buy']:
-                            pnl_pct = ((mark - entry) / entry) * leverage * 100
-                        else:  # short
-                            pnl_pct = -((mark - entry) / entry) * leverage * 100
-                        
-                        all_positions_status.append(f"{symbol}: {pnl_pct:+.2f}%")
-                        if pnl_pct < 0:
-                            all_in_profit = False
-                
-                # Genera rationale in base allo stato reale
-                positions_str = " | ".join(all_positions_status)
-                if all_in_profit:
-                    rationale = f"Tutte le posizioni in profitto. {positions_str}. Nessuna azione richiesta. Continuo monitoraggio trailing stop."
-                else:
-                    rationale = f"Posizioni miste. {positions_str}. Nessuna in perdita critica. Continuo monitoraggio trailing stop."
-                
-                print(f"        ✅ Nessun allarme perdita - Skip analisi DeepSeek")
-                save_monitoring_decision(
-                    positions_count=len(position_details),
-                    max_positions=MAX_POSITIONS,
-                    positions_details=position_details,
-                    reason=rationale
+                mgmt_resp = await c.post(
+                    f"{URLS['ai']}/manage_critical_positions",
+                    json={
+                        "positions": critical_positions,
+                        "portfolio_snapshot": portfolio
+                    },
+                    timeout=60.0
                 )
+                
+                mgmt_elapsed = (datetime.now() - mgmt_start).total_seconds()
+                
+                if mgmt_resp.status_code == 200:
+                    mgmt_data = mgmt_resp.json()
+                    actions = mgmt_data.get('actions', [])
+                    meta = mgmt_data.get('meta', {})
+                    
+                    print(f"        ✅ MGMT Response: {len(actions)} actions, {meta.get('processing_time_ms', 0)}ms")
+                    
+                    # Log azioni
+                    for act in actions:
+                        action_type = act.get('action')
+                        symbol = act.get('symbol')
+                        loss_pct = act.get('loss_pct_with_leverage', 0)
+                        confidence = act.get('confidence', 0)
+                        print(f"        🎯 ACTION: {symbol} → {action_type} (loss={loss_pct:.2f}%, conf={confidence}%)")
+                    
+                    # Esegui azioni (se non DRY_RUN)
+                    if DRY_RUN:
+                        print(f"        🔍 DRY_RUN mode: azioni non eseguite")
+                    else:
+                        for act in actions:
+                            action_type = act.get('action')
+                            symbol = act.get('symbol')
+                            
+                            if action_type == "CLOSE":
+                                print(f"        🔒 Closing {symbol}...")
+                                try:
+                                    close_resp = await c.post(
+                                        f"{URLS['pos']}/close_position",
+                                        json={"symbol": symbol},
+                                        timeout=10.0
+                                    )
+                                    print(f"        ✅ Close result: {close_resp.json()}")
+                                except Exception as e:
+                                    print(f"        ❌ Close error: {e}")
+                            
+                            elif action_type == "REVERSE":
+                                # Trova posizione originale per side
+                                original_pos = next((p for p in positions_losing if p['symbol'] == symbol), None)
+                                if original_pos:
+                                    original_side = original_pos['side']
+                                    new_side = "OPEN_SHORT" if original_side in ['long', 'buy'] else "OPEN_LONG"
+                                    
+                                    print(f"        🔄 Reversing {symbol} from {original_side} to {new_side}...")
+                                    
+                                    # 1. Chiudi posizione esistente
+                                    try:
+                                        close_resp = await c.post(
+                                            f"{URLS['pos']}/close_position",
+                                            json={"symbol": symbol},
+                                            timeout=10.0
+                                        )
+                                        print(f"        ✅ Closed: {close_resp.json()}")
+                                        
+                                        # 2. Apri posizione opposta
+                                        await asyncio.sleep(1)  # Breve pausa
+                                        open_resp = await c.post(
+                                            f"{URLS['pos']}/open_position",
+                                            json={
+                                                "symbol": symbol,
+                                                "side": new_side,
+                                                "leverage": 5,
+                                                "size_pct": 0.15
+                                            },
+                                            timeout=10.0
+                                        )
+                                        print(f"        ✅ Opened: {open_resp.json()}")
+                                    except Exception as e:
+                                        print(f"        ❌ Reverse error: {e}")
+                            
+                            elif action_type == "HOLD":
+                                print(f"        ⏸️ Holding {symbol} (no action)")
+                    
+                    # Salta apertura nuove posizioni in questo ciclo
+                    print(f"        🛑 Critical management ran, skipping new position logic this cycle")
+                    return
+                    
+                else:
+                    print(f"        ❌ MGMT failed: {mgmt_resp.status_code}")
+                    
+            except Exception as e:
+                print(f"        ❌ Critical management error: {e}")
+                # Continua con logica normale se gestione critica fallisce
+
+        # CASO 1: Tutte le posizioni occupate (3/3) MA senza posizioni critiche
+        if num_positions >= MAX_POSITIONS:
+            # Controlla se tutte le posizioni sono realmente in profitto o se ci sono perdite minori
+            all_positions_status = []
+            all_in_profit = True
+            
+            for pos in position_details:
+                entry = pos.get('entry_price', 0)
+                mark = pos.get('mark_price', 0)
+                side = pos.get('side', '').lower()
+                symbol = pos.get('symbol', '').replace('USDT', '')
+                leverage = float(pos.get('leverage', 1))
+                
+                if entry > 0 and mark > 0:
+                    # Calcola P&L % con leva
+                    if side in ['long', 'buy']:
+                        pnl_pct = ((mark - entry) / entry) * leverage * 100
+                    else:  # short
+                        pnl_pct = -((mark - entry) / entry) * leverage * 100
+                    
+                    all_positions_status.append(f"{symbol}: {pnl_pct:+.2f}%")
+                    if pnl_pct < 0:
+                        all_in_profit = False
+            
+            # Genera rationale in base allo stato reale
+            positions_str = " | ".join(all_positions_status)
+            if all_in_profit:
+                rationale = f"Tutte le posizioni in profitto. {positions_str}. Nessuna azione richiesta. Continuo monitoraggio trailing stop."
+            else:
+                rationale = f"Posizioni miste. {positions_str}. Nessuna in perdita critica. Continuo monitoraggio trailing stop."
+            
+            print(f"        ✅ Nessun allarme perdita - Skip analisi DeepSeek")
+            save_monitoring_decision(
+                positions_count=len(position_details),
+                max_positions=MAX_POSITIONS,
+                positions_details=position_details,
+                reason=rationale
+            )
             return
 
         # CASO 2: Almeno uno slot libero (< 3 posizioni)
