@@ -4,7 +4,8 @@ from datetime import datetime
 URLS = {
     "tech": "http://01_technical_analyzer:8000",
     "pos": "http://07_position_manager:8000",
-    "ai": "http://04_master_ai_agent:8000"
+    "ai": "http://04_master_ai_agent:8000",
+    "learning": "http://10_learning_agent:8000"
 }
 SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
 DISABLED_SYMBOLS = os.getenv("DISABLED_SYMBOLS", "").split(",")  # Comma-separated list of disabled symbols
@@ -19,6 +20,17 @@ DRY_RUN = os.getenv("DRY_RUN", "false").lower() == "true"  # Se true, logga solo
 AI_DECISIONS_FILE = "/data/ai_decisions.json"
 
 
+async def fetch_learning_params(c: httpx.AsyncClient) -> dict:
+    """Fetch evolved params from learning agent. Best-effort: returns {} on failure."""
+    try:
+        r = await c.get(f"{URLS['learning']}/current_params", timeout=5.0)
+        if r.status_code == 200:
+            return r.json() or {}
+    except Exception as e:
+        print(f"        ⚠️ Learning params fetch failed: {e}")
+    return {}
+
+
 def append_ai_decision_event(event: dict) -> None:
     """Append a single event to /data/ai_decisions.json (list), creating the file if needed.
 
@@ -26,6 +38,70 @@ def append_ai_decision_event(event: dict) -> None:
     """
     import json
     from datetime import datetime
+
+
+# --- HTTP helper: retry su errori di rete/DNS (Temporary failure in name resolution) ---
+import time
+import random
+
+
+# --- HTTPX async helper: retry su errori temporanei di rete/DNS ---
+import random
+
+async def async_post_with_retry(client, url, json_payload, timeout=30.0, attempts=3, base_sleep=1.0):
+    """
+    POST JSON con retry/backoff per errori temporanei (DNS, timeout, connessione).
+    attempts=3 -> sleep ~1s, ~2s, ~4s (+ jitter)
+    """
+    last_exc = None
+    for n in range(1, attempts + 1):
+        try:
+            return await client.post(url, json=json_payload, timeout=timeout)
+        except Exception as e:
+            last_exc = e
+            msg = str(e).lower()
+            retryable = (
+                "temporary failure in name resolution" in msg
+                or "name resolution" in msg
+                or "failed to establish a new connection" in msg
+                or "connecterror" in msg
+                or "connection refused" in msg
+                or "timed out" in msg
+                or "timeout" in msg
+            )
+            if (not retryable) or (n == attempts):
+                raise
+            sleep_s = (base_sleep * (2 ** (n - 1))) + random.uniform(0, 0.25)
+            print(f"        ⏳ Retry {n}/{attempts} POST {url} dopo errore rete/DNS: {e} (sleep {sleep_s:.2f}s)")
+            await asyncio.sleep(sleep_s)
+    raise last_exc
+
+def post_json_with_retry(url, json_payload, timeout=30, attempts=3, base_sleep=1.0):
+    """
+    POST JSON con retry/backoff per errori temporanei di rete/DNS.
+    attempts=3 -> wait ~1s, ~2s, ~4s (+ jitter)
+    """
+    last_exc = None
+    for n in range(1, attempts + 1):
+        try:
+            return requests.post(url, json=json_payload, timeout=timeout)
+        except Exception as e:
+            last_exc = e
+            msg = str(e).lower()
+            retryable = (
+                "temporary failure in name resolution" in msg
+                or "name resolution" in msg
+                or "failed to establish a new connection" in msg
+                or "connection refused" in msg
+                or "timed out" in msg
+                or "timeout" in msg
+            )
+            if not retryable or n == attempts:
+                raise
+            sleep_s = (base_sleep * (2 ** (n - 1))) + random.uniform(0, 0.25)
+            print(f"        ⏳ Retry {n}/{attempts} POST {url} dopo errore rete/DNS: {e} (sleep {sleep_s:.2f}s)")
+            time.sleep(sleep_s)
+    raise last_exc
 
     event = dict(event or {})
     event.setdefault("timestamp", datetime.utcnow().isoformat())
@@ -94,11 +170,13 @@ def save_monitoring_decision(positions_count: int, max_positions: int, positions
 
 async def manage_cycle():
     async with httpx.AsyncClient() as c:
+        learning_params = await fetch_learning_params(c)
         try: await c.post(f"{URLS['pos']}/manage_active_positions", timeout=5)
         except: pass
 
 async def analysis_cycle():
     async with httpx.AsyncClient(timeout=60) as c:
+        learning_params = await fetch_learning_params(c)
         
         # 1. DATA COLLECTION
         portfolio = {}
@@ -180,11 +258,10 @@ async def analysis_cycle():
                         "is_disabled": pl['symbol'] in DISABLED_SYMBOLS
                     })
                 
-                mgmt_resp = await c.post(
-                    f"{URLS['ai']}/manage_critical_positions",
-                    json={
+                mgmt_resp = await async_post_with_retry(c, f"{URLS['ai']}/manage_critical_positions", json_payload={
                         "positions": critical_positions,
-                        "portfolio_snapshot": portfolio
+                        "portfolio_snapshot": portfolio,
+                        "learning_params": learning_params,
                     },
                     timeout=60.0
                 )
@@ -221,46 +298,70 @@ async def analysis_cycle():
                                     close_resp = await c.post(
                                         f"{URLS['pos']}/close_position",
                                         json={"symbol": symbol},
-                                        timeout=10.0
+                                        timeout=20.0
                                     )
-                                    print(f"        ✅ Close result: {close_resp.json()}")
+                                    close_json = close_resp.json()
+                                    print(f"        ✅ Close result: {close_json}")
+
+                                    if close_json.get("status") not in ("executed", "no_position"):
+                                        print(f"        ⚠️ Close returned status={close_json.get('status')}, retrying once...")
+                                        close_resp2 = await c.post(
+                                            f"{URLS['pos']}/close_position",
+                                            json={"symbol": symbol},
+                                            timeout=20.0
+                                        )
+                                        close_json2 = close_resp2.json()
+                                        print(f"        ✅ Close retry result: {close_json2}")
                                 except Exception as e:
                                     print(f"        ❌ Close error: {e}")
                             
                             elif action_type == "REVERSE":
-                                # Trova posizione originale per side
-                                original_pos = next((p for p in positions_losing if p['symbol'] == symbol), None)
-                                if original_pos:
-                                    original_side = original_pos['side']
-                                    new_side = "OPEN_SHORT" if original_side in ['long', 'buy'] else "OPEN_LONG"
-                                    
-                                    print(f"        🔄 Reversing {symbol} from {original_side} to {new_side}...")
-                                    
-                                    # 1. Chiudi posizione esistente
-                                    try:
-                                        close_resp = await c.post(
-                                            f"{URLS['pos']}/close_position",
-                                            json={"symbol": symbol},
-                                            timeout=10.0
-                                        )
-                                        print(f"        ✅ Closed: {close_resp.json()}")
-                                        
-                                        # 2. Apri posizione opposta
-                                        await asyncio.sleep(1)  # Breve pausa
-                                        open_resp = await c.post(
-                                            f"{URLS['pos']}/open_position",
-                                            json={
-                                                "symbol": symbol,
-                                                "side": new_side,
-                                                "leverage": 5,
-                                                "size_pct": 0.15
-                                            },
-                                            timeout=10.0
-                                        )
-                                        print(f"        ✅ Opened: {open_resp.json()}")
-                                    except Exception as e:
-                                        print(f"        ❌ Reverse error: {e}")
-                            
+                                # Preferisci reverse atomico lato position_manager (close + open opposto)
+                                # recovery_size_pct può arrivare dall'AI; fallback a 0.25
+                                recovery_size_pct = float(act.get("recovery_size_pct", 0.25) or 0.25)
+
+                                print(f"        🔄 Reversing {symbol} via /reverse_position (recovery_size_pct={recovery_size_pct})...")
+                                try:
+                                    rev_resp = await c.post(
+                                        f"{URLS['pos']}/reverse_position",
+                                        json={"symbol": symbol, "recovery_size_pct": recovery_size_pct},
+                                        timeout=20.0
+                                    )
+                                    rev_json = rev_resp.json()
+                                    print(f"        ✅ Reverse result: {rev_json}")
+
+                                    # Fallback: se reverse è disabilitato o fallisce, usa vecchio approccio (close + open)
+                                    if rev_json.get("status") not in ("executed",):
+                                        print(f"        ⚠️ Reverse endpoint status={rev_json.get('status')}, fallback to close+open_position")
+
+                                        original_pos = next((p for p in positions_losing if p['symbol'] == symbol), None)
+                                        if original_pos:
+                                            original_side = original_pos['side']
+                                            new_side = "OPEN_SHORT" if original_side in ['long', 'buy'] else "OPEN_LONG"
+                                            try:
+                                                close_resp = await c.post(
+                                                    f"{URLS['pos']}/close_position",
+                                                    json={"symbol": symbol},
+                                                    timeout=10.0
+                                                )
+                                                print(f"        ✅ Closed: {close_resp.json()}")
+                                                await asyncio.sleep(1)
+                                                open_resp = await c.post(
+                                                    f"{URLS['pos']}/open_position",
+                                                    json={
+                                                        "symbol": symbol,
+                                                        "side": new_side,
+                                                        "leverage": 5,
+                                                        "size_pct": 0.15
+                                                    },
+                                                    timeout=10.0
+                                                )
+                                                print(f"        ✅ Opened: {open_resp.json()}")
+                                            except Exception as e:
+                                                print(f"        ❌ Reverse fallback error: {e}")
+                                except Exception as e:
+                                    print(f"        ❌ Reverse error: {e}")
+
                             elif action_type == "HOLD":
                                 print(f"        ⏸️ Holding {symbol} (no action)")
                     
@@ -369,10 +470,11 @@ async def analysis_cycle():
                     drawdown_pct = (total_pnl / equity) * 100
                     enhanced_global_data['drawdown_pct'] = drawdown_pct
             
-            resp = await c.post(f"{URLS['ai']}/decide_batch", json={
+            resp = await async_post_with_retry(c, f"{URLS['ai']}/decide_batch", json_payload={
+                    "learning_params": learning_params,
                 "global_data": enhanced_global_data,
                 "assets_data": assets_data
-            }, timeout=120)
+            }, timeout=120.0)
             
             dec_data = resp.json()
             analysis_text = dec_data.get('analysis', 'No text')
