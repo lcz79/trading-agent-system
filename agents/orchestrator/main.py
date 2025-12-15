@@ -18,6 +18,40 @@ DRY_RUN = os.getenv("DRY_RUN", "false").lower() == "true"  # Se true, logga solo
 
 AI_DECISIONS_FILE = "/data/ai_decisions.json"
 
+
+def append_ai_decision_event(event: dict) -> None:
+    """Append a single event to /data/ai_decisions.json (list), creating the file if needed.
+
+    The dashboard reads this file to show the AI Decision Log. We must log also CRITICAL cycles.
+    """
+    import json
+    from datetime import datetime
+
+    event = dict(event or {})
+    event.setdefault("timestamp", datetime.utcnow().isoformat())
+
+    try:
+        try:
+            with open(AI_DECISIONS_FILE, "r") as f:
+                data = json.load(f)
+            if not isinstance(data, list):
+                data = []
+        except FileNotFoundError:
+            data = []
+        except Exception:
+            # If file is corrupted, start a new log rather than blocking the bot
+            data = []
+
+        data.append(event)
+        # Keep last N to avoid unbounded growth
+        data = data[-500:]
+
+        with open(AI_DECISIONS_FILE, "w") as f:
+            json.dump(data, f, indent=2)
+    except Exception as e:
+        print(f"        ⚠️ Failed to write AI decision log: {e}")
+
+
 def save_monitoring_decision(positions_count: int, max_positions: int, positions_details: list, reason: str):
     """Salva la decisione di monitoraggio per la dashboard"""
     try:
@@ -163,6 +197,7 @@ async def analysis_cycle():
                     meta = mgmt_data.get('meta', {})
                     
                     print(f"        ✅ MGMT Response: {len(actions)} actions, {meta.get('processing_time_ms', 0)}ms")
+                    append_ai_decision_event({"type": "CRITICAL_MANAGEMENT", "status": "MGMT_RESPONSE", "details": {"note": "manage_critical_positions executed"}})
                     
                     # Log azioni
                     for act in actions:
@@ -230,6 +265,7 @@ async def analysis_cycle():
                                 print(f"        ⏸️ Holding {symbol} (no action)")
                     
                     # Salta apertura nuove posizioni in questo ciclo
+                    append_ai_decision_event({"type": "CRITICAL_MANAGEMENT", "status": "COMPLETED", "rationale": "Critical management cycle completed; new position logic skipped."})
                     print(f"        🛑 Critical management ran, skipping new position logic this cycle")
                     return
                     
