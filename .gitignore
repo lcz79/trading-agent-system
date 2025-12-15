@@ -11,3 +11,4 @@ data/
 *_old_*.py
 *.bak
 *.bak.*
+.venv/
