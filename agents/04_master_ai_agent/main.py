@@ -350,6 +350,7 @@ class Decision(BaseModel):
 class AnalysisPayload(BaseModel):
     global_data: Dict[str, Any]
     assets_data: Dict[str, Any]
+    learning_params: Optional[Dict[str, Any]] = None
 
 class ReverseAnalysisRequest(BaseModel):
     symbol: str
@@ -370,6 +371,7 @@ class ManageCriticalPositionsRequest(BaseModel):
     """Richiesta per gestire posizioni critiche in perdita"""
     positions: List[PositionData]
     portfolio_snapshot: Optional[Dict[str, Any]] = None  # equity, free balance, etc.
+    learning_params: Optional[dict] = None
 
 
 def get_evolved_params() -> Dict[str, Any]:
@@ -608,7 +610,14 @@ async def decide_batch(payload: AnalysisPayload):
         
         # 4. Get learning insights
         learning_insights = await get_learning_insights()
-        
+        payload_learning_params = (payload.learning_params or {}) if hasattr(payload, "learning_params") else {}
+        payload_learning_params_params = (payload_learning_params.get("params") if isinstance(payload_learning_params, dict) else {}) or {}
+        payload_learning_params_meta = {
+            "status": payload_learning_params.get("status") if isinstance(payload_learning_params, dict) else None,
+            "version": payload_learning_params.get("version") if isinstance(payload_learning_params, dict) else None,
+            "evolved_at": payload_learning_params.get("evolved_at") if isinstance(payload_learning_params, dict) else None,
+        }
+
         # 5. Per ogni asset, raccogli TUTTI i dati dagli agenti
         async with httpx.AsyncClient(timeout=30.0) as http_client:
             # Ottieni lista asset da analizzare (quelli senza posizione aperta)
@@ -666,7 +675,9 @@ async def decide_batch(payload: AnalysisPayload):
             "recent_closes": recent_closes,
             "recent_losses": recent_losses[:5],
             "system_performance": performance,
-            "learning_insights": learning_insights
+            "learning_insights": learning_insights,
+            "learning_params": payload_learning_params_params,
+            "learning_params_meta": payload_learning_params_meta
         }
         
         # 7. Costruisci contesto per DeepSeek con informazioni sui vincoli
@@ -713,20 +724,32 @@ async def decide_batch(payload: AnalysisPayload):
 - Trade vincenti: {performance['winning_trades']}
 - Trade perdenti: {performance['losing_trades']}
 """
-        
         learning_text = ""
+        learning_policy_text = ""
+        if payload_learning_params_params:
+            learning_policy_text = f"""
+## LEARNING POLICY (guidance, NOT hard rules)
+- Questi parametri sono evoluti dal Learning Agent e servono come guardrail.
+- Puoi scegliere leva e size liberamente, ma se fai override rispetto alla policy devi spiegarlo nel rationale.
+- In generale: se vai contro policy, riduci rischio (leva/size) e aumenta prudenza.
+
+Evolved params (guidance):
+{json.dumps(payload_learning_params_params, indent=2)[:1200]}
+"""
+
         if learning_insights.get('losing_patterns'):
             learning_text = "\n\n## PATTERN PERDENTI DA EVITARE\n"
             for pattern in learning_insights['losing_patterns']:
                 learning_text += f"- {pattern}\n"
         
-        enhanced_system_prompt = (
+                enhanced_system_prompt = (
             SYSTEM_PROMPT
             + constraints_text
             + margin_text
             + cooldown_text
             + performance_text
             + learning_text
+            + learning_policy_text
         )
         
         response = client.chat.completions.create(
@@ -756,9 +779,24 @@ async def decide_batch(payload: AnalysisPayload):
             try:
                 # Applica guardrail per garantire coerenza
                 d = enforce_decision_consistency(d)
-                
                 valid_dec = Decision(**d)
-                
+
+                # CAP ENTRY CONFIDENCE by setup_confirmations (soft sanity-check)
+                sc = valid_dec.setup_confirmations or valid_dec.confirmations or []
+                sc_n = len(sc) if isinstance(sc, list) else 0
+                if valid_dec.confidence is not None:
+                    try:
+                        conf = int(valid_dec.confidence)
+                    except Exception:
+                        conf = 50
+                    if sc_n <= 0:
+                        conf = min(conf, 55)
+                    elif sc_n == 1:
+                        conf = min(conf, 65)
+                    elif sc_n == 2:
+                        conf = min(conf, 75)
+                    valid_dec.confidence = max(0, min(100, conf))
+
                 # HARD CONSTRAINT: blocca OPEN_LONG/OPEN_SHORT se margine insufficiente
                 if not can_open_new_positions and valid_dec.action in ["OPEN_LONG", "OPEN_SHORT"]:
                     logger.warning(
@@ -1056,7 +1094,14 @@ async def manage_critical_positions(request: ManageCriticalPositionsRequest):
     
     try:
         logger.info(f"🔥 Managing {len(request.positions)} critical positions")
-        
+        learning_params = getattr(request, "learning_params", None) or {}
+        learning_params_params = (learning_params.get("params") if isinstance(learning_params, dict) else {}) or {}
+        learning_params_meta = {
+            "status": learning_params.get("status") if isinstance(learning_params, dict) else None,
+            "version": learning_params.get("version") if isinstance(learning_params, dict) else None,
+            "evolved_at": learning_params.get("evolved_at") if isinstance(learning_params, dict) else None,
+        }
+
         # Fast path: ottieni dati tecnici per tutti i simboli in parallelo
         async with httpx.AsyncClient(timeout=10.0) as http_client:
             tech_tasks = []
@@ -1163,12 +1208,19 @@ CRITERI REVERSE (servono ALMENO 4 conferme):
 
 Rispondi SOLO in formato JSON:
 {"action": "HOLD|CLOSE|REVERSE", "confidence": 0-100, "rationale": "breve spiegazione"}"""
-            
             user_prompt = f"""POSIZIONE CRITICA:
 Symbol: {pos.symbol}
 Side: {side}
 Loss: {loss_pct_with_leverage:.2f}%
 Confirmations: {confirmations_count} - {confirmations_list}
+
+LEARNING_POLICY (evolved params, guidance not hard rules):
+{json.dumps(learning_params_params, indent=2)[:800]}
+
+Regole di disciplina:
+- Puoi fare override rispetto alla policy, ma devi spiegarlo nel rationale.
+- Se le conferme sono poche (0-1), preferisci CLOSE o HOLD prudente: confidence moderata.
+- REVERSE solo se conferme >=4 (verificato a valle).
 
 Technical data summary:
 {json.dumps(tech_data.get('timeframes', {}).get('1h', {}), indent=2)[:500]}
@@ -1210,7 +1262,20 @@ DECIDI: HOLD, CLOSE o REVERSE"""
                 decision_action = decision_data.get("action", "CLOSE").upper()
                 decision_confidence = decision_data.get("confidence", 50)
                 decision_rationale = decision_data.get("rationale", "No rationale")
-                
+
+                # CAP CONFIDENCE by confirmations_count (soft sanity-check)
+                try:
+                    decision_confidence = float(decision_confidence)
+                except Exception:
+                    decision_confidence = 50
+                if confirmations_count <= 0:
+                    decision_confidence = min(decision_confidence, 55)
+                elif confirmations_count == 1:
+                    decision_confidence = min(decision_confidence, 65)
+                elif confirmations_count == 2:
+                    decision_confidence = min(decision_confidence, 75)
+                decision_confidence = int(max(0, min(100, decision_confidence)))
+
             except asyncio.TimeoutError:
                 logger.warning(f"⏱️ LLM timeout for {pos.symbol}, using fallback")
                 timeout_occurred = True
@@ -1258,7 +1323,8 @@ DECIDI: HOLD, CLOSE o REVERSE"""
             "meta": {
                 "timeout_occurred": timeout_occurred,
                 "processing_time_ms": elapsed_ms,
-                "total_positions": len(request.positions)
+                "total_positions": len(request.positions),
+                "learning_params": learning_params_meta,
             }
         }
         
