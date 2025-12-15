@@ -64,6 +64,9 @@ COOLDOWN_FILE = os.getenv("COOLDOWN_FILE", "/data/closed_cooldown.json")
 # --- AI DECISIONS FILE ---
 AI_DECISIONS_FILE = os.getenv("AI_DECISIONS_FILE", "/data/ai_decisions.json")
 
+# --- TRAILING STATE FILE (prevents SL regression) ---
+TRAILING_STATE_FILE = os.getenv("TRAILING_STATE_FILE", "/data/trailing_state.json")
+
 # --- LEARNING AGENT ---
 LEARNING_AGENT_URL = os.getenv("LEARNING_AGENT_URL", "http://10_learning_agent:8000").strip()
 DEFAULT_SIZE_PCT = float(os.getenv("DEFAULT_SIZE_PCT", "0.15"))
@@ -246,6 +249,17 @@ def save_json(path: str, data):
         except Exception:
             pass
 
+def _load_trailing_state() -> dict:
+    s = load_json(TRAILING_STATE_FILE, default={})
+    return s if isinstance(s, dict) else {}
+
+def _save_trailing_state(state: dict) -> None:
+    if isinstance(state, dict):
+        save_json(TRAILING_STATE_FILE, state)
+
+def _trailing_key(symbol: str, side_dir: str, position_idx: int) -> str:
+    return f"{bybit_symbol_id(symbol)}|{side_dir}|{int(position_idx)}"
+
 # =========================================================
 # EXCHANGE SETUP
 # =========================================================
@@ -311,6 +325,11 @@ class OrderRequest(BaseModel):
 
 class CloseRequest(BaseModel):
     symbol: str
+
+
+class ReverseRequest(BaseModel):
+    symbol: str
+    recovery_size_pct: float = 0.25
 
 # =========================================================
 # LEARNING AGENT
@@ -424,6 +443,7 @@ def check_and_update_trailing_stops():
         return
 
     try:
+        trailing_state = _load_trailing_state()
         positions = exchange.fetch_positions(None, params={"category": "linear"})
 
         for p in positions:
@@ -467,7 +487,16 @@ def check_and_update_trailing_stops():
             new_sl_price = None
 
             if side_dir == "long":
-                target_sl = mark_price * (1 - trailing_distance)
+                position_idx = get_position_idx_from_position(p)
+                k = _trailing_key(symbol, side_dir, position_idx)
+                st = trailing_state.get(k, {}) if isinstance(trailing_state.get(k, {}), dict) else {}
+                peak = to_float(st.get("peak_mark"), 0.0)
+                if peak <= 0:
+                    peak = mark_price
+                peak = max(peak, mark_price)
+                trailing_state[k] = {**st, "peak_mark": peak, "updated_at": datetime.utcnow().isoformat()}
+
+                target_sl = peak * (1 - trailing_distance)
                 
                 # BREAK-EVEN PROTECTION: se in profitto sufficiente, SL minimo = entry + margine
                 if roi >= BREAKEVEN_ACTIVATION_PCT:
@@ -476,10 +505,22 @@ def check_and_update_trailing_stops():
                         target_sl = min_sl
                         print(f"🛡️ BREAK-EVEN PROTECTION {symbol}: SL alzato a {target_sl:.2f} (entry+margin)")
                 
-                if sl_current == 0.0 or target_sl > sl_current:
-                    new_sl_price = target_sl
+                last_sl = to_float(st.get("last_sl"), 0.0)
+                baseline = max([v for v in (sl_current, last_sl) if v > 0.0], default=0.0)
+                hardened = max(target_sl, baseline)
+                if baseline == 0.0 or hardened > baseline:
+                    new_sl_price = hardened
             else:  # short
-                target_sl = mark_price * (1 + trailing_distance)
+                position_idx = get_position_idx_from_position(p)
+                k = _trailing_key(symbol, side_dir, position_idx)
+                st = trailing_state.get(k, {}) if isinstance(trailing_state.get(k, {}), dict) else {}
+                trough = to_float(st.get("trough_mark"), 0.0)
+                if trough <= 0:
+                    trough = mark_price
+                trough = min(trough, mark_price)
+                trailing_state[k] = {**st, "trough_mark": trough, "updated_at": datetime.utcnow().isoformat()}
+
+                target_sl = trough * (1 + trailing_distance)
                 
                 # BREAK-EVEN PROTECTION per short
                 if roi >= BREAKEVEN_ACTIVATION_PCT:
@@ -488,8 +529,11 @@ def check_and_update_trailing_stops():
                         target_sl = max_sl
                         print(f"🛡️ BREAK-EVEN PROTECTION {symbol}: SL abbassato a {target_sl:.2f} (entry-margin)")
                 
-                if sl_current == 0.0 or target_sl < sl_current:
-                    new_sl_price = target_sl
+                last_sl = to_float(st.get("last_sl"), 0.0)
+                baseline = min([v for v in (sl_current, last_sl) if v > 0.0], default=0.0)
+                hardened = target_sl if baseline == 0.0 else min(target_sl, baseline)
+                if baseline == 0.0 or hardened < baseline:
+                    new_sl_price = hardened
 
             if not new_sl_price:
                 continue
@@ -497,9 +541,14 @@ def check_and_update_trailing_stops():
             price_str = exchange.price_to_precision(symbol, new_sl_price)
             position_idx = get_position_idx_from_position(p)
 
+            k = _trailing_key(symbol, side_dir, position_idx)
+            st = trailing_state.get(k, {}) if isinstance(trailing_state.get(k, {}), dict) else {}
+            trailing_state[k] = {**st, "last_sl": float(new_sl_price), "updated_at": datetime.utcnow().isoformat()}
+
             print(
-                f"🏃 TRAILING STOP {symbol} ROI={roi*100:.2f}% "
-                f"SL {sl_current} -> {price_str} (dist={trailing_distance*100:.2f}%) idx={position_idx}"
+                f"🏃 TRAILING STOP {symbol} side={side_dir} ROI={roi*100:.2f}% "
+                f"entry={entry_price:.4f} mark={mark_price:.4f} "
+                f"SL(cur={sl_current}) -> {price_str} (dist={trailing_distance*100:.2f}%) idx={position_idx}"
             )
 
             try:
@@ -515,6 +564,7 @@ def check_and_update_trailing_stops():
             except Exception as api_err:
                 print(f"❌ Errore API Bybit (trading_stop): {api_err}")
 
+        _save_trailing_state(trailing_state)
     except Exception as e:
         print(f"⚠️ Trailing logic error: {e}")
 
@@ -799,6 +849,7 @@ def check_smart_reverse():
         return
 
     try:
+        trailing_state = _load_trailing_state()
         positions = exchange.fetch_positions(None, params={"category": "linear"})
         wallet_bal = exchange.fetch_balance(params={"type": "swap"})
         wallet_balance = to_float((wallet_bal.get("USDT", {}) or {}).get("total", 0.0), 0.0)
@@ -1214,9 +1265,67 @@ def open_position(order: OrderRequest):
 
 @app.post("/close_position")
 def close_position(req: CloseRequest):
-    # se vuoi abilitarlo manualmente, puoi chiamare execute_close_position(req.symbol)
-    return {"status": "manual_only"}
+    # Default SAFE: manual-only. Set POSITION_MANAGER_MANUAL_ONLY=false to allow auto-close.
+    manual_only = os.getenv("POSITION_MANAGER_MANUAL_ONLY", "true").lower() == "true"
+    if manual_only:
+        return {"status": "manual_only"}
 
+    try:
+        ok = execute_close_position(req.symbol)
+        if ok:
+            return {"status": "executed"}
+
+        # execute_close_position ritorna False anche quando NON esiste una posizione.
+        # Double-check per distinguere "no_position" da "error".
+        sym = req.symbol
+        try:
+            sym_id = bybit_symbol_id(sym)
+            sym_ccxt = ccxt_symbol_from_id(exchange, sym_id) or sym
+            positions = exchange.fetch_positions([sym_ccxt], params={"category": "linear"})
+            has_pos = any(to_float(p.get("contracts"), 0.0) > 0 for p in positions)
+            if not has_pos:
+                return {"status": "no_position", "symbol": sym_id}
+        except Exception:
+            pass
+
+        return {"status": "error", "msg": "close_failed_or_unknown_state"}
+    except Exception as e:
+        print(f"❌ Close Error: {e}")
+        return {"status": "error", "msg": str(e)}
+
+@app.post("/reverse_position")
+def reverse_position(req: ReverseRequest):
+    # Reverse è opzionale e va abilitato esplicitamente
+    enable_reverse = os.getenv("POSITION_MANAGER_ENABLE_REVERSE", "false").lower() == "true"
+    if not enable_reverse:
+        return {"status": "disabled"}
+
+    manual_only = os.getenv("POSITION_MANAGER_MANUAL_ONLY", "true").lower() == "true"
+    if manual_only:
+        return {"status": "manual_only"}
+
+    try:
+        # Ricava il lato corrente dalla posizione aperta
+        sym = req.symbol
+        sym_id = bybit_symbol_id(sym)
+        sym_ccxt = ccxt_symbol_from_id(exchange, sym_id) or sym
+        positions = exchange.fetch_positions([sym_ccxt], params={"category": "linear"})
+        position = None
+        for p in positions:
+            if to_float(p.get("contracts"), 0.0) > 0:
+                position = p
+                break
+        if not position:
+            return {"status": "no_position", "symbol": sym_id}
+
+        current_side_raw = position.get("side", "")
+        ok = execute_reverse(sym_ccxt, current_side_raw=current_side_raw, recovery_size_pct=float(req.recovery_size_pct))
+        if ok:
+            return {"status": "executed", "symbol": sym_id}
+        return {"status": "error", "msg": "reverse_failed", "symbol": sym_id}
+    except Exception as e:
+        print(f"❌ Reverse Error: {e}")
+        return {"status": "error", "msg": str(e)}
 @app.post("/manage_active_positions")
 def manage():
     check_recent_closes_and_save_cooldown()
