@@ -52,6 +52,9 @@ services:
       - trading-network
 
   07_position_manager:
+    environment:
+      POSITION_MANAGER_ENABLE_REVERSE: "true"
+      POSITION_MANAGER_MANUAL_ONLY: "false"
     build: ./agents/07_position_manager
     container_name: 07_position_manager
     ports:
