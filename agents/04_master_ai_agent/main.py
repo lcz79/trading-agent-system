@@ -621,20 +621,12 @@ async def decide_batch(payload: AnalysisPayload):
                 }
         
         # 6. Costruisci prompt con TUTTO il contesto
-        # Estrai informazioni sui vincoli dal payload
+        # Estrai informazioni dal payload (tutte da portfolio e global_data)
         max_positions = payload.global_data.get('max_positions', 3)
         positions_open_count = payload.global_data.get('positions_open_count', len(already_open))
-        wallet_info = payload.global_data.get('wallet', {})
         drawdown_pct = payload.global_data.get('drawdown_pct', 0)
         
-        prompt_data = {
-            "wallet_equity": payload.global_data.get('portfolio', {}).get('equity'),
-            "wallet_available": wallet_info.get('available', 0),
-            "wallet_available_for_trades": wallet_info.get('available_for_new_trades', 0),
-            "max_positions": max_positions,
-            "positions_open_count": positions_open_count,
-            "positions_remaining": max(0, max_positions - positions_open_count),
-            "drawdown_pct": drawdown_pct,
+        # Leggi dati wallet da portfolio
         portfolio = payload.global_data.get('portfolio', {})
         wallet_equity = portfolio.get('equity', 0)
         wallet_available = portfolio.get('available', 0)
@@ -654,6 +646,10 @@ async def decide_batch(payload: AnalysisPayload):
                 "can_open_new_positions": can_open_new_positions,
                 "margin_threshold": margin_threshold
             },
+            "max_positions": max_positions,
+            "positions_open_count": positions_open_count,
+            "positions_remaining": max(0, max_positions - positions_open_count),
+            "drawdown_pct": drawdown_pct,
             "active_positions": already_open,
             "market_data": enriched_assets_data,
             "recent_closes": recent_closes,
@@ -666,8 +662,8 @@ async def decide_batch(payload: AnalysisPayload):
         constraints_text = f"""
 ## VINCOLI ATTUALI DEL SISTEMA
 - Posizioni aperte: {positions_open_count}/{max_positions}
-- Wallet disponibile: ${wallet_info.get('available', 0):.2f}
-- Wallet per nuovi trade: ${wallet_info.get('available_for_new_trades', 0):.2f}
+- Wallet disponibile: ${wallet_available:.2f}
+- Wallet per nuovi trade: ${wallet_available_for_new_trades:.2f}
 - Drawdown corrente: {drawdown_pct:.2f}%
 
 ⚠️ IMPORTANTE: 
@@ -676,7 +672,7 @@ async def decide_batch(payload: AnalysisPayload):
 - Se drawdown_pct < -10%, usa blocked_by: ["DRAWDOWN_GUARD"]
 """
         
-        # 7. Costruisci contesto per DeepSeek
+        # 8. Costruisci contesto per DeepSeek
         margin_text = ""
         if not can_open_new_positions:
             margin_text = f"""

@@ -310,17 +310,19 @@ async def analysis_cycle():
         # 5. AI DECISION
         print(f"        🤖 DeepSeek: Analizzando {list(assets_data.keys())}...")
         try:
-            # Prepara payload arricchito con informazioni su posizioni e wallet
+            # Garantisce che portfolio abbia tutti i campi necessari
+            # Se available_for_new_trades manca, calcola fallback sicuro
+            if "available_for_new_trades" not in portfolio:
+                available = portfolio.get('available', 0)
+                portfolio["available_for_new_trades"] = max(0.0, available * 0.95) if available > 0 else 0.0
+                portfolio["available_source"] = "orchestrator_fallback"
+            
+            # Prepara payload con portfolio contenente tutti i campi necessari
             enhanced_global_data = {
-                "portfolio": portfolio,
+                "portfolio": portfolio,  # Contiene: equity, available, available_for_new_trades, available_source
                 "already_open": active_symbols,
                 "max_positions": MAX_POSITIONS,
                 "positions_open_count": num_positions,
-                "wallet": {
-                    "equity": portfolio.get('equity', 0),
-                    "available": portfolio.get('available', 0),
-                    "available_for_new_trades": portfolio.get('available', 0) * 0.95  # 95% of available
-                }
             }
             
             # Calcola drawdown se abbiamo dati sufficienti
