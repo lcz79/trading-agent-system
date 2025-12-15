@@ -9,3 +9,5 @@ data/
 *_backup.py
 *_backup_*.py
 *_old_*.py
+*.bak
+*.bak.*
