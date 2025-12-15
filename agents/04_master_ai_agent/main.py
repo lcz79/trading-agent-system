@@ -670,7 +670,7 @@ async def decide_batch(payload: AnalysisPayload):
 
 ⚠️ IMPORTANTE: 
 - Se positions_open_count >= max_positions, usa blocked_by: ["MAX_POSITIONS"]
-- Se wallet_available_for_new_trades < $100, usa blocked_by: ["INSUFFICIENT_MARGIN"]
+- Se wallet_available_for_new_trades < 10.0 USDT, usa blocked_by: ["INSUFFICIENT_MARGIN"]
 - Se drawdown_pct < -10%, usa blocked_by: ["DRAWDOWN_GUARD"]
 """
         
@@ -711,8 +711,14 @@ async def decide_batch(payload: AnalysisPayload):
             for pattern in learning_insights['losing_patterns']:
                 learning_text += f"- {pattern}\n"
         
-        enhanced_system_prompt = SYSTEM_PROMPT + constraints_text + cooldown_text + performance_text + learning_text
-        enhanced_system_prompt = SYSTEM_PROMPT + margin_text + cooldown_text + performance_text + learning_text
+        enhanced_system_prompt = (
+            SYSTEM_PROMPT
+            + constraints_text
+            + margin_text
+            + cooldown_text
+            + performance_text
+            + learning_text
+        )
         
         response = client.chat.completions.create(
             model="deepseek-chat", 
