@@ -89,7 +89,9 @@ def test_master_ai_reads_portfolio():
     portfolio = payload.global_data.get('portfolio', {})
     wallet_equity = portfolio.get('equity', 0)
     wallet_available = portfolio.get('available', 0)
-    wallet_available_for_new_trades = portfolio.get('available_for_new_trades', wallet_available)
+    # Fallback: se available_for_new_trades manca, usa 95% di available (come orchestrator)
+    wallet_available_for_new_trades = portfolio.get('available_for_new_trades', 
+                                                    max(0.0, wallet_available * 0.95) if wallet_available > 0 else 0.0)
     wallet_source = portfolio.get('available_source', 'unknown')
     
     # Verify reads
