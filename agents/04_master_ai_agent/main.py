@@ -541,6 +541,15 @@ Esempio ERRATO da EVITARE:
 - action: "OPEN_SHORT" ma setup_confirmations contiene "BTC long setup con RSI basso" ❌
 
 ## GESTIONE RISCHIO DINAMICA
+
+## REGOLE RSI (ANTI-CONTRADDIZIONE)
+- Mean-reversion (default):
+  - Se direction_considered = "LONG": RSI basso (es. < 35) è a favore del LONG (possibile rimbalzo). RSI alto (> 65) è contro LONG.
+  - Se direction_considered = "SHORT": RSI alto (es. > 65) è a favore dello SHORT (possibile ritracciamento). RSI basso (< 35) è contro SHORT.
+- Eccezione trend-following (solo se trend molto forte e confermato multi-timeframe):
+  - Puoi considerare SHORT anche con RSI basso (< 35) solo se ci sono conferme di continuazione ribassista (lower highs/lower lows, breakdown di supporto, momentum/MACD coerente, nessun segnale chiaro di reversal). In questo caso scrivi nel rationale che stai seguendo il trend e che RSI oversold e` un rischio di rimbalzo.
+- In ogni caso: NON dire mai "RSI oversold e` una conferma per SHORT" senza spiegare l`eccezione trend-following.
+
 Decidi TU leva e size in base alla tua confidenza e alle condizioni di mercato:
 - Alta confidenza (90%+): considera leverage più alto e size maggiore
 - Media confidenza (70-89%): usa leverage moderato e size standard
