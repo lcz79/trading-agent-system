@@ -799,7 +799,7 @@ Use this context to adjust your aggressiveness and selectivity, while keeping fu
 - **YOU DECIDE leverage and size**: Use this context as guidance, not hard rules. Explain your reasoning if you deviate.
 """
         
-                enhanced_system_prompt = (
+        enhanced_system_prompt = (
             SYSTEM_PROMPT
             + constraints_text
             + margin_text
