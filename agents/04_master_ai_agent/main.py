@@ -768,7 +768,14 @@ Use this context to adjust your aggressiveness and selectivity, while keeping fu
 """
             if lc_by_symbol:
                 for symbol, stats in lc_by_symbol.items():
-                    learning_context_text += f"- **{symbol}**: {stats.get('total_trades', 0)} trades, win_rate={stats.get('win_rate', 0)*100:.0f}%, total_pnl={stats.get('total_pnl', 0):.1f}%, avg_pnl={stats.get('avg_pnl', 0):.1f}%, max_dd={stats.get('max_drawdown', 0):.1f}%\n"
+                    line = (
+                        f"- **{symbol}**: {stats.get('total_trades', 0)} trades, "
+                        f"win_rate={stats.get('win_rate', 0)*100:.0f}%, "
+                        f"total_pnl={stats.get('total_pnl', 0):.1f}%, "
+                        f"avg_pnl={stats.get('avg_pnl', 0):.1f}%, "
+                        f"max_dd={stats.get('max_drawdown', 0):.1f}%\n"
+                    )
+                    learning_context_text += line
             else:
                 learning_context_text += "- No per-symbol data available yet\n"
             
