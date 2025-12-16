@@ -643,6 +643,7 @@ async def decide_batch(payload: AnalysisPayload):
         max_positions = payload.global_data.get('max_positions', 3)
         positions_open_count = payload.global_data.get('positions_open_count', len(already_open))
         drawdown_pct = payload.global_data.get('drawdown_pct', 0)
+        learning_context = payload.global_data.get('learning_context', {})
         
         # Leggi dati wallet da portfolio
         portfolio = payload.global_data.get('portfolio', {})
@@ -677,7 +678,8 @@ async def decide_batch(payload: AnalysisPayload):
             "system_performance": performance,
             "learning_insights": learning_insights,
             "learning_params": payload_learning_params_params,
-            "learning_params_meta": payload_learning_params_meta
+            "learning_params_meta": payload_learning_params_meta,
+            "learning_context": learning_context  # Nuovo: contesto di apprendimento completo
         }
         
         # 7. Costruisci contesto per DeepSeek con informazioni sui vincoli
@@ -742,6 +744,61 @@ Evolved params (guidance):
             for pattern in learning_insights['losing_patterns']:
                 learning_text += f"- {pattern}\n"
         
+        # Costruisci sezione learning context
+        learning_context_text = ""
+        if learning_context and learning_context.get("status") == "success":
+            lc_perf = learning_context.get("performance", {})
+            lc_recent = learning_context.get("recent_trades", [])
+            lc_by_symbol = learning_context.get("by_symbol", {})
+            lc_risk = learning_context.get("risk_flags", {})
+            
+            learning_context_text = f"""
+
+## LEARNING CONTEXT (Historical Performance & Risk Signals)
+Use this context to adjust your aggressiveness and selectivity, while keeping full discretion on leverage and position size.
+
+### Overall Performance (last {learning_context.get('period_hours', 0)} hours)
+- Total trades: {lc_perf.get('total_trades', 0)}
+- Win rate: {lc_perf.get('win_rate', 0)*100:.1f}%
+- Total PnL: {lc_perf.get('total_pnl', 0):.2f}%
+- Max drawdown: {lc_perf.get('max_drawdown', 0):.2f}%
+- Winning: {lc_perf.get('winning_trades', 0)} | Losing: {lc_perf.get('losing_trades', 0)}
+
+### Per-Symbol Performance
+"""
+            if lc_by_symbol:
+                for symbol, stats in lc_by_symbol.items():
+                    learning_context_text += f"- **{symbol}**: {stats.get('total_trades', 0)} trades, win_rate={stats.get('win_rate', 0)*100:.0f}%, total_pnl={stats.get('total_pnl', 0):.1f}%, avg_pnl={stats.get('avg_pnl', 0):.1f}%, max_dd={stats.get('max_drawdown', 0):.1f}%\n"
+            else:
+                learning_context_text += "- No per-symbol data available yet\n"
+            
+            learning_context_text += f"""
+### Risk Flags (Heuristics)
+- Losing streak: {lc_risk.get('losing_streak_count', 0)} consecutive losses
+- Last trade PnL: {lc_risk.get('last_trade_pnl_pct', 0):.2f}%
+- Negative PnL period: {'YES' if lc_risk.get('negative_pnl_period', False) else 'NO'}
+- High drawdown period: {'YES' if lc_risk.get('high_drawdown_period', False) else 'NO'}
+
+### Recent Trades Sample (last {len(lc_recent)} completed)
+"""
+            # Mostra solo gli ultimi 5 trade per non appesantire il prompt
+            for trade in lc_recent[-5:]:
+                ts = trade.get('timestamp', '')[:16]  # Solo data e ora
+                sym = trade.get('symbol', 'UNK')
+                side = trade.get('side', '?')
+                pnl = trade.get('pnl_pct', 0)
+                learning_context_text += f"- [{ts}] {sym} {side}: PnL={pnl:.2f}%\n"
+            
+            learning_context_text += """
+### How to use this context:
+- **If win_rate is low (<50%)**: Be MORE SELECTIVE. Require stronger confirmations (4-5 instead of 3).
+- **If losing streak > 2**: Consider REDUCING position sizes and leverage to limit further damage.
+- **If high_drawdown_period = YES**: Be CONSERVATIVE. Avoid aggressive trades.
+- **If negative_pnl_period = YES**: Focus on HIGH CONFIDENCE setups only (confidence >80%).
+- **Per-symbol stats**: If a symbol has poor historical performance, be extra cautious or skip it.
+- **YOU DECIDE leverage and size**: Use this context as guidance, not hard rules. Explain your reasoning if you deviate.
+"""
+        
                 enhanced_system_prompt = (
             SYSTEM_PROMPT
             + constraints_text
@@ -750,6 +807,7 @@ Evolved params (guidance):
             + performance_text
             + learning_text
             + learning_policy_text
+            + learning_context_text
         )
         
         response = client.chat.completions.create(

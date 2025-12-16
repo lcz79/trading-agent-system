@@ -31,6 +31,32 @@ async def fetch_learning_params(c: httpx.AsyncClient) -> dict:
     return {}
 
 
+async def fetch_learning_context(c: httpx.AsyncClient) -> dict:
+    """
+    Fetch learning context from learning agent. Best-effort: returns empty dict on failure.
+    
+    Returns context with performance, recent_trades, by_symbol stats, and risk_flags.
+    """
+    try:
+        r = await c.get(f"{URLS['learning']}/learning_context", timeout=5.0)
+        if r.status_code == 200:
+            data = r.json()
+            if data.get("status") == "success":
+                return data
+    except Exception as e:
+        print(f"        ⚠️ Learning context fetch failed: {e}")
+    # Ritorna struttura vuota di default
+    return {
+        "status": "unavailable",
+        "period_hours": 0,
+        "as_of": datetime.now().isoformat(),
+        "performance": {},
+        "recent_trades": [],
+        "by_symbol": {},
+        "risk_flags": {}
+    }
+
+
 def append_ai_decision_event(event: dict) -> None:
     """Append a single event to /data/ai_decisions.json (list), creating the file if needed.
 
@@ -177,6 +203,22 @@ async def manage_cycle():
 async def analysis_cycle():
     async with httpx.AsyncClient(timeout=60) as c:
         learning_params = await fetch_learning_params(c)
+        learning_context = await fetch_learning_context(c)
+        
+        # Log learning context summary
+        if learning_context.get("status") == "success":
+            perf = learning_context.get("performance", {})
+            recent_trades_count = len(learning_context.get("recent_trades", []))
+            trades_in_window = perf.get("total_trades", 0)
+            pnl = perf.get("total_pnl", 0)
+            win_rate = perf.get("win_rate", 0) * 100
+            print(
+                f"        🧠 Learning context: "
+                f"last_N={recent_trades_count}, "
+                f"trades_in_window={trades_in_window}, "
+                f"pnl={pnl:.2f}%, "
+                f"win_rate={win_rate:.1f}%"
+            )
         
         # 1. DATA COLLECTION
         portfolio = {}
@@ -460,6 +502,7 @@ async def analysis_cycle():
                 "already_open": active_symbols,
                 "max_positions": MAX_POSITIONS,
                 "positions_open_count": num_positions,
+                "learning_context": learning_context,  # Nuovo: contesto di apprendimento
             }
             
             # Calcola drawdown se abbiamo dati sufficienti
