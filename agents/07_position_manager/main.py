@@ -257,6 +257,39 @@ def _save_trailing_state(state: dict) -> None:
     if isinstance(state, dict):
         save_json(TRAILING_STATE_FILE, state)
 
+
+# =========================================================
+# PROFIT-LOCK (AGGRESSIVE TRAILING AFTER STABILITY)
+# =========================================================
+PROFIT_LOCK_STATE_FILE = os.getenv("PROFIT_LOCK_STATE_FILE", "/data/profit_lock_state.json")
+PROFIT_LOCK_CONFIRM_SECONDS = int(os.getenv("PROFIT_LOCK_CONFIRM_SECONDS", "90"))
+# ROI values here are "leveraged ROI fraction" (e.g. 0.018 = 1.8% lev ROI)
+PROFIT_LOCK_ARM_ROI = float(os.getenv("PROFIT_LOCK_ARM_ROI", "0.018"))
+PROFIT_LOCK_MAX_BACKSTEP_ROI = float(os.getenv("PROFIT_LOCK_MAX_BACKSTEP_ROI", "0.003"))
+
+# When profit-lock is confirmed, tighten the ATR multiplier to protect more profit
+ATR_MULTIPLIER_AGGRESSIVE = float(os.getenv("ATR_MULTIPLIER_AGGRESSIVE", "1.2"))
+
+def _load_profit_lock_state() -> dict:
+    try:
+        if os.path.exists(PROFIT_LOCK_STATE_FILE):
+            with open(PROFIT_LOCK_STATE_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                return data if isinstance(data, dict) else {}
+    except Exception as e:
+        print(f"⚠️ Could not load profit-lock state: {e}")
+    return {}
+
+def _save_profit_lock_state(state: dict) -> None:
+    try:
+        ensure_parent_dir(PROFIT_LOCK_STATE_FILE)
+        with open(PROFIT_LOCK_STATE_FILE, "w", encoding="utf-8") as f:
+            json.dump(state, f, indent=2, sort_keys=True)
+    except Exception as e:
+        print(f"⚠️ Could not save profit-lock state: {e}")
+
+
+
 def _trailing_key(symbol: str, side_dir: str, position_idx: int) -> str:
     return f"{bybit_symbol_id(symbol)}|{side_dir}|{int(position_idx)}"
 
@@ -423,27 +456,28 @@ def get_atr_for_symbol(symbol: str) -> Tuple[Optional[float], Optional[float]]:
         pass
     return None, None
 
-def get_trailing_distance_pct(symbol: str, mark_price: float) -> float:
+def get_trailing_distance_pct(symbol: str, mark_price: float, aggressive: bool = False) -> float:
     atr, price = get_atr_for_symbol(symbol)
     if atr and price and price > 0:
         base = symbol_base(symbol)
-        mult = float(ATR_MULTIPLIERS.get(base, ATR_MULTIPLIER_DEFAULT))
+        if aggressive:
+            mult = float(ATR_MULTIPLIER_AGGRESSIVE)
+        else:
+            mult = float(ATR_MULTIPLIERS.get(base, ATR_MULTIPLIER_DEFAULT))
         pct = min(0.08, max(0.01, (atr * mult) / price))
-        print(f"📊 ATR {symbol}: {atr:.6f}, mult={mult}, trailing={pct*100:.2f}%")
+        mode = "AGGR" if aggressive else "NORM"
+        print(f"📊 ATR {symbol}: {atr:.6f}, mult={mult} ({mode}), trailing={pct*100:.2f}%")
         return pct
 
     print(f"⚠️ ATR unavailable for {symbol}, using fallback {FALLBACK_TRAILING_PCT*100:.2f}%")
     return FALLBACK_TRAILING_PCT
-
-# =========================================================
-# TRAILING LOGIC (ATR-BASED)
-# =========================================================
 def check_and_update_trailing_stops():
     if not exchange:
         return
 
     try:
         trailing_state = _load_trailing_state()
+        profit_lock_state = _load_profit_lock_state()
         positions = exchange.fetch_positions(None, params={"category": "linear"})
 
         for p in positions:
@@ -480,14 +514,78 @@ def check_and_update_trailing_stops():
                 roi_raw = (entry_price - mark_price) / entry_price
             roi = roi_raw * leverage
 
+            # DEBUG: stampa ROI anche quando non scatta (solo BTC)
+            try:
+                sym_id_dbg = bybit_symbol_id(symbol)
+            except Exception:
+                sym_id_dbg = str(symbol)
+
+            if sym_id_dbg == "BTCUSDT":
+                print(
+                    f"🧾 TRAIL DEBUG {sym_id_dbg} side={side_dir} "
+                    f"entry={entry_price:.2f} mark={mark_price:.2f} lev={leverage:.1f} "
+                    f"roi_raw={roi_raw*100:.3f}% roi_lev={roi*100:.3f}% "
+                    f"need>={TRAILING_ACTIVATION_PCT*100:.3f}% (lev)"
+                )
+
+            position_idx = get_position_idx_from_position(p)
+            k_pl = _trailing_key(symbol, side_dir, position_idx)
+
+            # Activation gate
             if roi < TRAILING_ACTIVATION_PCT:
+                profit_lock_state.pop(k_pl, None)
                 continue
 
-            trailing_distance = get_trailing_distance_pct(symbol, mark_price)
+            # Profit-lock stage logic (B: confirm 90s, max backstep 0.3%, aggressive mult 1.2)
+            stage = 1
+            if roi >= PROFIT_LOCK_ARM_ROI:
+                st_pl = profit_lock_state.get(k_pl, {}) if isinstance(profit_lock_state.get(k_pl, {}), dict) else {}
+                armed_at_iso = st_pl.get("armed_at")
+                best_roi = to_float(st_pl.get("best_roi"), roi)
+
+                now = datetime.utcnow()
+                if not armed_at_iso:
+                    st_pl = {
+                        "armed_at": now.isoformat(),
+                        "best_roi": float(roi),
+                        "stage": 1,
+                        "updated_at": now.isoformat(),
+                    }
+                else:
+                    best_roi = max(best_roi, roi)
+                    try:
+                        armed_at = datetime.fromisoformat(armed_at_iso)
+                    except Exception:
+                        armed_at = now
+
+                    elapsed = (now - armed_at).total_seconds()
+                    backstep = max(0.0, best_roi - roi)
+
+                    if elapsed >= PROFIT_LOCK_CONFIRM_SECONDS and backstep <= PROFIT_LOCK_MAX_BACKSTEP_ROI:
+                        st_pl["stage"] = 2
+                    else:
+                        st_pl["stage"] = 1
+
+                    st_pl["best_roi"] = float(best_roi)
+                    st_pl["updated_at"] = now.isoformat()
+
+                profit_lock_state[k_pl] = st_pl
+                stage = int(to_float(st_pl.get("stage"), 1))
+            else:
+                profit_lock_state.pop(k_pl, None)
+                stage = 1
+
+            if stage == 2:
+                print(
+                    f"🔒 PROFIT LOCK STAGE 2 {symbol} side={side_dir} "
+                    f"roi={roi*100:.2f}% (arm>={PROFIT_LOCK_ARM_ROI*100:.2f}%) "
+                    f"confirm={PROFIT_LOCK_CONFIRM_SECONDS}s backstep<={PROFIT_LOCK_MAX_BACKSTEP_ROI*100:.2f}%"
+                )
+
+            trailing_distance = get_trailing_distance_pct(symbol, mark_price, aggressive=(stage == 2))
             new_sl_price = None
 
             if side_dir == "long":
-                position_idx = get_position_idx_from_position(p)
                 k = _trailing_key(symbol, side_dir, position_idx)
                 st = trailing_state.get(k, {}) if isinstance(trailing_state.get(k, {}), dict) else {}
                 peak = to_float(st.get("peak_mark"), 0.0)
@@ -497,21 +595,21 @@ def check_and_update_trailing_stops():
                 trailing_state[k] = {**st, "peak_mark": peak, "updated_at": datetime.utcnow().isoformat()}
 
                 target_sl = peak * (1 - trailing_distance)
-                
+
                 # BREAK-EVEN PROTECTION: se in profitto sufficiente, SL minimo = entry + margine
                 if roi >= BREAKEVEN_ACTIVATION_PCT:
                     min_sl = entry_price * (1 + BREAKEVEN_MARGIN_PCT)
                     if target_sl < min_sl:
                         target_sl = min_sl
                         print(f"🛡️ BREAK-EVEN PROTECTION {symbol}: SL alzato a {target_sl:.2f} (entry+margin)")
-                
+
                 last_sl = to_float(st.get("last_sl"), 0.0)
                 baseline = max([v for v in (sl_current, last_sl) if v > 0.0], default=0.0)
                 hardened = max(target_sl, baseline)
                 if baseline == 0.0 or hardened > baseline:
                     new_sl_price = hardened
+
             else:  # short
-                position_idx = get_position_idx_from_position(p)
                 k = _trailing_key(symbol, side_dir, position_idx)
                 st = trailing_state.get(k, {}) if isinstance(trailing_state.get(k, {}), dict) else {}
                 trough = to_float(st.get("trough_mark"), 0.0)
@@ -521,14 +619,14 @@ def check_and_update_trailing_stops():
                 trailing_state[k] = {**st, "trough_mark": trough, "updated_at": datetime.utcnow().isoformat()}
 
                 target_sl = trough * (1 + trailing_distance)
-                
+
                 # BREAK-EVEN PROTECTION per short
                 if roi >= BREAKEVEN_ACTIVATION_PCT:
                     max_sl = entry_price * (1 - BREAKEVEN_MARGIN_PCT)
                     if target_sl > max_sl:
                         target_sl = max_sl
                         print(f"🛡️ BREAK-EVEN PROTECTION {symbol}: SL abbassato a {target_sl:.2f} (entry-margin)")
-                
+
                 last_sl = to_float(st.get("last_sl"), 0.0)
                 baseline = min([v for v in (sl_current, last_sl) if v > 0.0], default=0.0)
                 hardened = target_sl if baseline == 0.0 else min(target_sl, baseline)
@@ -539,7 +637,6 @@ def check_and_update_trailing_stops():
                 continue
 
             price_str = exchange.price_to_precision(symbol, new_sl_price)
-            position_idx = get_position_idx_from_position(p)
 
             k = _trailing_key(symbol, side_dir, position_idx)
             st = trailing_state.get(k, {}) if isinstance(trailing_state.get(k, {}), dict) else {}
@@ -565,12 +662,10 @@ def check_and_update_trailing_stops():
                 print(f"❌ Errore API Bybit (trading_stop): {api_err}")
 
         _save_trailing_state(trailing_state)
+        _save_profit_lock_state(profit_lock_state)
     except Exception as e:
         print(f"⚠️ Trailing logic error: {e}")
 
-# =========================================================
-# AI DECISIONS PERSISTENCE
-# =========================================================
 def save_ai_decision(decision_data: dict):
     try:
         ensure_parent_dir(AI_DECISIONS_FILE)

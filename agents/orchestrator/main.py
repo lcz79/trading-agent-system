@@ -13,7 +13,8 @@ DISABLED_SYMBOLS = [s.strip() for s in DISABLED_SYMBOLS if s.strip()]  # Clean u
 
 # --- CONFIGURAZIONE OTTIMIZZAZIONE ---
 MAX_POSITIONS = 3  # Numero massimo posizioni contemporanee
-REVERSE_THRESHOLD = 2.0  # Percentuale perdita per trigger reverse analysis
+REVERSE_THRESHOLD = float(os.getenv("REVERSE_THRESHOLD", "2.0"))  # Percentuale perdita per trigger reverse analysis
+CRITICAL_LOSS_PCT_LEV = float(os.getenv("CRITICAL_LOSS_PCT_LEV", "6.0"))  # % perdita (con leva) per trigger gestione critica
 CYCLE_INTERVAL = 60  # Secondi tra ogni ciclo di controllo (era 900)
 DRY_RUN = os.getenv("DRY_RUN", "false").lower() == "true"  # Se true, logga solo azioni senza eseguirle
 CRITICAL_LOSS_PCT_LEV = float(os.getenv("CRITICAL_LOSS_PCT_LEV", "6.0"))  # Soglia perdita % con leva per CRITICAL
@@ -288,7 +289,7 @@ async def analysis_cycle():
                 else:  # short - loss when mark > entry, profit when mark < entry
                     loss_pct = -((mark - entry) / entry) * leverage * 100  # Negative sign because direction is reversed
                 
-                if loss_pct < -REVERSE_THRESHOLD:
+                if loss_pct < -CRITICAL_LOSS_PCT_LEV:
                     positions_losing.append({
                         'symbol': symbol,
                         'loss_pct': loss_pct,
@@ -302,7 +303,7 @@ async def analysis_cycle():
 
         # GESTIONE CRITICA POSIZIONI IN PERDITA
         if positions_losing:
-            print(f"        🔥 CRITICAL: {len(positions_losing)} posizioni in perdita oltre soglia!")
+            print(f"        🔥 CRITICAL: {len(positions_losing)} posizioni in perdita oltre soglia ({CRITICAL_LOSS_PCT_LEV:.2f}% lev)!")
             for pos_loss in positions_losing:
                 print(f"        ⚠️ {pos_loss['symbol']} {pos_loss['side']}: {pos_loss['loss_pct']:.2f}%")
             
