@@ -57,6 +57,10 @@ CONFIDENCE_THRESHOLD_LOW = 50  # Soglia confidenza bassa per blocco automatico
 # Cooldown configuration
 COOLDOWN_MINUTES = 15
 
+# Crash Guard configuration - momentum filters to avoid knife catching
+CRASH_GUARD_5M_LONG_BLOCK_PCT = float(os.getenv("CRASH_GUARD_5M_LONG_BLOCK_PCT", "0.6"))  # Block LONG if return_5m <= -0.6%
+CRASH_GUARD_5M_SHORT_BLOCK_PCT = float(os.getenv("CRASH_GUARD_5M_SHORT_BLOCK_PCT", "0.6"))  # Block SHORT if return_5m >= +0.6%
+
 file_lock = Lock()
 
 
@@ -330,7 +334,8 @@ BLOCKER_REASONS = Literal[
     "DRAWDOWN_GUARD",
     "PATTERN_LOSING",
     "CONFLICTING_SIGNALS",
-    "LOW_CONFIDENCE"
+    "LOW_CONFIDENCE",
+    "CRASH_GUARD"
 ]
 
 class Decision(BaseModel):
@@ -813,6 +818,50 @@ Evolved params (guidance):
                         f"threshold={margin_threshold}). "
                         f"Original: {valid_dec.rationale}"
                     )
+                
+                # CRASH GUARD: blocca OPEN_LONG/OPEN_SHORT basato su momentum 5m
+                # Evita "knife catching" durante crash/pump rapidi
+                symbol = valid_dec.symbol
+                tech_data = enriched_assets_data.get(symbol, {}).get('technical', {})
+                return_5m = tech_data.get('summary', {}).get('return_5m', 0)
+                
+                crash_guard_blocked = False
+                crash_guard_reason = ""
+                
+                # Block LONG if return_5m <= -CRASH_GUARD_5M_LONG_BLOCK_PCT (rapid dump)
+                if valid_dec.action == "OPEN_LONG" and return_5m <= -CRASH_GUARD_5M_LONG_BLOCK_PCT:
+                    crash_guard_blocked = True
+                    crash_guard_reason = (
+                        f"CRASH_GUARD: Blocked OPEN_LONG due to rapid dump "
+                        f"(return_5m={return_5m:.2f}% <= -{CRASH_GUARD_5M_LONG_BLOCK_PCT}%). "
+                        f"Avoiding knife catching."
+                    )
+                    logger.warning(f"🚫 {crash_guard_reason}")
+                
+                # Block SHORT if return_5m >= +CRASH_GUARD_5M_SHORT_BLOCK_PCT (rapid pump)
+                elif valid_dec.action == "OPEN_SHORT" and return_5m >= CRASH_GUARD_5M_SHORT_BLOCK_PCT:
+                    crash_guard_blocked = True
+                    crash_guard_reason = (
+                        f"CRASH_GUARD: Blocked OPEN_SHORT due to rapid pump "
+                        f"(return_5m={return_5m:.2f}% >= +{CRASH_GUARD_5M_SHORT_BLOCK_PCT}%). "
+                        f"Avoiding counter-momentum entry."
+                    )
+                    logger.warning(f"🚫 {crash_guard_reason}")
+                
+                if crash_guard_blocked:
+                    # Converti in HOLD e aggiorna blocked_by
+                    valid_dec.action = "HOLD"
+                    valid_dec.leverage = 0
+                    valid_dec.size_pct = 0
+                    
+                    # Aggiungi CRASH_GUARD a blocked_by se non già presente
+                    current_blocked = list(valid_dec.blocked_by or [])
+                    if "CRASH_GUARD" not in current_blocked:
+                        current_blocked.append("CRASH_GUARD")
+                    valid_dec.blocked_by = current_blocked
+                    
+                    # Aggiungi crash guard reason al rationale
+                    valid_dec.rationale = f"{crash_guard_reason} Original: {valid_dec.rationale}"
                 
                 valid_decisions.append(valid_dec)
                 
