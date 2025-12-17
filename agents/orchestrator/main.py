@@ -16,6 +16,18 @@ MAX_POSITIONS = 3  # Numero massimo posizioni contemporanee
 REVERSE_THRESHOLD = 2.0  # Percentuale perdita per trigger reverse analysis
 CYCLE_INTERVAL = 60  # Secondi tra ogni ciclo di controllo (era 900)
 DRY_RUN = os.getenv("DRY_RUN", "false").lower() == "true"  # Se true, logga solo azioni senza eseguirle
+CRITICAL_LOSS_PCT_LEV = float(os.getenv("CRITICAL_LOSS_PCT_LEV", "6.0"))  # Soglia perdita % con leva per CRITICAL
+
+# --- CRITICAL CLOSE CONFIRMATION STATE ---
+# Tracks pending CLOSE requests per symbol. Format: {symbol: cycle_count}
+# Requires 2 consecutive cycles with CLOSE action to execute
+pending_critical_closes = {}
+
+# --- AI PARAMS CLAMPING CONFIG ---
+MIN_LEVERAGE = 3
+MAX_LEVERAGE = 10
+MIN_SIZE_PCT = 0.08
+MAX_SIZE_PCT = 0.20
 
 AI_DECISIONS_FILE = "/data/ai_decisions.json"
 
@@ -168,6 +180,61 @@ def save_monitoring_decision(positions_count: int, max_positions: int, positions
     except Exception as e:
         print(f"⚠️ Error saving monitoring decision: {e}")
 
+
+def clamp_ai_params(leverage: float, size_pct: float, symbol: str = "") -> tuple:
+    """
+    Clamp AI-provided leverage and size_pct to safe ranges.
+    Returns: (clamped_leverage, clamped_size_pct, was_clamped)
+    """
+    original_leverage = leverage
+    original_size_pct = size_pct
+    
+    # Clamp leverage to [MIN_LEVERAGE, MAX_LEVERAGE]
+    leverage = max(MIN_LEVERAGE, min(MAX_LEVERAGE, leverage))
+    
+    # Clamp size_pct to [MIN_SIZE_PCT, MAX_SIZE_PCT]
+    size_pct = max(MIN_SIZE_PCT, min(MAX_SIZE_PCT, size_pct))
+    
+    was_clamped = (leverage != original_leverage) or (size_pct != original_size_pct)
+    
+    if was_clamped:
+        print(f"        ⚙️ CLAMP {symbol}: leverage {original_leverage:.1f}→{leverage:.1f}, size_pct {original_size_pct:.3f}→{size_pct:.3f}")
+    
+    return leverage, size_pct, was_clamped
+
+
+def check_critical_close_confirmation(symbol: str, action_type: str) -> bool:
+    """
+    Implements 2-cycle confirmation for CRITICAL CLOSE actions.
+    
+    Returns True if action should be executed (second consecutive CLOSE).
+    Returns False if action should be pending (first CLOSE).
+    
+    Updates pending_critical_closes state.
+    """
+    global pending_critical_closes
+    
+    if action_type == "CLOSE":
+        # Check if this symbol already has a pending CLOSE
+        if symbol in pending_critical_closes:
+            # Second consecutive CLOSE - execute it
+            print(f"        ✅ CRITICAL CLOSE confirmed for {symbol} (2nd cycle)")
+            # Remove from pending after execution
+            del pending_critical_closes[symbol]
+            return True
+        else:
+            # First CLOSE - mark as pending
+            print(f"        ⏸️ CRITICAL CLOSE pending for {symbol} (1st cycle, need confirmation)")
+            pending_critical_closes[symbol] = datetime.now().isoformat()
+            return False
+    else:
+        # If action is not CLOSE, reset any pending CLOSE for this symbol
+        if symbol in pending_critical_closes:
+            print(f"        🔄 CRITICAL CLOSE reset for {symbol} (no CLOSE in this cycle)")
+            del pending_critical_closes[symbol]
+        return False  # Not a CLOSE action
+
+
 async def manage_cycle():
     async with httpx.AsyncClient() as c:
         learning_params = await fetch_learning_params(c)
@@ -293,76 +360,88 @@ async def analysis_cycle():
                             symbol = act.get('symbol')
                             
                             if action_type == "CLOSE":
-                                print(f"        🔒 Closing {symbol}...")
-                                try:
-                                    close_resp = await c.post(
-                                        f"{URLS['pos']}/close_position",
-                                        json={"symbol": symbol},
-                                        timeout=20.0
-                                    )
-                                    close_json = close_resp.json()
-                                    print(f"        ✅ Close result: {close_json}")
-
-                                    if close_json.get("status") not in ("executed", "no_position"):
-                                        print(f"        ⚠️ Close returned status={close_json.get('status')}, retrying once...")
-                                        close_resp2 = await c.post(
+                                # Implement 2-cycle confirmation for CRITICAL CLOSE
+                                should_execute = check_critical_close_confirmation(symbol, action_type)
+                                
+                                if should_execute:
+                                    print(f"        🔒 Closing {symbol}...")
+                                    try:
+                                        close_resp = await c.post(
                                             f"{URLS['pos']}/close_position",
                                             json={"symbol": symbol},
                                             timeout=20.0
                                         )
-                                        close_json2 = close_resp2.json()
-                                        print(f"        ✅ Close retry result: {close_json2}")
-                                except Exception as e:
-                                    print(f"        ❌ Close error: {e}")
+                                        close_json = close_resp.json()
+                                        print(f"        ✅ Close result: {close_json}")
+
+                                        if close_json.get("status") not in ("executed", "no_position"):
+                                            print(f"        ⚠️ Close returned status={close_json.get('status')}, retrying once...")
+                                            close_resp2 = await c.post(
+                                                f"{URLS['pos']}/close_position",
+                                                json={"symbol": symbol},
+                                                timeout=20.0
+                                            )
+                                            close_json2 = close_resp2.json()
+                                            print(f"        ✅ Close retry result: {close_json2}")
+                                    except Exception as e:
+                                        print(f"        ❌ Close error: {e}")
+                                # else: should_execute is False - already logged in check_critical_close_confirmation
                             
                             elif action_type == "REVERSE":
-                                # Preferisci reverse atomico lato position_manager (close + open opposto)
-                                # recovery_size_pct può arrivare dall'AI; fallback a 0.25
-                                recovery_size_pct = float(act.get("recovery_size_pct", 0.25) or 0.25)
+                                # REVERSE also needs 2-cycle confirmation (treated as CLOSE + OPEN)
+                                should_execute = check_critical_close_confirmation(symbol, "CLOSE")
+                                
+                                if should_execute:
+                                    # Preferisci reverse atomico lato position_manager (close + open opposto)
+                                    # recovery_size_pct può arrivare dall'AI; fallback a 0.25
+                                    recovery_size_pct = float(act.get("recovery_size_pct", 0.25) or 0.25)
 
-                                print(f"        🔄 Reversing {symbol} via /reverse_position (recovery_size_pct={recovery_size_pct})...")
-                                try:
-                                    rev_resp = await c.post(
-                                        f"{URLS['pos']}/reverse_position",
-                                        json={"symbol": symbol, "recovery_size_pct": recovery_size_pct},
-                                        timeout=20.0
-                                    )
-                                    rev_json = rev_resp.json()
-                                    print(f"        ✅ Reverse result: {rev_json}")
+                                    print(f"        🔄 Reversing {symbol} via /reverse_position (recovery_size_pct={recovery_size_pct})...")
+                                    try:
+                                        rev_resp = await c.post(
+                                            f"{URLS['pos']}/reverse_position",
+                                            json={"symbol": symbol, "recovery_size_pct": recovery_size_pct},
+                                            timeout=20.0
+                                        )
+                                        rev_json = rev_resp.json()
+                                        print(f"        ✅ Reverse result: {rev_json}")
 
-                                    # Fallback: se reverse è disabilitato o fallisce, usa vecchio approccio (close + open)
-                                    if rev_json.get("status") not in ("executed",):
-                                        print(f"        ⚠️ Reverse endpoint status={rev_json.get('status')}, fallback to close+open_position")
+                                        # Fallback: se reverse è disabilitato o fallisce, usa vecchio approccio (close + open)
+                                        if rev_json.get("status") not in ("executed",):
+                                            print(f"        ⚠️ Reverse endpoint status={rev_json.get('status')}, fallback to close+open_position")
 
-                                        original_pos = next((p for p in positions_losing if p['symbol'] == symbol), None)
-                                        if original_pos:
-                                            original_side = original_pos['side']
-                                            new_side = "OPEN_SHORT" if original_side in ['long', 'buy'] else "OPEN_LONG"
-                                            try:
-                                                close_resp = await c.post(
-                                                    f"{URLS['pos']}/close_position",
-                                                    json={"symbol": symbol},
-                                                    timeout=10.0
-                                                )
-                                                print(f"        ✅ Closed: {close_resp.json()}")
-                                                await asyncio.sleep(1)
-                                                open_resp = await c.post(
-                                                    f"{URLS['pos']}/open_position",
-                                                    json={
-                                                        "symbol": symbol,
-                                                        "side": new_side,
-                                                        "leverage": 5,
-                                                        "size_pct": 0.15
-                                                    },
-                                                    timeout=10.0
-                                                )
-                                                print(f"        ✅ Opened: {open_resp.json()}")
-                                            except Exception as e:
-                                                print(f"        ❌ Reverse fallback error: {e}")
-                                except Exception as e:
-                                    print(f"        ❌ Reverse error: {e}")
+                                            original_pos = next((p for p in positions_losing if p['symbol'] == symbol), None)
+                                            if original_pos:
+                                                original_side = original_pos['side']
+                                                new_side = "OPEN_SHORT" if original_side in ['long', 'buy'] else "OPEN_LONG"
+                                                try:
+                                                    close_resp = await c.post(
+                                                        f"{URLS['pos']}/close_position",
+                                                        json={"symbol": symbol},
+                                                        timeout=10.0
+                                                    )
+                                                    print(f"        ✅ Closed: {close_resp.json()}")
+                                                    await asyncio.sleep(1)
+                                                    open_resp = await c.post(
+                                                        f"{URLS['pos']}/open_position",
+                                                        json={
+                                                            "symbol": symbol,
+                                                            "side": new_side,
+                                                            "leverage": 5,
+                                                            "size_pct": 0.15
+                                                        },
+                                                        timeout=10.0
+                                                    )
+                                                    print(f"        ✅ Opened: {open_resp.json()}")
+                                                except Exception as e:
+                                                    print(f"        ❌ Reverse fallback error: {e}")
+                                    except Exception as e:
+                                        print(f"        ❌ Reverse error: {e}")
+                                # else: should_execute is False - already logged in check_critical_close_confirmation
 
                             elif action_type == "HOLD":
+                                # Reset pending close for HOLD
+                                check_critical_close_confirmation(symbol, "HOLD")
                                 print(f"        ⏸️ Holding {symbol} (no action)")
                     
                     # Salta apertura nuove posizioni in questo ciclo
@@ -505,12 +584,19 @@ async def analysis_cycle():
                     continue
 
                 if action in ["OPEN_LONG", "OPEN_SHORT"]:
+                    # Get AI-provided params with fallback to conservative defaults
+                    raw_leverage = d.get('leverage', MIN_LEVERAGE)
+                    raw_size_pct = d.get('size_pct', MIN_SIZE_PCT)
+                    
+                    # Apply clamping to ensure params are within safe ranges
+                    leverage, size_pct, was_clamped = clamp_ai_params(raw_leverage, raw_size_pct, sym)
+                    
                     print(f"        🔥 EXECUTING {action} on {sym}...")
                     res = await c.post(f"{URLS['pos']}/open_position", json={
                         "symbol": sym,
                         "side": action,
-                        "leverage": d.get('leverage', 5),
-                        "size_pct": d.get('size_pct', 0.15)
+                        "leverage": leverage,
+                        "size_pct": size_pct
                     })
                     print(f"        ✅ Result: {res.json()}")
 
