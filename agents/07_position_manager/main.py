@@ -27,7 +27,7 @@ IS_TESTNET = os.getenv("BYBIT_TESTNET", "false").lower() == "true"
 HEDGE_MODE = os.getenv("BYBIT_HEDGE_MODE", "false").lower() == "true"
 
 # --- PARAMETRI TRAILING STOP DINAMICO (ATR-BASED) ---
-TRAILING_ACTIVATION_PCT = float(os.getenv("TRAILING_ACTIVATION_PCT", "0.018"))  # 1.8% (leveraged ROI fraction)
+TRAILING_ACTIVATION_PCT = float(os.getenv("TRAILING_ACTIVATION_PCT", "0.01"))  # 1% (leveraged ROI fraction) - more aggressive
 ATR_MULTIPLIER_DEFAULT = float(os.getenv("ATR_MULTIPLIER_DEFAULT", "2.5"))
 ATR_MULTIPLIERS = {
     "BTC": 2.0,
@@ -49,9 +49,9 @@ ENABLE_AI_REVIEW = os.getenv("ENABLE_AI_REVIEW", "true").lower() == "true"
 MASTER_AI_URL = os.getenv("MASTER_AI_URL", "http://04_master_ai_agent:8000").strip()
 
 WARNING_THRESHOLD = float(os.getenv("WARNING_THRESHOLD", "-0.08"))
-AI_REVIEW_THRESHOLD = float(os.getenv("AI_REVIEW_THRESHOLD", "-0.12"))
-REVERSE_THRESHOLD = float(os.getenv("REVERSE_THRESHOLD", "-0.15"))
-HARD_STOP_THRESHOLD = float(os.getenv("HARD_STOP_THRESHOLD", "-0.20"))
+AI_REVIEW_THRESHOLD = float(os.getenv("AI_REVIEW_THRESHOLD", "-0.08"))  # -8% triggers AI review
+REVERSE_THRESHOLD = float(os.getenv("REVERSE_THRESHOLD", "-0.10"))  # -10% triggers reverse consideration
+HARD_STOP_THRESHOLD = float(os.getenv("HARD_STOP_THRESHOLD", "-0.20"))  # -20% triggers immediate close
 
 REVERSE_COOLDOWN_MINUTES = int(os.getenv("REVERSE_COOLDOWN_MINUTES", "30"))
 REVERSE_LEVERAGE = float(os.getenv("REVERSE_LEVERAGE", "5.0"))
