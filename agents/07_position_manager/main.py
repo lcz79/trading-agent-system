@@ -72,8 +72,8 @@ LEARNING_AGENT_URL = os.getenv("LEARNING_AGENT_URL", "http://10_learning_agent:8
 DEFAULT_SIZE_PCT = float(os.getenv("DEFAULT_SIZE_PCT", "0.15"))
 
 # --- DEBUG CONFIGURATION ---
-DEBUG_SYMBOLS = os.getenv("DEBUG_SYMBOLS", "BTCUSDT").split(",")  # Comma-separated list of symbols to debug
-DEBUG_SYMBOLS = [s.strip() for s in DEBUG_SYMBOLS if s.strip()]
+# Comma-separated list of symbols to show detailed debug logs (e.g., "BTCUSDT,ETHUSDT")
+DEBUG_SYMBOLS = [s.strip() for s in os.getenv("DEBUG_SYMBOLS", "BTCUSDT").split(",") if s.strip()]
 
 file_lock = Lock()
 
@@ -1091,8 +1091,7 @@ def check_smart_reverse():
                 continue
 
             if roi <= AI_REVIEW_THRESHOLD:
-                print(f"🔍 AI REVIEW THRESHOLD REACHED: {symbol} {side_dir.upper()} ROI={roi*100:.2f}% <= {AI_REVIEW_THRESHOLD*100:.2f}%")
-                print(f"🔍 AI REVIEW: {symbol} {side_dir.upper()} ROI={roi*100:.2f}% - Chiedo consiglio AI...")
+                print(f"🔍 AI REVIEW: {symbol} {side_dir.upper()} ROI={roi*100:.2f}% <= {AI_REVIEW_THRESHOLD*100:.2f}% - Chiedo consiglio AI...")
 
                 position_data = {
                     "side": side_dir,
