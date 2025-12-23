@@ -71,6 +71,10 @@ TRAILING_STATE_FILE = os.getenv("TRAILING_STATE_FILE", "/data/trailing_state.jso
 LEARNING_AGENT_URL = os.getenv("LEARNING_AGENT_URL", "http://10_learning_agent:8000").strip()
 DEFAULT_SIZE_PCT = float(os.getenv("DEFAULT_SIZE_PCT", "0.15"))
 
+# --- DEBUG CONFIGURATION ---
+DEBUG_SYMBOLS = os.getenv("DEBUG_SYMBOLS", "BTCUSDT").split(",")  # Comma-separated list of symbols to debug
+DEBUG_SYMBOLS = [s.strip() for s in DEBUG_SYMBOLS if s.strip()]
+
 file_lock = Lock()
 
 # =========================================================
@@ -546,7 +550,7 @@ def check_and_update_trailing_stops():
             except Exception:
                 sym_id_dbg = str(symbol)
 
-            if sym_id_dbg == "BTCUSDT":
+            if sym_id_dbg in DEBUG_SYMBOLS:
                 print(
                     f"🧾 TRAIL DEBUG {sym_id_dbg} side={side_dir} "
                     f"entry={entry_price:.2f} mark={mark_price:.2f} lev={leverage:.1f} "
@@ -561,7 +565,7 @@ def check_and_update_trailing_stops():
             if roi < TRAILING_ACTIVATION_PCT:
                 profit_lock_state.pop(k_pl, None)
                 # Log why trailing is not active for debugging
-                if sym_id_dbg == "BTCUSDT":
+                if sym_id_dbg in DEBUG_SYMBOLS:
                     print(f"   ⏸️ Trailing NOT active: ROI {roi*100:.3f}% < activation threshold {TRAILING_ACTIVATION_PCT*100:.3f}%")
                 continue
 
@@ -641,7 +645,7 @@ def check_and_update_trailing_stops():
                         print(f"🔼 LONG SL raising: {baseline:.2f} -> {hardened:.2f} (protecting profit)")
                 else:
                     # hardened <= baseline, don't lower SL (would reduce protection)
-                    if sym_id_dbg == "BTCUSDT":
+                    if sym_id_dbg in DEBUG_SYMBOLS:
                         print(f"   ⏸️ LONG SL NOT updated: hardened {hardened:.2f} <= baseline {baseline:.2f} (would reduce protection)")
 
             else:  # short
@@ -676,7 +680,7 @@ def check_and_update_trailing_stops():
                     print(f"🔽 SHORT SL lowering: {baseline:.2f} -> {target_sl:.2f} (protecting profit)")
                 else:
                     # target_sl >= baseline, don't raise SL (would reduce protection)
-                    if sym_id_dbg == "BTCUSDT":
+                    if sym_id_dbg in DEBUG_SYMBOLS:
                         print(f"   ⏸️ SHORT SL NOT updated: target_sl {target_sl:.2f} >= baseline {baseline:.2f} (would reduce protection)")
 
             if not new_sl_price:

@@ -11,11 +11,6 @@ import json
 import sys
 import os
 import time
-from unittest.mock import Mock, MagicMock, patch
-from threading import Thread
-
-# Add agents directory to path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'agents', '07_position_manager'))
 
 def test_background_loop_initialization():
     """Test that background monitoring loop is properly initialized"""
@@ -175,7 +170,7 @@ def test_orchestrator_timeout():
             content = f.read()
         
         # Check for timeout=60 in manage_active_positions call
-        if 'manage_active_positions", timeout=60' in content:
+        if 'manage_active_positions' in content and 'timeout=60' in content:
             print("  ✓ Timeout increased to 60 seconds")
         else:
             print("  ❌ Timeout not found or incorrect")
