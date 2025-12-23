@@ -27,7 +27,7 @@ IS_TESTNET = os.getenv("BYBIT_TESTNET", "false").lower() == "true"
 HEDGE_MODE = os.getenv("BYBIT_HEDGE_MODE", "false").lower() == "true"
 
 # --- PARAMETRI TRAILING STOP DINAMICO (ATR-BASED) ---
-TRAILING_ACTIVATION_PCT = float(os.getenv("TRAILING_ACTIVATION_PCT", "0.018"))  # 1.8% (leveraged ROI fraction)
+TRAILING_ACTIVATION_PCT = float(os.getenv("TRAILING_ACTIVATION_PCT", "0.01"))  # 1% (leveraged ROI fraction) - more aggressive
 ATR_MULTIPLIER_DEFAULT = float(os.getenv("ATR_MULTIPLIER_DEFAULT", "2.5"))
 ATR_MULTIPLIERS = {
     "BTC": 2.0,
@@ -49,9 +49,9 @@ ENABLE_AI_REVIEW = os.getenv("ENABLE_AI_REVIEW", "true").lower() == "true"
 MASTER_AI_URL = os.getenv("MASTER_AI_URL", "http://04_master_ai_agent:8000").strip()
 
 WARNING_THRESHOLD = float(os.getenv("WARNING_THRESHOLD", "-0.08"))
-AI_REVIEW_THRESHOLD = float(os.getenv("AI_REVIEW_THRESHOLD", "-0.12"))
-REVERSE_THRESHOLD = float(os.getenv("REVERSE_THRESHOLD", "-0.15"))
-HARD_STOP_THRESHOLD = float(os.getenv("HARD_STOP_THRESHOLD", "-0.20"))
+AI_REVIEW_THRESHOLD = float(os.getenv("AI_REVIEW_THRESHOLD", "-0.08"))  # -8% triggers AI review
+REVERSE_THRESHOLD = float(os.getenv("REVERSE_THRESHOLD", "-0.10"))  # -10% triggers reverse consideration
+HARD_STOP_THRESHOLD = float(os.getenv("HARD_STOP_THRESHOLD", "-0.20"))  # -20% triggers immediate close
 
 REVERSE_COOLDOWN_MINUTES = int(os.getenv("REVERSE_COOLDOWN_MINUTES", "30"))
 REVERSE_LEVERAGE = float(os.getenv("REVERSE_LEVERAGE", "5.0"))
@@ -70,6 +70,10 @@ TRAILING_STATE_FILE = os.getenv("TRAILING_STATE_FILE", "/data/trailing_state.jso
 # --- LEARNING AGENT ---
 LEARNING_AGENT_URL = os.getenv("LEARNING_AGENT_URL", "http://10_learning_agent:8000").strip()
 DEFAULT_SIZE_PCT = float(os.getenv("DEFAULT_SIZE_PCT", "0.15"))
+
+# --- DEBUG CONFIGURATION ---
+# Comma-separated list of symbols to show detailed debug logs (e.g., "BTCUSDT,ETHUSDT")
+DEBUG_SYMBOLS = [s.strip() for s in os.getenv("DEBUG_SYMBOLS", "BTCUSDT").split(",") if s.strip()]
 
 file_lock = Lock()
 
@@ -347,6 +351,32 @@ def record_equity_loop():
 Thread(target=record_equity_loop, daemon=True).start()
 
 # =========================================================
+# BACKGROUND: POSITION MONITORING LOOP (TRAILING + REVERSE)
+# =========================================================
+def position_monitor_loop():
+    """
+    Background loop that monitors positions every 30 seconds.
+    This ensures trailing stops and reverse logic run independently
+    of orchestrator calls, preventing issues with timeouts or failures.
+    """
+    # Wait 10 seconds on startup to allow exchange to initialize
+    time.sleep(10)
+    print("🔄 Position monitor loop started - checking every 30s")
+    
+    while True:
+        if exchange:
+            try:
+                check_recent_closes_and_save_cooldown()
+                check_and_update_trailing_stops()
+                check_smart_reverse()
+            except Exception as e:
+                print(f"⚠️ Position monitor loop error: {e}")
+        
+        time.sleep(30)
+
+Thread(target=position_monitor_loop, daemon=True).start()
+
+# =========================================================
 # MODELS
 # =========================================================
 class OrderRequest(BaseModel):
@@ -520,7 +550,7 @@ def check_and_update_trailing_stops():
             except Exception:
                 sym_id_dbg = str(symbol)
 
-            if sym_id_dbg == "BTCUSDT":
+            if sym_id_dbg in DEBUG_SYMBOLS:
                 print(
                     f"🧾 TRAIL DEBUG {sym_id_dbg} side={side_dir} "
                     f"entry={entry_price:.2f} mark={mark_price:.2f} lev={leverage:.1f} "
@@ -534,6 +564,9 @@ def check_and_update_trailing_stops():
             # Activation gate
             if roi < TRAILING_ACTIVATION_PCT:
                 profit_lock_state.pop(k_pl, None)
+                # Log why trailing is not active for debugging
+                if sym_id_dbg in DEBUG_SYMBOLS:
+                    print(f"   ⏸️ Trailing NOT active: ROI {roi*100:.3f}% < activation threshold {TRAILING_ACTIVATION_PCT*100:.3f}%")
                 continue
 
             # Profit-lock stage logic (B: confirm 90s, max backstep 0.3%, aggressive mult 1.2)
@@ -608,6 +641,12 @@ def check_and_update_trailing_stops():
                 hardened = max(target_sl, baseline)
                 if baseline == 0.0 or hardened > baseline:
                     new_sl_price = hardened
+                    if baseline > 0.0 and hardened > baseline and sym_id_dbg in DEBUG_SYMBOLS:
+                        print(f"🔼 LONG SL raising: {baseline:.2f} -> {hardened:.2f} (protecting profit)")
+                else:
+                    # hardened <= baseline, don't lower SL (would reduce protection)
+                    if sym_id_dbg in DEBUG_SYMBOLS:
+                        print(f"   ⏸️ LONG SL NOT updated: hardened {hardened:.2f} <= baseline {baseline:.2f} (would reduce protection)")
 
             else:  # short
                 k = _trailing_key(symbol, side_dir, position_idx)
@@ -629,9 +668,21 @@ def check_and_update_trailing_stops():
 
                 last_sl = to_float(st.get("last_sl"), 0.0)
                 baseline = min([v for v in (sl_current, last_sl) if v > 0.0], default=0.0)
-                hardened = target_sl if baseline == 0.0 else min(target_sl, baseline)
-                if baseline == 0.0 or hardened < baseline:
-                    new_sl_price = hardened
+                
+                # For SHORT: SL must be able to LOWER (numerically decrease) to protect profit
+                # when price drops. Only update if target_sl is lower than current baseline.
+                if baseline == 0.0:
+                    # No existing SL - set initial
+                    new_sl_price = target_sl
+                elif target_sl < baseline:
+                    # Price dropped, SL can lower to protect more profit
+                    new_sl_price = target_sl
+                    if sym_id_dbg in DEBUG_SYMBOLS:
+                        print(f"🔽 SHORT SL lowering: {baseline:.2f} -> {target_sl:.2f} (protecting profit)")
+                else:
+                    # target_sl >= baseline, don't raise SL (would reduce protection)
+                    if sym_id_dbg in DEBUG_SYMBOLS:
+                        print(f"   ⏸️ SHORT SL NOT updated: target_sl {target_sl:.2f} >= baseline {baseline:.2f} (would reduce protection)")
 
             if not new_sl_price:
                 continue
@@ -978,6 +1029,7 @@ def check_smart_reverse():
                 continue
 
             if roi <= REVERSE_THRESHOLD:
+                print(f"⚠️ REVERSE THRESHOLD REACHED: {symbol} {side_dir.upper()} ROI={roi*100:.2f}% <= {REVERSE_THRESHOLD*100:.2f}%")
                 last_reverse_time = reverse_cooldown_tracker.get(sym_id, 0.0)
                 now = time.time()
                 if (now - last_reverse_time) < (REVERSE_COOLDOWN_MINUTES * 60):
@@ -1029,12 +1081,17 @@ def check_smart_reverse():
                     else:
                         print(f"✋ HOLD - Mantengo posizione {symbol}")
                 else:
-                    print(f"⚠️ Analisi AI fallita per {symbol} - Mantengo posizione")
+                    # FALLBACK: AI non disponibile - implementa sicurezza
+                    if roi <= HARD_STOP_THRESHOLD:
+                        print(f"🛑 AI non disponibile + perdita critica ({roi*100:.2f}% <= {HARD_STOP_THRESHOLD*100:.2f}%) - CHIUSURA DI SICUREZZA per {symbol}")
+                        execute_close_position(symbol)
+                    else:
+                        print(f"⚠️ AI non disponibile per {symbol} (ROI: {roi*100:.2f}%) - Mantengo posizione ma continuo monitoraggio")
 
                 continue
 
             if roi <= AI_REVIEW_THRESHOLD:
-                print(f"🔍 AI REVIEW: {symbol} {side_dir.upper()} ROI={roi*100:.2f}% - Chiedo consiglio AI...")
+                print(f"🔍 AI REVIEW: {symbol} {side_dir.upper()} ROI={roi*100:.2f}% <= {AI_REVIEW_THRESHOLD*100:.2f}% - Chiedo consiglio AI...")
 
                 position_data = {
                     "side": side_dir,
