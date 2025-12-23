@@ -641,7 +641,7 @@ def check_and_update_trailing_stops():
                 hardened = max(target_sl, baseline)
                 if baseline == 0.0 or hardened > baseline:
                     new_sl_price = hardened
-                    if baseline > 0.0 and hardened > baseline:
+                    if baseline > 0.0 and hardened > baseline and sym_id_dbg in DEBUG_SYMBOLS:
                         print(f"🔼 LONG SL raising: {baseline:.2f} -> {hardened:.2f} (protecting profit)")
                 else:
                     # hardened <= baseline, don't lower SL (would reduce protection)
@@ -677,7 +677,8 @@ def check_and_update_trailing_stops():
                 elif target_sl < baseline:
                     # Price dropped, SL can lower to protect more profit
                     new_sl_price = target_sl
-                    print(f"🔽 SHORT SL lowering: {baseline:.2f} -> {target_sl:.2f} (protecting profit)")
+                    if sym_id_dbg in DEBUG_SYMBOLS:
+                        print(f"🔽 SHORT SL lowering: {baseline:.2f} -> {target_sl:.2f} (protecting profit)")
                 else:
                     # target_sl >= baseline, don't raise SL (would reduce protection)
                     if sym_id_dbg in DEBUG_SYMBOLS:

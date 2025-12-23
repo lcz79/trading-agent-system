@@ -7,10 +7,8 @@ This test validates:
 3. AI fallback logic
 """
 
-import json
 import sys
 import os
-import time
 
 def test_background_loop_initialization():
     """Test that background monitoring loop is properly initialized"""
@@ -161,9 +159,6 @@ def test_orchestrator_timeout():
     print("🧪 Test 4: Orchestrator timeout configuration")
     
     try:
-        # Import orchestrator main
-        sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'agents', 'orchestrator'))
-        
         # Read the file to check timeout value
         orchestrator_file = os.path.join(os.path.dirname(__file__), 'agents', 'orchestrator', 'main.py')
         with open(orchestrator_file, 'r') as f:
