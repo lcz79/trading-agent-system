@@ -18,6 +18,7 @@ EVOLUTION_INTERVAL_HOURS = int(os.getenv("EVOLUTION_INTERVAL_HOURS", "48"))
 MIN_TRADES_FOR_EVOLUTION = int(os.getenv("MIN_TRADES_FOR_EVOLUTION", "5"))
 BACKTEST_IMPROVEMENT_THRESHOLD = float(os.getenv("BACKTEST_IMPROVEMENT_THRESHOLD", "0.5"))
 MAX_STRATEGY_ARCHIVE = int(os.getenv("MAX_STRATEGY_ARCHIVE", "20"))
+LEARNING_CONTEXT_TRADES = int(os.getenv("LEARNING_CONTEXT_TRADES", "30"))
 
 DATA_DIR = "/data"
 EVOLVED_PARAMS_FILE = f"{DATA_DIR}/evolved_params.json"
@@ -498,6 +499,127 @@ async def evolution_loop():
             await asyncio.sleep(3600)  # Wait 1 hour on error
 
 
+def calculate_per_symbol_stats(trades: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """
+    Calcola statistiche aggregate per simbolo da una lista di trade completati.
+    
+    Args:
+        trades: Lista di trade con pnl_pct non null
+        
+    Returns:
+        Dict con chiave = symbol, valore = stats dict
+    """
+    by_symbol = {}
+    
+    for trade in trades:
+        if trade.get('pnl_pct') is None:
+            continue
+            
+        symbol = trade.get('symbol', 'UNKNOWN')
+        if symbol not in by_symbol:
+            by_symbol[symbol] = {
+                'trades': [],
+                'total_trades': 0,
+                'winning_trades': 0,
+                'losing_trades': 0,
+                'total_pnl': 0.0,
+                'durations': []
+            }
+        
+        pnl = trade.get('pnl_pct', 0)
+        by_symbol[symbol]['trades'].append(trade)
+        by_symbol[symbol]['total_trades'] += 1
+        by_symbol[symbol]['total_pnl'] += pnl
+        
+        if pnl > 0:
+            by_symbol[symbol]['winning_trades'] += 1
+        else:
+            by_symbol[symbol]['losing_trades'] += 1
+        
+        duration = trade.get('duration_minutes')
+        if duration is not None:
+            by_symbol[symbol]['durations'].append(duration)
+    
+    # Calcola metriche finali per ogni simbolo
+    result = {}
+    for symbol, data in by_symbol.items():
+        total = data['total_trades']
+        if total == 0:
+            continue
+        
+        win_rate = data['winning_trades'] / total if total > 0 else 0
+        avg_pnl = data['total_pnl'] / total if total > 0 else 0
+        avg_duration = sum(data['durations']) / len(data['durations']) if data['durations'] else 0
+        
+        # Calcola max drawdown per simbolo
+        cumulative_pnl = 0
+        peak = 0
+        max_dd = 0
+        for t in data['trades']:
+            cumulative_pnl += t.get('pnl_pct', 0)
+            peak = max(peak, cumulative_pnl)
+            drawdown = peak - cumulative_pnl
+            max_dd = max(max_dd, drawdown)
+        
+        result[symbol] = {
+            'total_trades': total,
+            'win_rate': round(win_rate, 4),
+            'total_pnl': round(data['total_pnl'], 2),
+            'avg_pnl': round(avg_pnl, 2),
+            'max_drawdown': round(max_dd, 2),
+            'avg_duration': round(avg_duration, 0)
+        }
+    
+    return result
+
+
+def calculate_risk_flags(trades: List[Dict[str, Any]], performance: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Calcola risk flags basati su euristiche semplici.
+    
+    Args:
+        trades: Lista di trade completati (ordinati per timestamp)
+        performance: Dict con metriche di performance
+        
+    Returns:
+        Dict con risk flags
+    """
+    flags = {
+        'losing_streak_count': 0,
+        'last_trade_pnl_pct': 0.0,
+        'negative_pnl_period': False,
+        'high_drawdown_period': False
+    }
+    
+    if not trades:
+        return flags
+    
+    # Calcola losing streak (conteggio trade in perdita consecutivi più recenti)
+    losing_streak = 0
+    for trade in reversed(trades):  # Parte dal più recente
+        pnl = trade.get('pnl_pct', 0)
+        if pnl <= 0:
+            losing_streak += 1
+        else:
+            break
+    
+    flags['losing_streak_count'] = losing_streak
+    
+    # Ultimo trade PnL
+    if trades:
+        flags['last_trade_pnl_pct'] = round(trades[-1].get('pnl_pct', 0), 2)
+    
+    # PnL negativo nel periodo
+    total_pnl = performance.get('total_pnl', 0)
+    flags['negative_pnl_period'] = total_pnl < 0
+    
+    # Drawdown elevato (soglia arbitraria: >10%)
+    max_dd = performance.get('max_drawdown', 0)
+    flags['high_drawdown_period'] = max_dd > 10.0
+    
+    return flags
+
+
 # API Endpoints
 
 @app.post("/record_trade")
@@ -567,6 +689,97 @@ async def get_performance():
         return {"status": "error", "message": str(e)}
 
 
+@app.get("/learning_context")
+async def get_learning_context():
+    """
+    Get learning context derived from closed trades for Master AI decisions.
+    
+    Returns structured context with:
+    - Performance metrics
+    - Recent N completed trades (chronological)
+    - Per-symbol aggregated stats
+    - Risk flags (heuristics)
+    
+    Resilient: returns success with empty arrays if history missing/corrupt.
+    """
+    try:
+        # Carica tutti i trade dall'history
+        all_trades = load_json_file(TRADING_HISTORY_FILE, [])
+        
+        # Filtra solo trade completati nel periodo EVOLUTION_INTERVAL_HOURS
+        cutoff_time = datetime.now() - timedelta(hours=EVOLUTION_INTERVAL_HOURS)
+        trades_in_window = []
+        for trade in all_trades:
+            try:
+                trade_time = datetime.fromisoformat(trade.get('timestamp', ''))
+                if trade_time >= cutoff_time and trade.get('pnl_pct') is not None:
+                    trades_in_window.append(trade)
+            except (ValueError, TypeError):
+                continue
+        
+        # Ordina per timestamp (cronologico: oldest first)
+        trades_in_window.sort(key=lambda t: t.get('timestamp', ''))
+        
+        # Prendi gli ultimi N trade completati (più recenti)
+        # Nota: se abbiamo già filtrato per periodo, prendiamo tutti fino a LEARNING_CONTEXT_TRADES
+        all_completed_trades = [t for t in all_trades if t.get('pnl_pct') is not None]
+        all_completed_trades.sort(key=lambda t: t.get('timestamp', ''))
+        recent_n_trades = all_completed_trades[-LEARNING_CONTEXT_TRADES:] if all_completed_trades else []
+        
+        # Calcola performance (su tutti i trade nel window)
+        performance = calculate_performance(trades_in_window)
+        
+        # Calcola statistiche per simbolo (su tutti i trade nel window)
+        by_symbol = calculate_per_symbol_stats(trades_in_window)
+        
+        # Calcola risk flags (su tutti i trade nel window)
+        risk_flags = calculate_risk_flags(trades_in_window, performance)
+        
+        logger.info(
+            f"🧠 Learning context generated: "
+            f"last_N={len(recent_n_trades)}, "
+            f"trades_in_window={len(trades_in_window)}, "
+            f"pnl={performance.get('total_pnl', 0):.2f}%, "
+            f"win_rate={performance.get('win_rate', 0)*100:.1f}%"
+        )
+        
+        return {
+            "status": "success",
+            "period_hours": EVOLUTION_INTERVAL_HOURS,
+            "as_of": datetime.now().isoformat(),
+            "performance": performance,
+            "recent_trades": recent_n_trades,
+            "by_symbol": by_symbol,
+            "risk_flags": risk_flags
+        }
+        
+    except Exception as e:
+        logger.error(f"Error generating learning context: {e}")
+        # Ritorna successo con dati vuoti (resilienza)
+        return {
+            "status": "success",
+            "period_hours": EVOLUTION_INTERVAL_HOURS,
+            "as_of": datetime.now().isoformat(),
+            "performance": {
+                "total_trades": 0,
+                "win_rate": 0.0,
+                "total_pnl": 0.0,
+                "avg_duration": 0,
+                "max_drawdown": 0.0,
+                "winning_trades": 0,
+                "losing_trades": 0,
+            },
+            "recent_trades": [],
+            "by_symbol": {},
+            "risk_flags": {
+                "losing_streak_count": 0,
+                "last_trade_pnl_pct": 0.0,
+                "negative_pnl_period": False,
+                "high_drawdown_period": False
+            }
+        }
+
+
 @app.get("/evolution_log")
 async def get_evolution_log():
     """Get recent evolution log entries"""
@@ -600,6 +813,7 @@ async def startup_event():
     logger.info(f"   - Min trades for evolution: {MIN_TRADES_FOR_EVOLUTION}")
     logger.info(f"   - Improvement threshold: {BACKTEST_IMPROVEMENT_THRESHOLD}%")
     logger.info(f"   - Max strategy archive: {MAX_STRATEGY_ARCHIVE}")
+    logger.info(f"   - Learning context trades: {LEARNING_CONTEXT_TRADES}")
     
     # Start evolution loop in background
     asyncio.create_task(evolution_loop())
