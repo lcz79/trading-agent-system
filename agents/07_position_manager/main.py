@@ -347,6 +347,32 @@ def record_equity_loop():
 Thread(target=record_equity_loop, daemon=True).start()
 
 # =========================================================
+# BACKGROUND: POSITION MONITORING LOOP (TRAILING + REVERSE)
+# =========================================================
+def position_monitor_loop():
+    """
+    Background loop that monitors positions every 30 seconds.
+    This ensures trailing stops and reverse logic run independently
+    of orchestrator calls, preventing issues with timeouts or failures.
+    """
+    # Wait 10 seconds on startup to allow exchange to initialize
+    time.sleep(10)
+    print("🔄 Position monitor loop started - checking every 30s")
+    
+    while True:
+        if exchange:
+            try:
+                check_recent_closes_and_save_cooldown()
+                check_and_update_trailing_stops()
+                check_smart_reverse()
+            except Exception as e:
+                print(f"⚠️ Position monitor loop error: {e}")
+        
+        time.sleep(30)
+
+Thread(target=position_monitor_loop, daemon=True).start()
+
+# =========================================================
 # MODELS
 # =========================================================
 class OrderRequest(BaseModel):
@@ -534,6 +560,9 @@ def check_and_update_trailing_stops():
             # Activation gate
             if roi < TRAILING_ACTIVATION_PCT:
                 profit_lock_state.pop(k_pl, None)
+                # Log why trailing is not active for debugging
+                if sym_id_dbg == "BTCUSDT":
+                    print(f"   ⏸️ Trailing NOT active: ROI {roi*100:.3f}% < activation threshold {TRAILING_ACTIVATION_PCT*100:.3f}%")
                 continue
 
             # Profit-lock stage logic (B: confirm 90s, max backstep 0.3%, aggressive mult 1.2)
@@ -608,6 +637,12 @@ def check_and_update_trailing_stops():
                 hardened = max(target_sl, baseline)
                 if baseline == 0.0 or hardened > baseline:
                     new_sl_price = hardened
+                    if baseline > 0.0 and hardened > baseline:
+                        print(f"🔼 LONG SL raising: {baseline:.2f} -> {hardened:.2f} (protecting profit)")
+                else:
+                    # hardened <= baseline, don't lower SL (would reduce protection)
+                    if sym_id_dbg == "BTCUSDT":
+                        print(f"   ⏸️ LONG SL NOT updated: hardened {hardened:.2f} <= baseline {baseline:.2f} (would reduce protection)")
 
             else:  # short
                 k = _trailing_key(symbol, side_dir, position_idx)
@@ -629,9 +664,20 @@ def check_and_update_trailing_stops():
 
                 last_sl = to_float(st.get("last_sl"), 0.0)
                 baseline = min([v for v in (sl_current, last_sl) if v > 0.0], default=0.0)
-                hardened = target_sl if baseline == 0.0 else min(target_sl, baseline)
-                if baseline == 0.0 or hardened < baseline:
-                    new_sl_price = hardened
+                
+                # For SHORT: SL must be able to LOWER (numerically decrease) to protect profit
+                # when price drops. Only update if target_sl is lower than current baseline.
+                if baseline == 0.0:
+                    # No existing SL - set initial
+                    new_sl_price = target_sl
+                elif target_sl < baseline:
+                    # Price dropped, SL can lower to protect more profit
+                    new_sl_price = target_sl
+                    print(f"🔽 SHORT SL lowering: {baseline:.2f} -> {target_sl:.2f} (protecting profit)")
+                else:
+                    # target_sl >= baseline, don't raise SL (would reduce protection)
+                    if sym_id_dbg == "BTCUSDT":
+                        print(f"   ⏸️ SHORT SL NOT updated: target_sl {target_sl:.2f} >= baseline {baseline:.2f} (would reduce protection)")
 
             if not new_sl_price:
                 continue
@@ -978,6 +1024,7 @@ def check_smart_reverse():
                 continue
 
             if roi <= REVERSE_THRESHOLD:
+                print(f"⚠️ REVERSE THRESHOLD REACHED: {symbol} {side_dir.upper()} ROI={roi*100:.2f}% <= {REVERSE_THRESHOLD*100:.2f}%")
                 last_reverse_time = reverse_cooldown_tracker.get(sym_id, 0.0)
                 now = time.time()
                 if (now - last_reverse_time) < (REVERSE_COOLDOWN_MINUTES * 60):
@@ -1029,11 +1076,17 @@ def check_smart_reverse():
                     else:
                         print(f"✋ HOLD - Mantengo posizione {symbol}")
                 else:
-                    print(f"⚠️ Analisi AI fallita per {symbol} - Mantengo posizione")
+                    # FALLBACK: AI non disponibile - implementa sicurezza
+                    if roi <= HARD_STOP_THRESHOLD:
+                        print(f"🛑 AI non disponibile + perdita critica ({roi*100:.2f}% <= {HARD_STOP_THRESHOLD*100:.2f}%) - CHIUSURA DI SICUREZZA per {symbol}")
+                        execute_close_position(symbol)
+                    else:
+                        print(f"⚠️ AI non disponibile per {symbol} (ROI: {roi*100:.2f}%) - Mantengo posizione ma continuo monitoraggio")
 
                 continue
 
             if roi <= AI_REVIEW_THRESHOLD:
+                print(f"🔍 AI REVIEW THRESHOLD REACHED: {symbol} {side_dir.upper()} ROI={roi*100:.2f}% <= {AI_REVIEW_THRESHOLD*100:.2f}%")
                 print(f"🔍 AI REVIEW: {symbol} {side_dir.upper()} ROI={roi*100:.2f}% - Chiedo consiglio AI...")
 
                 position_data = {

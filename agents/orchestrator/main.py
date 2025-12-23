@@ -237,10 +237,32 @@ def check_critical_close_confirmation(symbol: str, action_type: str) -> bool:
 
 
 async def manage_cycle():
+    """
+    Manages active positions by calling position manager.
+    Increased timeout to 60s to allow trailing stop + reverse + AI calls to complete.
+    Added retry logic and error logging instead of silent failure.
+    """
     async with httpx.AsyncClient() as c:
         learning_params = await fetch_learning_params(c)
-        try: await c.post(f"{URLS['pos']}/manage_active_positions", timeout=5)
-        except: pass
+        # Retry up to 3 times with exponential backoff
+        for attempt in range(1, 4):
+            try:
+                await c.post(f"{URLS['pos']}/manage_active_positions", timeout=60)
+                break  # Success - exit retry loop
+            except Exception as e:
+                error_msg = str(e).lower()
+                # Check if it's a retryable error
+                is_retryable = any(x in error_msg for x in ["timeout", "connection", "temporary"])
+                
+                if attempt == 3 or not is_retryable:
+                    # Last attempt or non-retryable error - log and continue
+                    print(f"        ⚠️ manage_active_positions error (attempt {attempt}/3): {e}")
+                    break
+                else:
+                    # Retryable error - wait and retry
+                    wait_time = 2 ** (attempt - 1)  # 1s, 2s exponential backoff
+                    print(f"        ⏳ manage_active_positions retry {attempt}/3 after {wait_time}s: {e}")
+                    await asyncio.sleep(wait_time)
 
 async def analysis_cycle():
     async with httpx.AsyncClient(timeout=60) as c:
