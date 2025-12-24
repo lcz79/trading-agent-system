@@ -629,6 +629,13 @@ def check_and_update_trailing_stops():
 
                 target_sl = peak * (1 - trailing_distance)
 
+
+                # PROTEZIONE CRITICA: per LONG, SL non deve MAI essere <= entry
+                # altrimenti chiuderemmo in perdita o breakeven!
+                if target_sl <= entry_price:
+                    if sym_id_dbg in DEBUG_SYMBOLS:
+                        print(f"⚠️ LONG {symbol}: SL calcolato {target_sl:.2f} <= entry {entry_price:.2f}, skip")
+                    continue
                 # BREAK-EVEN PROTECTION: se in profitto sufficiente, SL minimo = entry + margine
                 if roi >= BREAKEVEN_ACTIVATION_PCT:
                     min_sl = entry_price * (1 + BREAKEVEN_MARGIN_PCT)
@@ -659,6 +666,13 @@ def check_and_update_trailing_stops():
 
                 target_sl = trough * (1 + trailing_distance)
 
+
+                # PROTEZIONE CRITICA:  per SHORT, SL non deve MAI essere >= entry
+                # altrimenti chiuderemmo in perdita o breakeven!
+                if target_sl >= entry_price:
+                    if sym_id_dbg in DEBUG_SYMBOLS:
+                        print(f"⚠️ SHORT {symbol}: SL calcolato {target_sl:.2f} >= entry {entry_price:.2f}, skip")
+                    continue
                 # BREAK-EVEN PROTECTION per short
                 if roi >= BREAKEVEN_ACTIVATION_PCT:
                     max_sl = entry_price * (1 - BREAKEVEN_MARGIN_PCT)
