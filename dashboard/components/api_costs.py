@@ -94,27 +94,27 @@ def render_api_costs_section():
     with col1:
         st.metric(
             "Oggi", 
-            f"${costs['today']['cost']:.4f}",
+            f"€{costs['today']['cost']:.4f}",
             f"{costs['today']['calls']} chiamate"
         )
     
     with col2:
         st.metric(
             "Settimana", 
-            f"${costs['week']['cost']:.4f}",
+            f"€{costs['week']['cost']:.4f}",
             f"{costs['week']['calls']} chiamate"
         )
     
     with col3:
         st.metric(
             "Mese", 
-            f"${costs['month']['cost']:.4f}",
+            f"€{costs['month']['cost']:.4f}",
             f"{costs['month']['calls']} chiamate"
         )
     
     with col4:
         st.metric(
             "Totale", 
-            f"${costs['total']['cost']:.4f}",
+            f"€{costs['total']['cost']:.4f}",
             f"{costs['total']['calls']} chiamate"
         )

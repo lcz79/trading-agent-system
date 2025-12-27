@@ -14,10 +14,10 @@ DISABLED_SYMBOLS = [s.strip() for s in DISABLED_SYMBOLS if s.strip()]  # Clean u
 # --- CONFIGURAZIONE OTTIMIZZAZIONE ---
 MAX_POSITIONS = 3  # Numero massimo posizioni contemporanee
 REVERSE_THRESHOLD = float(os.getenv("REVERSE_THRESHOLD", "2.0"))  # Percentuale perdita per trigger reverse analysis
-CRITICAL_LOSS_PCT_LEV = float(os.getenv("CRITICAL_LOSS_PCT_LEV", "12.0"))  # % perdita (con leva) per trigger gestione critica
+CRITICAL_LOSS_PCT_LEV = float(os.getenv("CRITICAL_LOSS_PCT_LEV", "6.0"))  # % perdita (con leva) per trigger gestione critica
 CYCLE_INTERVAL = 60  # Secondi tra ogni ciclo di controllo (era 900)
 DRY_RUN = os.getenv("DRY_RUN", "false").lower() == "true"  # Se true, logga solo azioni senza eseguirle
-CRITICAL_LOSS_PCT_LEV = float(os.getenv("CRITICAL_LOSS_PCT_LEV", "12.0"))  # Soglia perdita % con leva per CRITICAL
+CRITICAL_LOSS_PCT_LEV = float(os.getenv("CRITICAL_LOSS_PCT_LEV", "6.0"))  # Soglia perdita % con leva per CRITICAL
 
 # --- CRITICAL CLOSE CONFIRMATION STATE ---
 # Tracks pending CLOSE requests per symbol. Format: {symbol: cycle_count}
@@ -411,8 +411,8 @@ async def analysis_cycle():
                                 # else: should_execute is False - already logged in check_critical_close_confirmation
                             
                             elif action_type == "REVERSE":
-                                # FIX 24-DIC-2024: REVERSE immediato (treated as CLOSE + OPEN)
-                                should_execute = True  # BYPASS 2-cycle
+                                # REVERSE also needs 2-cycle confirmation (treated as CLOSE + OPEN)
+                                should_execute = check_critical_close_confirmation(symbol, "CLOSE")
                                 
                                 if should_execute:
                                     # Preferisci reverse atomico lato position_manager (close + open opposto)

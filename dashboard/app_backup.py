@@ -42,10 +42,10 @@ if wallet:
     col1, col2, col3, col4 = st.columns(4)
     pnl = wallet.get('unrealized_pnl', 0)
     
-    col1.metric("TOTAL EQUITY", f"${wallet.get('equity', 0):.2f}")
-    col2.metric("WALLET BALANCE", f"${wallet.get('wallet_balance', 0):.2f}")
-    col3.metric("AVAILABLE", f"${wallet.get('available', 0):.2f}")
-    col4.metric("PNL APERTO", f"${pnl:.2f}", delta_color="normal" if pnl >= 0 else "inverse")
+    col1.metric("TOTAL EQUITY", f"€{wallet.get('equity', 0):.2f}")
+    col2.metric("WALLET BALANCE", f"€{wallet.get('wallet_balance', 0):.2f}")
+    col3.metric("AVAILABLE", f"€{wallet.get('available', 0):.2f}")
+    col4.metric("PNL APERTO", f"€{pnl:.2f}", delta_color="normal" if pnl >= 0 else "inverse")
     st.markdown("---")
 
 # --- TABELLE E GRAFICO ---
@@ -58,7 +58,7 @@ with tab1:
         st.dataframe(
             df, use_container_width=True, hide_index=True,
             column_config={
-                "Unrealized PnL": st.column_config.NumberColumn(format="$%.2f"),
+                "Unrealized PnL": st.column_config.NumberColumn(format="€%.2f"),
                 "PnL %": st.column_config.NumberColumn(format="%.2f%%"),
             }
         )
