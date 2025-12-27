@@ -4,16 +4,12 @@ import json
 import time
 import requests
 import httpx
-import uuid
 from decimal import Decimal, ROUND_DOWN
 from datetime import datetime
 from typing import Optional, Any, Dict, Tuple
 from fastapi import FastAPI
 from pydantic import BaseModel
 from threading import Thread, Lock
-import sys
-sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
-from shared.trading_state import get_trading_state, OrderIntent, OrderStatus, PositionMetadata, Cooldown
 
 app = FastAPI()
 
@@ -52,10 +48,10 @@ BREAKEVEN_MARGIN_PCT = float(os.getenv("BREAKEVEN_MARGIN_PCT", "0.001"))  # 0.1%
 ENABLE_AI_REVIEW = os.getenv("ENABLE_AI_REVIEW", "true").lower() == "true"
 MASTER_AI_URL = os.getenv("MASTER_AI_URL", "http://04_master_ai_agent:8000").strip()
 
-WARNING_THRESHOLD = float(os.getenv("WARNING_THRESHOLD", "-0.10"))
-AI_REVIEW_THRESHOLD = float(os. getenv("AI_REVIEW_THRESHOLD", "-0.10"))  # -8% triggers AI review
-REVERSE_THRESHOLD = float(os.getenv("REVERSE_THRESHOLD", "-0.15"))  # -10% triggers reverse consideration
-HARD_STOP_THRESHOLD = float(os.getenv("HARD_STOP_THRESHOLD", "-0.25"))  # -20% triggers immediate close
+WARNING_THRESHOLD = float(os.getenv("WARNING_THRESHOLD", "-0.08"))
+AI_REVIEW_THRESHOLD = float(os.getenv("AI_REVIEW_THRESHOLD", "-0.08"))  # -8% triggers AI review
+REVERSE_THRESHOLD = float(os.getenv("REVERSE_THRESHOLD", "-0.10"))  # -10% triggers reverse consideration
+HARD_STOP_THRESHOLD = float(os.getenv("HARD_STOP_THRESHOLD", "-0.20"))  # -20% triggers immediate close
 
 REVERSE_COOLDOWN_MINUTES = int(os.getenv("REVERSE_COOLDOWN_MINUTES", "30"))
 REVERSE_LEVERAGE = float(os.getenv("REVERSE_LEVERAGE", "5.0"))
@@ -64,10 +60,6 @@ reverse_cooldown_tracker: Dict[str, float] = {}
 # --- COOLDOWN CONFIGURATION ---
 COOLDOWN_MINUTES = int(os.getenv("COOLDOWN_MINUTES", "5"))
 COOLDOWN_FILE = os.getenv("COOLDOWN_FILE", "/data/closed_cooldown.json")
-
-# --- SCALPING CONFIGURATION ---
-# Default time in trade limit for scalping mode (20-60 minutes)
-DEFAULT_TIME_IN_TRADE_LIMIT_SEC = int(os.getenv("DEFAULT_TIME_IN_TRADE_LIMIT_SEC", "2400"))  # 40 minutes default
 
 # --- AI DECISIONS FILE ---
 AI_DECISIONS_FILE = os.getenv("AI_DECISIONS_FILE", "/data/ai_decisions.json")
@@ -329,37 +321,6 @@ else:
     print("⚠️ BYBIT_API_KEY/BYBIT_API_SECRET mancanti: exchange non inizializzato")
 
 # =========================================================
-# BACKGROUND: STATE CLEANUP LOOP
-# =========================================================
-def state_cleanup_loop():
-    """
-    Background loop that cleans up old intents and expired cooldowns every hour.
-    This prevents unbounded growth of trading_state.json.
-    """
-    # Wait 5 minutes on startup
-    time.sleep(300)
-    print("🧹 State cleanup loop started - cleaning every hour")
-    
-    while True:
-        try:
-            trading_state = get_trading_state()
-            
-            # Clean up intents older than 6 hours (TTL)
-            trading_state.cleanup_old_intents(days=0.25)  # 6 hours = 0.25 days
-            
-            # Clean up expired cooldowns
-            trading_state.cleanup_expired_cooldowns()
-            
-            print("🧹 State cleanup completed")
-        except Exception as e:
-            print(f"⚠️ State cleanup error: {e}")
-        
-        # Run every hour
-        time.sleep(3600)
-
-Thread(target=state_cleanup_loop, daemon=True).start()
-
-# =========================================================
 # BACKGROUND: EQUITY HISTORY LOOP
 # =========================================================
 def record_equity_loop():
@@ -390,62 +351,12 @@ def record_equity_loop():
 Thread(target=record_equity_loop, daemon=True).start()
 
 # =========================================================
-# BACKGROUND: POSITION MONITORING LOOP (TRAILING + REVERSE + TIME-BASED EXIT)
+# BACKGROUND: POSITION MONITORING LOOP (TRAILING + REVERSE)
 # =========================================================
-def check_time_based_exits():
-    """
-    Check for positions that have exceeded their time_in_trade_limit and close them.
-    This implements the scalping time-based exit feature.
-    """
-    try:
-        trading_state = get_trading_state()
-        expired_positions = trading_state.get_expired_positions()
-        
-        if not expired_positions:
-            return
-        
-        print(f"⏰ Found {len(expired_positions)} expired positions")
-        
-        for pos_metadata in expired_positions:
-            symbol = pos_metadata.symbol
-            direction = pos_metadata.direction
-            time_in_trade = pos_metadata.time_in_trade_seconds()
-            limit_sec = pos_metadata.time_in_trade_limit_sec
-            
-            print(f"⏰ TIME-BASED EXIT: {symbol} {direction} - in trade for {time_in_trade}s (limit: {limit_sec}s)")
-            
-            # Close the position
-            success = execute_close_position(symbol)
-            
-            if success:
-                print(f"✅ Time-based exit executed for {symbol} {direction}")
-                # Record this to learning agent with specific reason
-                try:
-                    requests.post(
-                        f"{LEARNING_AGENT_URL}/record_event",
-                        json={
-                            "event_type": "time_based_exit",
-                            "symbol": symbol,
-                            "direction": direction,
-                            "time_in_trade_sec": time_in_trade,
-                            "limit_sec": limit_sec,
-                            "reason": "Position exceeded max holding time (scalping mode)"
-                        },
-                        timeout=5.0
-                    )
-                except Exception as e:
-                    print(f"⚠️ Failed to record time-based exit to learning agent: {e}")
-            else:
-                print(f"❌ Failed to execute time-based exit for {symbol} {direction}")
-                
-    except Exception as e:
-        print(f"⚠️ Error in check_time_based_exits: {e}")
-
-
 def position_monitor_loop():
     """
     Background loop that monitors positions every 30 seconds.
-    This ensures trailing stops, reverse logic, and time-based exits run independently
+    This ensures trailing stops and reverse logic run independently
     of orchestrator calls, preventing issues with timeouts or failures.
     """
     # Wait 10 seconds on startup to allow exchange to initialize
@@ -458,7 +369,6 @@ def position_monitor_loop():
                 check_recent_closes_and_save_cooldown()
                 check_and_update_trailing_stops()
                 check_smart_reverse()
-                check_time_based_exits()  # NEW: Check for time-based exits
             except Exception as e:
                 print(f"⚠️ Position monitor loop error: {e}")
         
@@ -475,12 +385,6 @@ class OrderRequest(BaseModel):
     leverage: float = 1.0
     size_pct: float = 0.0      # frazione del free USDT (es. 0.15)
     sl_pct: float = 0.0        # frazione (es. 0.04)
-    # Scalping parameters (optional)
-    intent_id: Optional[str] = None  # For idempotency
-    tp_pct: Optional[float] = None   # Take profit percentage
-    time_in_trade_limit_sec: Optional[int] = None  # Max holding time
-    cooldown_sec: Optional[int] = None  # Cooldown after close
-    trail_activation_roi: Optional[float] = None  # ROI threshold for trailing
 
 class CloseRequest(BaseModel):
     symbol: str
@@ -931,48 +835,20 @@ def execute_close_position(symbol: str) -> bool:
             market_conditions={},
         )
 
-        # Use trading_state for cooldown management
+        # Cooldown
         try:
-            trading_state = get_trading_state()
-            
-            # Get position metadata to determine cooldown duration
-            pos_metadata = trading_state.get_position(sym_id, side_dir)
-            # Use cooldown from metadata if available, otherwise use default
-            if pos_metadata and pos_metadata.cooldown_sec:
-                cooldown_sec = pos_metadata.cooldown_sec
-            else:
-                cooldown_sec = COOLDOWN_MINUTES * 60
-            
-            # Add cooldown to trading_state
-            cooldown = Cooldown(
-                symbol=sym_id,
-                direction=side_dir,
-                closed_at=datetime.now().isoformat(),
-                reason="Position closed",
-                cooldown_sec=cooldown_sec
-            )
-            trading_state.add_cooldown(cooldown)
-            
-            # Remove position metadata
-            trading_state.remove_position(sym_id, side_dir)
-            
-            # Also remove trailing stop state if exists
-            trading_state.remove_trailing_stop(sym_id, side_dir)
-            
-            print(f"💾 Cooldown saved for {sym_id} {side_dir} ({cooldown_sec}s)")
+            ensure_parent_dir(COOLDOWN_FILE)
+            cooldowns = load_json(COOLDOWN_FILE, default={})
+
+            direction_key = f"{sym_id}_{side_dir}"  # long/short
+            now_ts = time.time()
+            cooldowns[direction_key] = now_ts
+            cooldowns[sym_id] = now_ts
+
+            save_json(COOLDOWN_FILE, cooldowns)
+            print(f"💾 Cooldown salvato per {direction_key}")
         except Exception as e:
-            print(f"⚠️ Errore aggiornamento trading_state: {e}")
-            # Fallback to old cooldown file for backwards compatibility
-            try:
-                ensure_parent_dir(COOLDOWN_FILE)
-                cooldowns = load_json(COOLDOWN_FILE, default={})
-                direction_key = f"{sym_id}_{side_dir}"
-                now_ts = time.time()
-                cooldowns[direction_key] = now_ts
-                cooldowns[sym_id] = now_ts
-                save_json(COOLDOWN_FILE, cooldowns)
-            except Exception as e2:
-                print(f"⚠️ Errore salvataggio cooldown fallback: {e2}")
+            print(f"⚠️ Errore salvataggio cooldown: {e}")
 
         print(f"✅ Posizione {sym_ccxt} chiusa con successo | PnL={pnl_pct:.2f}%")
         return True
@@ -1457,43 +1333,14 @@ def open_position(order: OrderRequest):
         return {"status": "error", "msg": "No Exchange"}
 
     try:
-        # === IDEMPOTENCY CHECK ===
-        # If intent_id is provided, check if already processed
-        trading_state = get_trading_state()
-        intent_id = order.intent_id or str(uuid.uuid4())  # Generate if not provided
-        
-        existing_intent = trading_state.get_intent(intent_id)
-        if existing_intent:
-            print(f"💾 IDEMPOTENT: intent_id={intent_id[:8]} already processed")
-            return {
-                "status": existing_intent.status,
-                "msg": "Order already processed (idempotent)",
-                "intent_id": intent_id,
-                "exchange_order_id": existing_intent.exchange_order_id
-            }
-        
-        # Store intent as PENDING
+        # order.symbol può essere id (BTCUSDT) o symbol CCXT (BTC/USDT:USDT)
         raw_sym = str(order.symbol).strip()
         sym_id = bybit_symbol_id(raw_sym)
+        sym_ccxt = ccxt_symbol_from_id(exchange, sym_id) or raw_sym
+
+        # Decide side richiesta
         is_long_request = ("buy" in order.side.lower()) or ("long" in order.side.lower())
         requested_dir = "long" if is_long_request else "short"
-        
-        new_intent = OrderIntent(
-            intent_id=intent_id,
-            symbol=sym_id,
-            action=order.side,
-            leverage=order.leverage,
-            size_pct=order.size_pct,
-            tp_pct=order.tp_pct,
-            sl_pct=order.sl_pct,
-            time_in_trade_limit_sec=order.time_in_trade_limit_sec,
-            cooldown_sec=order.cooldown_sec
-        )
-        trading_state.add_intent(new_intent)
-        print(f"📝 Intent registered: {intent_id[:8]} for {sym_id} {requested_dir}")
-        
-        # === CONTINUE WITH ORDER EXECUTION ===
-        sym_ccxt = ccxt_symbol_from_id(exchange, sym_id) or raw_sym
         requested_side = side_to_order_side(requested_dir)  # buy/sell
         symbol_key = sym_id
 
@@ -1506,44 +1353,34 @@ def open_position(order: OrderRequest):
                     existing_dir = normalize_position_side(p.get("side", "")) or "long"
                     if existing_dir == requested_dir:
                         print(f"⚠️ SKIP: già esiste posizione {existing_dir.upper()} su {sym_ccxt}")
-                        trading_state.update_intent_status(intent_id, OrderStatus.CANCELLED, 
-                                                          error_message="Position already exists")
                         return {
                             "status": "skipped",
                             "msg": f"Posizione {existing_dir} già aperta su {sym_ccxt}",
                             "existing_side": existing_dir,
-                            "intent_id": intent_id
                         }
                     else:
-                        # Opposite direction requested
-                        if not HEDGE_MODE:
-                            # In One-Way mode, cannot have opposite direction - must close first
-                            print(f"⚠️ ONE-WAY MODE: Cannot open {requested_dir} while {existing_dir} position exists on {sym_ccxt}")
-                            trading_state.update_intent_status(intent_id, OrderStatus.CANCELLED, 
-                                                              error_message="One-Way mode: close existing position first")
-                            return {
-                                "status": "rejected",
-                                "msg": f"One-Way mode: Cannot open {requested_dir} while {existing_dir} position exists. Close first.",
-                                "existing_side": existing_dir,
-                                "requested_side": requested_dir,
-                                "intent_id": intent_id
-                            }
-                        else:
-                            # Hedge mode: REVERSE is allowed
-                            print(f"🔄 HEDGE MODE: REVERSE allowed: {existing_dir} → {requested_dir} su {sym_ccxt}")
+                        print(f"🔄 REVERSE PERMESSO: {existing_dir} → {requested_dir} su {sym_ccxt}")
         except Exception as e:
             print(f"⚠️ Errore check posizioni esistenti: {e}")
 
-        # Cooldown check using trading_state
-        if trading_state.is_in_cooldown(sym_id, requested_dir):
-            print(f"⏳ COOLDOWN: {sym_ccxt} {requested_dir} is in cooldown")
-            trading_state.update_intent_status(intent_id, OrderStatus.CANCELLED, 
-                                              error_message="Cooldown active")
-            return {
-                "status": "cooldown",
-                "msg": f"Cooldown attivo per {sym_ccxt} {requested_dir}",
-                "intent_id": intent_id
-            }
+        # Cooldown check
+        try:
+            ensure_parent_dir(COOLDOWN_FILE)
+            cooldowns = load_json(COOLDOWN_FILE, default={})
+            cooldown_key = f"{symbol_key}_{requested_dir}"  # BTCUSDT_long
+            last_close_time = to_float(cooldowns.get(cooldown_key), 0.0)
+            elapsed = time.time() - last_close_time
+
+            if elapsed < (COOLDOWN_MINUTES * 60):
+                minutes_left = COOLDOWN_MINUTES - (elapsed / 60)
+                print(f"⏳ COOLDOWN: {sym_ccxt} {requested_dir} - ancora {minutes_left:.1f} minuti")
+                return {
+                    "status": "cooldown",
+                    "msg": f"Cooldown attivo per {sym_ccxt} {requested_dir}",
+                    "minutes_left": round(minutes_left, 1),
+                }
+        except Exception as e:
+            print(f"⚠️ Errore check cooldown: {e}")
 
         # set leverage
         try:
@@ -1556,9 +1393,7 @@ def open_position(order: OrderRequest):
         cost = max(free_usdt * float(order.size_pct), 10.0)
         price = to_float(exchange.fetch_ticker(sym_ccxt).get("last"), 0.0)
         if price <= 0:
-            trading_state.update_intent_status(intent_id, OrderStatus.FAILED, 
-                                              error_message="Invalid price")
-            return {"status": "error", "msg": "Invalid price", "intent_id": intent_id}
+            return {"status": "error", "msg": "Invalid price"}
 
         target_market = exchange.market(sym_ccxt)
         info = target_market.get("info", {}) or {}
@@ -1575,77 +1410,24 @@ def open_position(order: OrderRequest):
             final_qty_d = Decimal(str(min_qty))
         final_qty = float("{:f}".format(final_qty_d.normalize()))
 
-        # Use tp_pct if provided, otherwise use sl_pct for SL
-        sl_pct = float(order.sl_pct) if order.sl_pct and float(order.sl_pct) > 0 else DEFAULT_INITIAL_SL_PCT
+        sl_pct = float(order.sl_pct) if float(order.sl_pct) > 0 else DEFAULT_INITIAL_SL_PCT
         sl_price = price * (1 - sl_pct) if requested_dir == "long" else price * (1 + sl_pct)
         sl_str = exchange.price_to_precision(sym_ccxt, sl_price)
-        
-        # Handle tp_pct if provided
-        tp_str = None
-        if order.tp_pct and float(order.tp_pct) > 0:
-            tp_price = price * (1 + order.tp_pct) if requested_dir == "long" else price * (1 - order.tp_pct)
-            tp_str = exchange.price_to_precision(sym_ccxt, tp_price)
 
         pos_idx = direction_to_position_idx(requested_dir)
 
-        # Log scalping parameters
-        scalping_info = ""
-        if order.time_in_trade_limit_sec:
-            scalping_info = f" MaxTime={order.time_in_trade_limit_sec}s"
-        print(f"🚀 ORDER {sym_ccxt}: side={requested_side} qty={final_qty} SL={sl_str}" + 
-              (f" TP={tp_str}" if tp_str else "") + f" idx={pos_idx}{scalping_info}")
+        print(f"🚀 ORDER {sym_ccxt}: side={requested_side} qty={final_qty} SL={sl_str} idx={pos_idx}")
 
         params = {"category": "linear", "stopLoss": sl_str}
-        if tp_str:
-            params["takeProfit"] = tp_str
         if HEDGE_MODE:
             params["positionIdx"] = pos_idx
 
-        # Mark intent as EXECUTING
-        trading_state.update_intent_status(intent_id, OrderStatus.EXECUTING)
-        
         res = exchange.create_order(sym_ccxt, "market", requested_side, final_qty, params=params)
-        exchange_order_id = res.get("id")
-        
-        # Mark intent as EXECUTED
-        trading_state.update_intent_status(intent_id, OrderStatus.EXECUTED, 
-                                          exchange_order_id=exchange_order_id)
-        
-        # Store position metadata for time-based exit
-        position_metadata = PositionMetadata(
-            symbol=sym_id,
-            direction=requested_dir,
-            opened_at=datetime.now().isoformat(),
-            intent_id=intent_id,
-            time_in_trade_limit_sec=order.time_in_trade_limit_sec,
-            entry_price=price,
-            size=final_qty,
-            leverage=order.leverage,
-            cooldown_sec=order.cooldown_sec
-        )
-        trading_state.add_position(position_metadata)
-        
-        print(f"✅ Position opened: {sym_id} {requested_dir} [intent:{intent_id[:8]}]")
-        
-        return {
-            "status": "executed", 
-            "id": exchange_order_id,
-            "intent_id": intent_id,
-            "symbol": sym_id,
-            "direction": requested_dir
-        }
+        return {"status": "executed", "id": res.get("id")}
 
     except Exception as e:
         print(f"❌ Order Error: {e}")
-        # Update intent status to FAILED if we have intent_id
-        if 'intent_id' in locals():
-            try:
-                trading_state = get_trading_state()
-                trading_state.update_intent_status(intent_id, OrderStatus.FAILED, 
-                                                  error_message=str(e))
-            except:
-                pass
-        return {"status": "error", "msg": str(e), "intent_id": intent_id if 'intent_id' in locals() else None}
+        return {"status": "error", "msg": str(e)}
 
 @app.post("/close_position")
 def close_position(req: CloseRequest):

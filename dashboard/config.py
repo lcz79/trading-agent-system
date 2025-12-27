@@ -16,5 +16,5 @@ SHARED_DATA_DIR = '/data'
 AI_DECISIONS_FILE = os.path.join(SHARED_DATA_DIR, 'ai_decisions.json')
 
 # Starting values for performance calculations
-STARTING_DATE = "2024-12-01"
-STARTING_BALANCE = 1000.0
+STARTING_DATE = "2025-12-18"
+STARTING_BALANCE = 102.25

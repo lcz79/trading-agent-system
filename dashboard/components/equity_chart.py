@@ -32,7 +32,7 @@ def render_equity_chart(equity_history):
         row_heights=[0.7, 0.3],
         shared_xaxes=True,
         vertical_spacing=0.05,
-        subplot_titles=('Equity ($)', 'P&L (%)')
+        subplot_titles=('Equity (€)', 'P&L (%)')
     )
     
     # Grafico Equity principale
@@ -91,7 +91,7 @@ def render_equity_chart(equity_history):
         ),
         yaxis=dict(
             gridcolor='rgba(50,50,50,0.5)',
-            tickformat='$,.0f'
+            tickformat='€,.0f'
         ),
         yaxis2=dict(
             gridcolor='rgba(50,50,50,0.5)',
@@ -108,7 +108,7 @@ def render_equity_chart(equity_history):
     fig.add_annotation(
         x=0.02, y=0.98,
         xref='paper', yref='paper',
-        text=f"<b>CURRENT: ${current_equity:,.2f}</b><br>P&L: ${current_pnl:+,.2f} ({current_pnl_pct:+.2f}%)",
+        text=f"<b>CURRENT: ${current_equity:,.2f}</b><br>P&L: €{current_pnl:+,.2f} ({current_pnl_pct:+.2f}%)",
         showarrow=False,
         font=dict(size=12, color='#00ff41' if current_pnl >= 0 else '#ff004c'),
         align='left',

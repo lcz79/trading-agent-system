@@ -488,19 +488,19 @@ if wallet:
     pnl = wallet.get('unrealized_pnl', 0)
     
     with col1:
-        st.metric("💰 TOTAL EQUITY", f"${equity:.2f}")
+        st.metric("💰 TOTAL EQUITY", f"€{equity:.2f}")
     
     with col2:
-        st.metric("💵 WALLET BALANCE", f"${balance:.2f}")
+        st.metric("💵 WALLET BALANCE", f"€{balance:.2f}")
     
     with col3:
-        st.metric("✅ AVAILABLE", f"${available:.2f}")
+        st.metric("✅ AVAILABLE", f"€{available:.2f}")
     
     with col4:
         pnl_color = "normal" if pnl >= 0 else "inverse"
         # Calculate PnL as percentage of total equity
         pnl_pct_of_balance = (pnl / equity * 100) if equity > 0 else 0
-        st.metric("📊 PNL APERTO", f"${pnl:.2f} ({pnl_pct_of_balance:+.2f}%)", delta=f"{pnl:.2f}", delta_color=pnl_color)
+        st.metric("📊 PNL APERTO", f"€{pnl:.2f} ({pnl_pct_of_balance:+.2f}%)", delta=f"{pnl:.2f}", delta_color=pnl_color)
     
     st.markdown("---")
 
@@ -534,9 +534,9 @@ with tab1:
             use_container_width=True, 
             hide_index=True,
             column_config={
-                "Unrealized PnL": st.column_config.NumberColumn(format="$%.2f"),
+                "Unrealized PnL": st.column_config.NumberColumn(format="€%.2f"),
                 "PnL %": st.column_config.NumberColumn(format="%.2f%%"),
-                "Entry Price": st.column_config.NumberColumn(format="$%.2f"),
+                "Entry Price": st.column_config.NumberColumn(format="€%.2f"),
             }
         )
         
@@ -590,7 +590,7 @@ with tab2:
     st.markdown('<div class="section-title">📈 EQUITY CURVE</div>', unsafe_allow_html=True)
     
     # Filtra dati dal 9 dicembre 2025
-    start_date = datetime(2025, 12, 9, 0, 0, 0, tzinfo=timezone.utc)
+    start_date = datetime(2025, 12, 18, 0, 0, 0, tzinfo=timezone.utc)
     hist = client.get_closed_pnl(limit=200, start_date=start_date)
     
     if hist and len(hist) > 0:
@@ -627,7 +627,7 @@ with tab2:
         fig_equity.add_annotation(
             x=df_chart.loc[max_idx, 'Trade'],
             y=df_chart.loc[max_idx, 'CumPnL'],
-            text=f"Max: ${df_chart.loc[max_idx, 'CumPnL']:.2f}",
+            text=f"Max: €{df_chart.loc[max_idx, 'CumPnL']:.2f}",
             showarrow=True,
             arrowhead=2,
             arrowcolor='#00ff9d',
@@ -640,7 +640,7 @@ with tab2:
         fig_equity.add_annotation(
             x=df_chart.loc[min_idx, 'Trade'],
             y=df_chart.loc[min_idx, 'CumPnL'],
-            text=f"Min: ${df_chart.loc[min_idx, 'CumPnL']:.2f}",
+            text=f"Min: €{df_chart.loc[min_idx, 'CumPnL']:.2f}",
             showarrow=True,
             arrowhead=2,
             arrowcolor='#ff2a6d',
@@ -670,7 +670,7 @@ with tab2:
                 showgrid=True
             ),
             yaxis=dict(
-                title="PnL Cumulativo ($)",
+                title="PnL Cumulativo (€)",
                 title_font=dict(color='#00f3ff', size=14, family='Orbitron'),
                 tickfont=dict(color='#00f3ff'),
                 gridcolor='rgba(0,243,255,0.1)',
@@ -739,7 +739,7 @@ with tab2:
                 gridcolor='rgba(0,243,255,0.1)'
             ),
             yaxis=dict(
-                title="PnL ($)",
+                title="PnL (€)",
                 title_font=dict(color='#00f3ff', size=14, family='Orbitron'),
                 tickfont=dict(color='#00f3ff'),
                 gridcolor='rgba(0,243,255,0.1)',
@@ -793,7 +793,7 @@ with tab2:
             textfont={"size": 10, "color": "white", "family": "Orbitron"},
             hovertemplate='<b>%{y} - Ora %{x}</b><br>PnL: $%{z:.2f}<extra></extra>',
             colorbar=dict(
-                title="PnL ($)",
+                title="PnL (€)",
                 title_font=dict(color='#00f3ff', family='Orbitron'),
                 tickfont=dict(color='#00f3ff')
             )
@@ -884,7 +884,7 @@ with tab2:
         
         with col3:
             pnl_delta_color = "normal" if total_pnl >= 0 else "inverse"
-            st.metric("💰 TOTAL PNL", f"${total_pnl:.2f}", delta=f"${total_pnl:.2f}", delta_color=pnl_delta_color)
+            st.metric("💰 TOTAL PNL", f"€{total_pnl:.2f}", delta=f"€{total_pnl:.2f}", delta_color=pnl_delta_color)
         
         with col4:
             st.metric("📈 PROFIT FACTOR", f"{profit_factor:.2f}")
@@ -898,13 +898,13 @@ with tab2:
         col1, col2, col3, col4, col5 = st.columns(5)
         
         with col1:
-            st.metric("🏆 BEST TRADE", f"${best_trade:.2f}")
+            st.metric("🏆 BEST TRADE", f"€{best_trade:.2f}")
         
         with col2:
-            st.metric("💥 WORST TRADE", f"${worst_trade:.2f}")
+            st.metric("💥 WORST TRADE", f"€{worst_trade:.2f}")
         
         with col3:
-            st.metric("📉 MAX DRAWDOWN", f"${max_drawdown:.2f}")
+            st.metric("📉 MAX DRAWDOWN", f"€{max_drawdown:.2f}")
         
         with col4:
             st.metric("📊 SHARPE RATIO", f"{sharpe_ratio_annualized:.2f}")
@@ -1075,7 +1075,7 @@ with tab3:
     st.markdown('<div class="section-title">📜 STORICO POSIZIONI CHIUSE</div>', unsafe_allow_html=True)
     
     # Filtra dati dal 9 dicembre 2025
-    start_date = datetime(2025, 12, 9, 0, 0, 0, tzinfo=timezone.utc)
+    start_date = datetime(2025, 12, 18, 0, 0, 0, tzinfo=timezone.utc)
     hist = client.get_closed_pnl(limit=50, start_date=start_date)
     
     if hist:
@@ -1094,8 +1094,8 @@ with tab3:
             use_container_width=True,
             hide_index=True,
             column_config={
-                "Closed PnL": st.column_config.NumberColumn(format="$%.2f"),
-                "Fee": st.column_config.NumberColumn(format="$%.4f"),
+                "Closed PnL": st.column_config.NumberColumn(format="€%.2f"),
+                "Fee": st.column_config.NumberColumn(format="€%.4f"),
             }
         )
     else:
