@@ -73,7 +73,6 @@ async def fetch_learning_params(c: httpx.AsyncClient) -> dict:
     return {}
 
 
-
 # --- HTTP helper: retry su errori di rete/DNS (Temporary failure in name resolution) ---
 import time
 import random
