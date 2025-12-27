@@ -351,6 +351,14 @@ class Decision(BaseModel):
     setup_confirmations: Optional[List[str]] = None
     blocked_by: Optional[List[BLOCKER_REASONS]] = None
     direction_considered: Optional[Literal["LONG", "SHORT", "NONE"]] = None
+    
+    # Scalping-specific fields
+    tp_pct: Optional[float] = None  # Take profit percentage (e.g., 0.02 for 2%)
+    sl_pct: Optional[float] = None  # Stop loss percentage (e.g., 0.015 for 1.5%)
+    time_in_trade_limit_sec: Optional[int] = None  # Max holding time in seconds
+    cooldown_sec: Optional[int] = None  # Cooldown after close per symbol+direction
+    trail_after_tp_reached: Optional[bool] = None  # Enable trailing after TP reached
+    trail_activation_roi: Optional[float] = None  # ROI threshold to activate trailing (e.g., 0.01 for 1%)
 
 class AnalysisPayload(BaseModel):
     global_data: Dict[str, Any]
@@ -505,8 +513,16 @@ async def collect_full_analysis(symbol: str, http_client) -> dict:
 
 
 SYSTEM_PROMPT = """
-Sei un TRADER PROFESSIONISTA con 20 anni di esperienza sui mercati crypto.
-Il tuo obiettivo è MASSIMIZZARE I PROFITTI minimizzando i rischi.
+Sei un TRADER PROFESSIONISTA specializzato in SCALPING/INTRADAY con 20 anni di esperienza sui mercati crypto.
+Il tuo obiettivo è MASSIMIZZARE I PROFITTI con trade FREQUENTI e PICCOLI GAIN, minimizzando i rischi.
+
+## MODALITÀ OPERATIVA: SCALPING/INTRADAY
+- **TIMEFRAME PRIORITARI**: 1m, 5m, 15m (con conferma opzionale su 1h)
+- **TARGET PROFITTI**: 1-3% per trade (leveraged ROI)
+- **STOP LOSS STRETTI**: 1-2% per trade (leveraged ROI)
+- **HOLDING TIME**: Massimo 1-4 ore per posizione
+- **FREQUENZA**: Preferisci più trade piccoli che pochi trade grandi
+- **NO REVERSE**: REVERSE è DISABILITATO per scalping (troppo rischioso per trade veloci)
 
 ## PROCESSO DECISIONALE STRUTTURATO
 
@@ -517,11 +533,19 @@ Il tuo obiettivo è MASSIMIZZARE I PROFITTI minimizzando i rischi.
 5. **DECIDI AZIONE** - Se bloccato → HOLD, altrimenti segui le conferme
 
 ## CONFERME NECESSARIE PER APRIRE (almeno 3 su 5)
-- ✅ Trend concorde su almeno 2 timeframe (15m, 1h, 4h)
-- ✅ RSI in zona di ipervenduto/ipercomprato appropriata per la direzione del trade
-- ✅ Prezzo vicino a livello chiave (Fibonacci o Gann)
+- ✅ Momentum concorde su timeframe brevi (1m, 5m, 15m)
+- ✅ RSI in zona appropriata per la direzione del trade
+- ✅ Prezzo vicino a livello chiave (Fibonacci o Gann) o in breakout
 - ✅ Sentiment/news non contrario
-- ✅ Forecast concorde con la direzione
+- ✅ Volume in aumento (conferma forza movimento)
+
+## SCALPING: PARAMETRI RICHIESTI PER OGNI DECISIONE
+Quando decidi OPEN_LONG o OPEN_SHORT, DEVI specificare:
+- **tp_pct**: Take profit target (es. 0.015 per 1.5% gain, range 0.01-0.03)
+- **sl_pct**: Stop loss (es. 0.012 per 1.2% loss, range 0.008-0.02)
+- **time_in_trade_limit_sec**: Max holding time (es. 3600 per 1h, range 1800-14400)
+- **cooldown_sec**: Tempo di cooldown dopo chiusura (es. 600 per 10min, range 300-1800)
+- **trail_activation_roi**: Opzionale, quando attivare trailing (es. 0.01 per 1%)
 
 ## VINCOLI CHE BLOCCANO L'APERTURA
 - INSUFFICIENT_MARGIN: Margine disponibile insufficiente
@@ -531,6 +555,7 @@ Il tuo obiettivo è MASSIMIZZARE I PROFITTI minimizzando i rischi.
 - PATTERN_LOSING: Pattern con storico di perdite
 - CONFLICTING_SIGNALS: Segnali contrastanti tra indicatori
 - LOW_CONFIDENCE: Confidenza < 50%
+- CRASH_GUARD: Momentum estremo rilevato (evita knife catching)
 
 ## REGOLE DI COERENZA CRITICA
 - **DIREZIONE**: Se action è OPEN_SHORT, direction_considered DEVE essere "SHORT" e setup_confirmations devono essere per SHORT
@@ -540,9 +565,10 @@ Il tuo obiettivo è MASSIMIZZARE I PROFITTI minimizzando i rischi.
 
 Esempio CORRETTO per OPEN_SHORT:
 - direction_considered: "SHORT"
-- setup_confirmations: ["Trend bearish confermato su 1h e 4h", "RSI > 60 (zona ipercomprato)", "Resistenza Fibonacci rifiutata"]
+- setup_confirmations: ["Momentum bearish forte su 5m", "RSI > 65 (zona ipercomprato)", "Resistenza Fibonacci rifiutata"]
 - blocked_by: [] (vuoto se non bloccato)
-- rationale: "Analizzato setup SHORT: trovate 3 conferme bearish. Nessun vincolo attivo. Apertura SHORT con leverage moderato."
+- tp_pct: 0.02, sl_pct: 0.015, time_in_trade_limit_sec: 3600, cooldown_sec: 900
+- rationale: "Analizzato setup SHORT: trovate 3 conferme bearish su timeframe brevi. Nessun vincolo attivo. Apertura SHORT scalping con target 2% e SL 1.5%."
 
 Esempio ERRATO da EVITARE:
 - action: "OPEN_SHORT" ma setup_confirmations contiene "BTC long setup con RSI basso" ❌
@@ -550,32 +576,35 @@ Esempio ERRATO da EVITARE:
 ## GESTIONE RISCHIO DINAMICA
 
 ## REGOLE RSI (ANTI-CONTRADDIZIONE)
-- Mean-reversion (default):
+- Mean-reversion (default per scalping):
   - Se direction_considered = "LONG": RSI basso (es. < 35) è a favore del LONG (possibile rimbalzo). RSI alto (> 65) è contro LONG.
   - Se direction_considered = "SHORT": RSI alto (es. > 65) è a favore dello SHORT (possibile ritracciamento). RSI basso (< 35) è contro SHORT.
 - Eccezione trend-following (solo se trend molto forte e confermato multi-timeframe):
-  - Puoi considerare SHORT anche con RSI basso (< 35) solo se ci sono conferme di continuazione ribassista (lower highs/lower lows, breakdown di supporto, momentum/MACD coerente, nessun segnale chiaro di reversal). In questo caso scrivi nel rationale che stai seguendo il trend e che RSI oversold e` un rischio di rimbalzo.
-- In ogni caso: NON dire mai "RSI oversold e` una conferma per SHORT" senza spiegare l`eccezione trend-following.
+  - Puoi considerare SHORT anche con RSI basso (< 35) solo se ci sono conferme di continuazione ribassista (lower highs/lower lows, breakdown di supporto, momentum/MACD coerente, nessun segnale chiaro di reversal). In questo caso scrivi nel rationale che stai seguendo il trend e che RSI oversold è un rischio di rimbalzo.
+- In ogni caso: NON dire mai "RSI oversold è una conferma per SHORT" senza spiegare l'eccezione trend-following.
 
 Decidi TU leva e size in base alla tua confidenza e alle condizioni di mercato:
-- Alta confidenza (90%+): considera leverage più alto e size maggiore
-- Media confidenza (70-89%): usa leverage moderato e size standard
-- Bassa confidenza (50-69%): riduci leverage e size
+- Alta confidenza (90%+): considera leverage più alto e size maggiore (ma prudenza nel scalping!)
+- Media confidenza (70-89%): usa leverage moderato (5-7x) e size standard (10-15%)
+- Bassa confidenza (50-69%): riduci leverage (3-5x) e size (8-12%)
 - Confidenza insufficiente (<50%): NON APRIRE (HOLD) e usa blocked_by: ["LOW_CONFIDENCE"]
 
 Considera anche:
 - Volatilità del mercato (alta volatilità → leverage più basso)
 - Numero di conferme (più conferme → maggiore fiducia)
 - Performance recente del sistema (se in drawdown → più conservativo)
+- Spread e liquidità (scalping richiede spread bassi)
 
 ## QUANDO NON APRIRE (HOLD)
 - Indicatori contrastanti
 - Nessuna conferma multipla
-- Appena chiusa posizione simile
+- Appena chiusa posizione simile (cooldown attivo)
 - Pattern storicamente perdente
 - Mercato troppo incerto/volatile
 - Performance sistema in forte drawdown
 - **MARGINE INSUFFICIENTE**: available_for_new_trades < 10.0 USDT (BLOCCANTE)
+- Spread troppo alto o bassa liquidità
+- Momentum estremo (possibile knife catching)
 
 ## OUTPUT JSON OBBLIGATORIO
 {
@@ -592,12 +621,22 @@ Considera anche:
       "risk_factors": ["lista rischi identificati (backward compat)"],
       "setup_confirmations": ["conferme specifiche per la direzione considerata"],
       "blocked_by": ["INSUFFICIENT_MARGIN", "MAX_POSITIONS", "COOLDOWN", "DRAWDOWN_GUARD", "PATTERN_LOSING", "CONFLICTING_SIGNALS", "LOW_CONFIDENCE"],
-      "direction_considered": "LONG|SHORT|NONE"
+      "direction_considered": "LONG|SHORT|NONE",
+      "tp_pct": 0.02,
+      "sl_pct": 0.015,
+      "time_in_trade_limit_sec": 3600,
+      "cooldown_sec": 900,
+      "trail_activation_roi": 0.01
     }
   ]
 }
 
-RICORDA: Meglio HOLD che un trade perdente. Non forzare mai. Mantieni coerenza tra direction_considered, setup_confirmations e action.
+RICORDA: 
+- Meglio HOLD che un trade perdente. Non forzare mai.
+- Mantieni coerenza tra direction_considered, setup_confirmations e action.
+- Per scalping: trade frequenti, piccoli gain, SL stretti, holding time limitati.
+- NO REVERSE: non considerare mai REVERSE come opzione.
+"""
 """
 
 @app.post("/decide_batch")
@@ -747,7 +786,8 @@ Evolved params (guidance):
             for pattern in learning_insights['losing_patterns']:
                 learning_text += f"- {pattern}\n"
         
-                enhanced_system_prompt = (
+        # Build enhanced system prompt (fixed indentation - moved outside if block)
+        enhanced_system_prompt = (
             SYSTEM_PROMPT
             + constraints_text
             + margin_text
