@@ -15,6 +15,11 @@ class BybitForecaster:
         self.session = HTTP(testnet=testnet)
 
     def _fetch_candles(self, coin: str, interval: str, limit: int) -> pd.DataFrame:
+        # Validate supported intervals
+        if interval not in ["15m", "1h"]:
+            logging.warning(f"Unsupported interval '{interval}' for {coin}. Only '15m' and '1h' are supported.")
+            return pd.DataFrame()
+        
         # Mappatura intervalli Bybit: 15m -> "15", 1h -> "60"
         bybit_interval = "15" if interval == "15m" else "60"
         
@@ -31,6 +36,7 @@ class BybitForecaster:
             )
             
             if response['retCode'] != 0:
+                logging.warning(f"get_kline returned non-zero retCode for {symbol}: retCode={response.get('retCode')}, message={response.get('retMsg', 'N/A')}")
                 return pd.DataFrame()
 
             data = response['result']['list']
@@ -46,7 +52,7 @@ class BybitForecaster:
             return df[['ds', 'y']]
 
         except Exception as e:
-            print(f"Error fetching candles for {symbol}: {e}")
+            logging.error(f"Error fetching candles for {symbol}: {e}")
             return pd.DataFrame()
 
     def forecast(self, coin: str, interval: str) -> tuple:
@@ -100,7 +106,7 @@ class BybitForecaster:
                         "Timestamp Previsione": fc["ds"]
                     })
                 except Exception as e:
-                    print(f"Forecast error for {coin}: {e}")
+                    logging.error(f"Forecast error for {coin} ({interval}): {e}")
                     continue
                     
         return results

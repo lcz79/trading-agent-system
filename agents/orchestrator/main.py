@@ -73,23 +73,12 @@ async def fetch_learning_params(c: httpx.AsyncClient) -> dict:
     return {}
 
 
-def append_ai_decision_event(event: dict) -> None:
-    """Append a single event to /data/ai_decisions.json (list), creating the file if needed.
-
-    The dashboard reads this file to show the AI Decision Log. We must log also CRITICAL cycles.
-    """
-    import json
-    from datetime import datetime
-
-
 # --- HTTP helper: retry su errori di rete/DNS (Temporary failure in name resolution) ---
 import time
 import random
 
 
 # --- HTTPX async helper: retry su errori temporanei di rete/DNS ---
-import random
-
 async def async_post_with_retry(client, url, json_payload, timeout=30.0, attempts=3, base_sleep=1.0):
     """
     POST JSON con retry/backoff per errori temporanei (DNS, timeout, connessione).
@@ -144,30 +133,6 @@ def post_json_with_retry(url, json_payload, timeout=30, attempts=3, base_sleep=1
             print(f"        ⏳ Retry {n}/{attempts} POST {url} dopo errore rete/DNS: {e} (sleep {sleep_s:.2f}s)")
             time.sleep(sleep_s)
     raise last_exc
-
-    event = dict(event or {})
-    event.setdefault("timestamp", datetime.utcnow().isoformat())
-
-    try:
-        try:
-            with open(AI_DECISIONS_FILE, "r") as f:
-                data = json.load(f)
-            if not isinstance(data, list):
-                data = []
-        except FileNotFoundError:
-            data = []
-        except Exception:
-            # If file is corrupted, start a new log rather than blocking the bot
-            data = []
-
-        data.append(event)
-        # Keep last N to avoid unbounded growth
-        data = data[-500:]
-
-        with open(AI_DECISIONS_FILE, "w") as f:
-            json.dump(data, f, indent=2)
-    except Exception as e:
-        print(f"        ⚠️ Failed to write AI decision log: {e}")
 
 
 def save_monitoring_decision(positions_count: int, max_positions: int, positions_details: list, reason: str):
