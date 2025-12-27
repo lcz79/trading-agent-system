@@ -9,6 +9,9 @@ import logging
 warnings.filterwarnings('ignore')
 logging.getLogger('cmdstanpy').setLevel(logging.WARNING)
 
+# Supported intervals for forecasting
+SUPPORTED_INTERVALS = ["15m", "1h"]
+
 class BybitForecaster:
     # Supported intervals - only these are validated and allowed
     SUPPORTED_INTERVALS = ['15m', '1h']
