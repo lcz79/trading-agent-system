@@ -13,14 +13,17 @@ logging.getLogger('cmdstanpy').setLevel(logging.WARNING)
 SUPPORTED_INTERVALS = ["15m", "1h"]
 
 class BybitForecaster:
+    # Supported intervals - only these are validated and allowed
+    SUPPORTED_INTERVALS = ['15m', '1h']
+    
     def __init__(self, testnet: bool = False):
         # Se testnet=True usa i server di test, altrimenti mainnet
         self.session = HTTP(testnet=testnet)
 
     def _fetch_candles(self, coin: str, interval: str, limit: int) -> pd.DataFrame:
         # Validate supported intervals
-        if interval not in SUPPORTED_INTERVALS:
-            logging.warning(f"Unsupported interval '{interval}' for {coin}. Only {SUPPORTED_INTERVALS} are supported.")
+        if interval not in self.SUPPORTED_INTERVALS:
+            logging.warning(f"Unsupported interval '{interval}' for {coin}. Only {self.SUPPORTED_INTERVALS} are supported.")
             return pd.DataFrame()
         
         # Mappatura intervalli Bybit: 15m -> "15", 1h -> "60"
@@ -39,9 +42,7 @@ class BybitForecaster:
             )
             
             if response['retCode'] != 0:
-                ret_code = response.get('retCode')
-                ret_msg = response.get('retMsg', 'N/A')
-                logging.warning(f"get_kline returned non-zero retCode for {symbol}: retCode={ret_code}, message={ret_msg}")
+                logging.warning(f"get_kline returned non-zero retCode for {symbol}: retCode={response['retCode']}, message={response.get('retMsg', 'N/A')}")
                 return pd.DataFrame()
 
             data = response['result']['list']
@@ -111,7 +112,7 @@ class BybitForecaster:
                         "Timestamp Previsione": fc["ds"]
                     })
                 except Exception as e:
-                    logging.error(f"Forecast error for {coin}: {e}")
+                    logging.error(f"Forecast error for {coin} ({interval}): {e}")
                     continue
                     
         return results

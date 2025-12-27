@@ -79,8 +79,6 @@ import random
 
 
 # --- HTTPX async helper: retry su errori temporanei di rete/DNS ---
-import random
-
 async def async_post_with_retry(client, url, json_payload, timeout=30.0, attempts=3, base_sleep=1.0):
     """
     POST JSON con retry/backoff per errori temporanei (DNS, timeout, connessione).
