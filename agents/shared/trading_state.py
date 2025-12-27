@@ -90,6 +90,7 @@ class PositionMetadata:
     entry_price: Optional[float] = None
     size: Optional[float] = None
     leverage: Optional[float] = None
+    cooldown_sec: Optional[int] = None  # Cooldown duration after close
     
     def is_expired(self) -> bool:
         """Check if position has exceeded max holding time"""
