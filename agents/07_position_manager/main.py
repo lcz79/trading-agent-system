@@ -1515,7 +1515,22 @@ def open_position(order: OrderRequest):
                             "intent_id": intent_id
                         }
                     else:
-                        print(f"🔄 REVERSE PERMESSO: {existing_dir} → {requested_dir} su {sym_ccxt}")
+                        # Opposite direction requested
+                        if not HEDGE_MODE:
+                            # In One-Way mode, cannot have opposite direction - must close first
+                            print(f"⚠️ ONE-WAY MODE: Cannot open {requested_dir} while {existing_dir} position exists on {sym_ccxt}")
+                            trading_state.update_intent_status(intent_id, OrderStatus.CANCELLED, 
+                                                              error_message="One-Way mode: close existing position first")
+                            return {
+                                "status": "rejected",
+                                "msg": f"One-Way mode: Cannot open {requested_dir} while {existing_dir} position exists. Close first.",
+                                "existing_side": existing_dir,
+                                "requested_side": requested_dir,
+                                "intent_id": intent_id
+                            }
+                        else:
+                            # Hedge mode: REVERSE is allowed
+                            print(f"🔄 HEDGE MODE: REVERSE allowed: {existing_dir} → {requested_dir} su {sym_ccxt}")
         except Exception as e:
             print(f"⚠️ Errore check posizioni esistenti: {e}")
 
