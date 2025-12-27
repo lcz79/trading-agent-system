@@ -1,4 +1,4 @@
-import asyncio, httpx, json, os
+import asyncio, httpx, json, os, uuid
 from datetime import datetime
 
 URLS = {
@@ -24,13 +24,42 @@ CRITICAL_LOSS_PCT_LEV = float(os.getenv("CRITICAL_LOSS_PCT_LEV", "6.0"))  # Sogl
 # Requires 2 consecutive cycles with CLOSE action to execute
 pending_critical_closes = {}
 
-# --- AI PARAMS CLAMPING CONFIG ---
+# --- AI PARAMS VALIDATION CONFIG (no silent clamping) ---
+# These are used for warnings only - Master AI should follow these ranges
 MIN_LEVERAGE = 3
 MAX_LEVERAGE = 10
 MIN_SIZE_PCT = 0.08
 MAX_SIZE_PCT = 0.20
 
 AI_DECISIONS_FILE = "/data/ai_decisions.json"
+
+
+def validate_ai_params(leverage: float, size_pct: float, symbol: str = "") -> tuple:
+    """
+    Validate AI-provided leverage and size_pct against expected ranges.
+    Logs warnings but does NOT modify values (trusts AI decision).
+    Returns: (leverage, size_pct, had_warnings)
+    """
+    had_warnings = False
+    warnings = []
+    
+    # Check leverage bounds
+    if leverage < MIN_LEVERAGE:
+        warnings.append(f"leverage {leverage:.1f} < {MIN_LEVERAGE} (conservative)")
+    elif leverage > MAX_LEVERAGE:
+        warnings.append(f"leverage {leverage:.1f} > {MAX_LEVERAGE} (aggressive)")
+    
+    # Check size_pct bounds
+    if size_pct < MIN_SIZE_PCT:
+        warnings.append(f"size_pct {size_pct:.3f} < {MIN_SIZE_PCT} (conservative)")
+    elif size_pct > MAX_SIZE_PCT:
+        warnings.append(f"size_pct {size_pct:.3f} > {MAX_SIZE_PCT} (aggressive)")
+    
+    if warnings:
+        had_warnings = True
+        print(f"        ⚠️ AI param validation for {symbol}: {'; '.join(warnings)}")
+    
+    return leverage, size_pct, had_warnings
 
 
 async def fetch_learning_params(c: httpx.AsyncClient) -> dict:
@@ -182,26 +211,37 @@ def save_monitoring_decision(positions_count: int, max_positions: int, positions
         print(f"⚠️ Error saving monitoring decision: {e}")
 
 
-def clamp_ai_params(leverage: float, size_pct: float, symbol: str = "") -> tuple:
+def append_ai_decision_event(event: dict) -> None:
+    """Append a single event to /data/ai_decisions.json (list), creating the file if needed.
+
+    The dashboard reads this file to show the AI Decision Log. We must log also CRITICAL cycles.
     """
-    Clamp AI-provided leverage and size_pct to safe ranges.
-    Returns: (clamped_leverage, clamped_size_pct, was_clamped)
-    """
-    original_leverage = leverage
-    original_size_pct = size_pct
+    import json
+    from datetime import datetime
     
-    # Clamp leverage to [MIN_LEVERAGE, MAX_LEVERAGE]
-    leverage = max(MIN_LEVERAGE, min(MAX_LEVERAGE, leverage))
-    
-    # Clamp size_pct to [MIN_SIZE_PCT, MAX_SIZE_PCT]
-    size_pct = max(MIN_SIZE_PCT, min(MAX_SIZE_PCT, size_pct))
-    
-    was_clamped = (leverage != original_leverage) or (size_pct != original_size_pct)
-    
-    if was_clamped:
-        print(f"        ⚙️ CLAMP {symbol}: leverage {original_leverage:.1f}→{leverage:.1f}, size_pct {original_size_pct:.3f}→{size_pct:.3f}")
-    
-    return leverage, size_pct, was_clamped
+    event = dict(event or {})
+    event.setdefault("timestamp", datetime.utcnow().isoformat())
+
+    try:
+        try:
+            with open(AI_DECISIONS_FILE, "r") as f:
+                data = json.load(f)
+            if not isinstance(data, list):
+                data = []
+        except FileNotFoundError:
+            data = []
+        except Exception:
+            # If file is corrupted, start a new log rather than blocking the bot
+            data = []
+
+        data.append(event)
+        # Keep last N to avoid unbounded growth
+        data = data[-500:]
+
+        with open(AI_DECISIONS_FILE, "w") as f:
+            json.dump(data, f, indent=2)
+    except Exception as e:
+        print(f"        ⚠️ Failed to write AI decision log: {e}")
 
 
 def check_critical_close_confirmation(symbol: str, action_type: str) -> bool:
@@ -608,19 +648,48 @@ async def analysis_cycle():
 
                 if action in ["OPEN_LONG", "OPEN_SHORT"]:
                     # Get AI-provided params with fallback to conservative defaults
-                    raw_leverage = d.get('leverage', MIN_LEVERAGE)
-                    raw_size_pct = d.get('size_pct', MIN_SIZE_PCT)
+                    leverage = d.get('leverage', MIN_LEVERAGE)
+                    size_pct = d.get('size_pct', MIN_SIZE_PCT)
                     
-                    # Apply clamping to ensure params are within safe ranges
-                    leverage, size_pct, was_clamped = clamp_ai_params(raw_leverage, raw_size_pct, sym)
+                    # Validate params (warns but does NOT modify - trusts AI)
+                    leverage, size_pct, had_warnings = validate_ai_params(leverage, size_pct, sym)
                     
-                    print(f"        🔥 EXECUTING {action} on {sym}...")
-                    res = await c.post(f"{URLS['pos']}/open_position", json={
+                    # Extract scalping parameters from AI decision
+                    tp_pct = d.get('tp_pct')  # Optional
+                    sl_pct = d.get('sl_pct')  # Optional
+                    time_in_trade_limit_sec = d.get('time_in_trade_limit_sec')  # Optional
+                    cooldown_sec = d.get('cooldown_sec')  # Optional
+                    trail_activation_roi = d.get('trail_activation_roi')  # Optional
+                    
+                    # Generate intent_id for idempotency
+                    intent_id = str(uuid.uuid4())
+                    
+                    print(f"        🔥 EXECUTING {action} on {sym} [intent:{intent_id[:8]}]...")
+                    if tp_pct:
+                        print(f"           Scalping: TP={tp_pct*100:.1f}%, SL={sl_pct*100:.1f}%, MaxTime={time_in_trade_limit_sec}s")
+                    
+                    # Build payload with scalping params
+                    payload = {
                         "symbol": sym,
                         "side": action,
                         "leverage": leverage,
-                        "size_pct": size_pct
-                    })
+                        "size_pct": size_pct,
+                        "intent_id": intent_id  # For idempotency
+                    }
+                    
+                    # Add optional scalping params if present
+                    if tp_pct is not None:
+                        payload["tp_pct"] = tp_pct
+                    if sl_pct is not None:
+                        payload["sl_pct"] = sl_pct
+                    if time_in_trade_limit_sec is not None:
+                        payload["time_in_trade_limit_sec"] = time_in_trade_limit_sec
+                    if cooldown_sec is not None:
+                        payload["cooldown_sec"] = cooldown_sec
+                    if trail_activation_roi is not None:
+                        payload["trail_activation_roi"] = trail_activation_roi
+                    
+                    res = await c.post(f"{URLS['pos']}/open_position", json=payload)
                     print(f"        ✅ Result: {res.json()}")
 
         except Exception as e: 
