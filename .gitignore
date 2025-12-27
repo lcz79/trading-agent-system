@@ -11,5 +11,7 @@ data/
 *_old_*.py
 *.bak
 *.bak.*
+*.backup
+*.backup*
 .venv/
 backup_snapshot/
