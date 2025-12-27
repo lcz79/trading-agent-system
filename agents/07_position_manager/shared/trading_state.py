@@ -6,7 +6,7 @@ from typing import Optional, Dict, List, Any
 from dataclasses import dataclass, field, asdict
 from enum import Enum
 
-TRADING_STATE_FILE = os.getenv("TRADING_STATE_FILE", "/data/trading_state. json")
+TRADING_STATE_FILE = os.getenv("TRADING_STATE_FILE", "/data/trading_state.json")
 
 class OrderStatus(str, Enum):
     PENDING = "PENDING"
@@ -23,7 +23,7 @@ class OrderIntent:
     leverage: float
     size_pct: float
     action: Optional[str] = None
-    status: OrderStatus = OrderStatus. PENDING
+    status: OrderStatus = OrderStatus.PENDING
     created_at: str = field(default_factory=lambda: datetime.now().isoformat())
     executed_at: Optional[str] = None
     error_message: Optional[str] = None
@@ -99,7 +99,7 @@ class Cooldown:
 
 class TradingState: 
     _instance = None
-    _lock = threading. Lock()
+    _lock = threading.Lock()
 
     def __new__(cls):
         if cls._instance is None: 
@@ -136,7 +136,7 @@ class TradingState:
 
     # --- Intent Management ---
     def add_intent(self, intent: OrderIntent):
-        self._state["intents"][intent.intent_id] = intent. to_dict()
+        self._state["intents"][intent.intent_id] = intent.to_dict()
         self._save_state()
 
     def get_intent(self, intent_id:  str) -> Optional[OrderIntent]:
@@ -148,7 +148,7 @@ class TradingState:
                             exchange_order_id: Optional[str] = None):
         if intent_id in self._state["intents"]:
             self._state["intents"][intent_id]["status"] = status.value
-            if status == OrderStatus. EXECUTED:
+            if status == OrderStatus.EXECUTED:
                 self._state["intents"][intent_id]["executed_at"] = datetime.now().isoformat()
             if error_message:
                 self._state["intents"][intent_id]["error_message"] = error_message
@@ -160,7 +160,7 @@ class TradingState:
         cutoff = datetime.now() - timedelta(days=days)
         to_remove = []
         for intent_id, data in self._state["intents"].items():
-            created = datetime.fromisoformat(data. get("created_at", datetime.now().isoformat()))
+            created = datetime.fromisoformat(data.get("created_at", datetime.now().isoformat()))
             if created < cutoff: 
                 to_remove.append(intent_id)
         for intent_id in to_remove:
@@ -170,8 +170,8 @@ class TradingState:
 
     # --- Position Management ---
     def add_position(self, position: PositionMetadata):
-        key = f"{position. symbol}_{position. side}"
-        self._state["positions"][key] = position. to_dict()
+        key = f"{position.symbol}_{position.side}"
+        self._state["positions"][key] = position.to_dict()
         self._save_state()
 
     def get_position(self, symbol: str, side: str) -> Optional[PositionMetadata]:
@@ -200,7 +200,7 @@ class TradingState:
 
     def is_in_cooldown(self, symbol:  str, side: str) -> bool:
         for cd_data in self._state["cooldowns"]: 
-            cd = Cooldown. from_dict(cd_data)
+            cd = Cooldown.from_dict(cd_data)
             if cd.symbol == symbol and cd.side == side:
                 if not cd.is_expired():
                     return True
@@ -211,7 +211,7 @@ class TradingState:
         for cd_data in self._state["cooldowns"]:
             cd = Cooldown.from_dict(cd_data)
             if not cd.is_expired():
-                valid. append(cd_data)
+                valid.append(cd_data)
         if len(valid) != len(self._state["cooldowns"]):
             self._state["cooldowns"] = valid
             self._save_state()
