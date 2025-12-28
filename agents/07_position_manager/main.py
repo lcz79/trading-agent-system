@@ -348,7 +348,9 @@ Thread(target=record_equity_loop, daemon=True).start()
 def check_time_based_exits():
     """
     Check for positions that have exceeded their time_in_trade_limit and close them.
-    This implements the scalping time-based exit feature.
+    This implements the scalping time-based exit feature with ADX-aware extension.
+    
+    FASE 2: If ADX > threshold at timeout, extend the position by additional time.
     """
     try:
         trading_state = get_trading_state()
@@ -359,16 +361,79 @@ def check_time_based_exits():
         
         print(f"⏰ Found {len(expired_positions)} expired positions")
         
+        # FASE 2 configuration
+        adx_threshold = float(os.getenv("TIME_EXIT_ADX_THRESHOLD", "25.0"))
+        extension_time_sec = int(os.getenv("TIME_EXIT_EXTENSION_SEC", "1200"))  # 20 minutes
+        
         for pos_metadata in expired_positions:
             symbol = pos_metadata.symbol
             direction = pos_metadata.direction
             time_in_trade = pos_metadata.time_in_trade_seconds()
             limit_sec = pos_metadata.time_in_trade_limit_sec
             
-            print(f"⏰ TIME-BASED EXIT: {symbol} {direction} - in trade for {time_in_trade}s (limit: {limit_sec}s)")
+            print(f"⏰ TIME-BASED EXIT CHECK: {symbol} {direction} - in trade for {time_in_trade}s (limit: {limit_sec}s)")
             
-            # Close the position
-            success = execute_close_position(symbol)
+            # FASE 2: Check ADX to determine if we should extend
+            should_extend = False
+            adx_value = None
+            
+            try:
+                # Fetch ADX from technical analyzer
+                sym_id = bybit_symbol_id(symbol)
+                with httpx.Client(timeout=5.0) as client:
+                    r = client.post(f"{TECHNICAL_ANALYZER_URL}/analyze_multi_tf", json={"symbol": sym_id})
+                    if r.status_code == 200:
+                        data = r.json()
+                        tf_15m = data.get("timeframes", {}).get("15m", {})
+                        adx_value = tf_15m.get("adx")
+                        
+                        if adx_value is not None and adx_value > adx_threshold:
+                            should_extend = True
+                            print(f"   📊 ADX={adx_value:.1f} > {adx_threshold} - TREND detected, extending position")
+            except Exception as e:
+                print(f"   ⚠️ Failed to fetch ADX for {symbol}: {e}")
+            
+            if should_extend:
+                # Extend the position time limit
+                try:
+                    # Update position metadata with extended time
+                    new_limit = limit_sec + extension_time_sec
+                    pos_metadata.time_in_trade_limit_sec = new_limit
+                    trading_state.add_position(pos_metadata)  # Re-save with updated limit
+                    
+                    print(f"   ⏱️ Position extended: new limit = {new_limit}s (added {extension_time_sec}s)")
+                    
+                    # Record extension event
+                    try:
+                        requests.post(
+                            f"{LEARNING_AGENT_URL}/record_event",
+                            json={
+                                "event_type": "time_exit_extended",
+                                "symbol": symbol,
+                                "direction": direction,
+                                "time_in_trade_sec": time_in_trade,
+                                "original_limit_sec": limit_sec,
+                                "new_limit_sec": new_limit,
+                                "adx": adx_value,
+                                "reason": f"Strong trend (ADX={adx_value:.1f}), extended by {extension_time_sec}s"
+                            },
+                            timeout=5.0
+                        )
+                    except Exception as e:
+                        print(f"   ⚠️ Failed to record extension event: {e}")
+                    
+                    # Skip closing this position
+                    continue
+                    
+                except Exception as e:
+                    print(f"   ⚠️ Failed to extend position: {e}")
+                    # Continue with close if extension fails
+            
+            # Close the position (either no extension or extension failed)
+            exit_reason = "time_exit_flat" if adx_value is None or adx_value <= adx_threshold else "time_exit_no_extension"
+            print(f"   🔒 Closing position: reason={exit_reason}, ADX={adx_value}")
+            
+            success = execute_close_position(symbol, exit_reason=exit_reason)
             
             if success:
                 print(f"✅ Time-based exit executed for {symbol} {direction}")
@@ -382,7 +447,9 @@ def check_time_based_exits():
                             "direction": direction,
                             "time_in_trade_sec": time_in_trade,
                             "limit_sec": limit_sec,
-                            "reason": "Position exceeded max holding time (scalping mode)"
+                            "exit_reason": exit_reason,
+                            "adx": adx_value,
+                            "reason": f"Position exceeded max holding time ({exit_reason})"
                         },
                         timeout=5.0
                     )
@@ -770,7 +837,7 @@ def request_reverse_analysis(symbol: str, position_data: dict) -> Optional[dict]
 # =========================================================
 # CLOSE / REVERSE EXECUTION
 # =========================================================
-def execute_close_position(symbol: str) -> bool:
+def execute_close_position(symbol: str, exit_reason: str = "manual") -> bool:
     if not exchange:
         return False
     try:
