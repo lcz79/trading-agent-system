@@ -7,6 +7,7 @@ This module provides:
 - Spread/slippage logging for telemetry
 """
 
+import ccxt
 from typing import Tuple, Optional, Dict, Any
 
 
@@ -162,8 +163,17 @@ def fetch_orderbook_safe(exchange, symbol: str, limit: int = 10) -> Optional[dic
     try:
         orderbook = exchange.fetch_order_book(symbol, limit=limit)
         return orderbook
+    except (ccxt.NetworkError, ccxt.ExchangeError) as e:
+        # Retryable errors
+        print(f"⚠️ Network/Exchange error fetching orderbook for {symbol}: {e}")
+        return None
+    except ccxt.InvalidSymbol as e:
+        # Permanent error - symbol not found
+        print(f"❌ Invalid symbol {symbol}: {e}")
+        return None
     except Exception as e:
-        print(f"⚠️ Failed to fetch orderbook for {symbol}: {e}")
+        # Unexpected error
+        print(f"⚠️ Unexpected error fetching orderbook for {symbol}: {e}")
         return None
 
 

@@ -74,7 +74,18 @@ class CryptoTechnicalAnalysisBybit:
         return ta.volatility.AverageTrueRange(high, low, close, window=period).average_true_range()
 
     def calculate_adx(self, high, low, close, period: int = 14) -> pd.Series:
-        """Calculate ADX (Average Directional Index) for trend strength"""
+        """
+        Calculate ADX (Average Directional Index) for trend strength.
+        
+        Args:
+            high: High price series
+            low: Low price series
+            close: Close price series
+            period: Calculation period (default 14)
+        
+        Returns:
+            pd.Series: ADX values ranging from 0-100. Values > 25 indicate strong trend.
+        """
         return ta.trend.ADXIndicator(high, low, close, window=period).adx()
 
     def calculate_pivot_points(self, high, low, close):

@@ -399,8 +399,10 @@ def test_telemetry_logging():
     # Cleanup
     try:
         os.remove(test_file)
-    except:
-        pass
+    except FileNotFoundError:
+        pass  # File already doesn't exist
+    except Exception as e:
+        print(f"   Warning: Could not cleanup test file: {e}")
     
     print(f"\n✓ Telemetry logging validated")
 

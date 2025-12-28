@@ -12,6 +12,10 @@ Respects Bybit precision and minimum lot size requirements.
 from decimal import Decimal, ROUND_DOWN
 from typing import Tuple, Optional
 
+# Constants for position sizing
+MIN_STOP_DISTANCE_PCT = 1e-8  # Minimum stop distance to avoid division by zero
+MIN_ATR_VALUE = 1e-8  # Minimum ATR value for calculations
+
 
 def calculate_position_size(
     equity: float,
@@ -61,9 +65,9 @@ def calculate_position_size(
     # If we lose stop_distance_pct with leverage, we need:
     # position_value * leverage * stop_distance_pct = risk_amount
     # position_value = risk_amount / (leverage * stop_distance_pct)
-    if stop_distance_pct <= 0:
+    if stop_distance_pct <= MIN_STOP_DISTANCE_PCT:
         # Invalid stop distance
-        return min_qty, {**sizing_info, 'error': 'Invalid stop distance'}
+        return min_qty, {**sizing_info, 'error': 'Invalid stop distance (too small)'}
     
     position_value = risk_amount / (leverage * stop_distance_pct)
     sizing_info['position_value'] = position_value
