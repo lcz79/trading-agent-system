@@ -73,6 +73,21 @@ class CryptoTechnicalAnalysisBybit:
     def calculate_atr(self, high, low, close, period):
         return ta.volatility.AverageTrueRange(high, low, close, window=period).average_true_range()
 
+    def calculate_adx(self, high, low, close, period: int = 14) -> pd.Series:
+        """
+        Calculate ADX (Average Directional Index) for trend strength.
+        
+        Args:
+            high: High price series
+            low: Low price series
+            close: Close price series
+            period: Calculation period (default 14)
+        
+        Returns:
+            pd.Series: ADX values ranging from 0-100. Values > 25 indicate strong trend.
+        """
+        return ta.trend.ADXIndicator(high, low, close, window=period).adx()
+
     def calculate_pivot_points(self, high, low, close):
         pp = (high + low + close) / 3.0
         return {
@@ -134,9 +149,11 @@ class CryptoTechnicalAnalysisBybit:
                 
                 df["ema_20"] = self.calculate_ema(df["close"], 20)
                 df["ema_50"] = self.calculate_ema(df["close"], 50)
+                df["ema_200"] = self.calculate_ema(df["close"], 200)
                 macd_line, macd_sig, macd_hist = self.calculate_macd(df["close"])
                 df["rsi_14"] = self.calculate_rsi(df["close"], 14)
                 df["atr_14"] = self.calculate_atr(df["high"], df["low"], df["close"], 14)
+                df["adx_14"] = self.calculate_adx(df["high"], df["low"], df["close"], 14)
                 
                 last = df.iloc[-1]
                 trend = "BULLISH" if last["close"] > last["ema_50"] else "BEARISH"
@@ -182,7 +199,9 @@ class CryptoTechnicalAnalysisBybit:
                     "macd_momentum": macd_momentum,
                     "ema_20": round(float(last["ema_20"]), 2),
                     "ema_50": round(float(last["ema_50"]), 2),
+                    "ema_200": round(float(last["ema_200"]), 2),
                     "atr":  round(float(last["atr_14"]), 4),
+                    "adx": round(float(last["adx_14"]), 2),
                     **crash_metrics  # Include crash guard metrics
                 }
             except Exception as e: 
