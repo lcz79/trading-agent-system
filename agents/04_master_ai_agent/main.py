@@ -687,13 +687,47 @@ async def decide_batch(payload: AnalysisPayload):
                 # Raccoglie dati da Fibonacci, Gann, News, Forecast
                 additional_data = await collect_full_analysis(symbol, http_client)
                 
+                # FASE 2: Compute volatility and regime metrics
+                tech_data = asset_data.get('tech', {})
+                timeframes = tech_data.get('timeframes', {})
+                tf_15m = timeframes.get('15m', {})
+                
+                # Volatility filter (anti-chop): volatility = ATR / price
+                atr = tf_15m.get('atr', 0)
+                price = tf_15m.get('price', 0)
+                volatility_pct = (atr / price) if price > 0 else 0
+                
+                # Market regime detection: trend_strength = abs((EMA20 - EMA200) / EMA200)
+                ema_20 = tf_15m.get('ema_20', 0)
+                ema_200 = tf_15m.get('ema_200', 0)
+                trend_strength = abs((ema_20 - ema_200) / ema_200) if ema_200 > 0 else 0
+                
+                # Regime classification: TREND if trend_strength > 0.005, else RANGE
+                regime_threshold = float(os.getenv("REGIME_TREND_THRESHOLD", "0.005"))
+                regime = "TREND" if trend_strength > regime_threshold else "RANGE"
+                
+                # ADX for trend confirmation
+                adx = tf_15m.get('adx', 0)
+                
+                # Add FASE 2 metrics to technical data
+                fase2_metrics = {
+                    "volatility_pct": round(volatility_pct, 6),
+                    "atr": atr,
+                    "trend_strength": round(trend_strength, 6),
+                    "regime": regime,
+                    "adx": adx,
+                    "ema_20": ema_20,
+                    "ema_200": ema_200
+                }
+                
                 # Combina technical analysis (già presente) con nuovi dati
                 enriched_assets_data[symbol] = {
                     "technical": asset_data.get('tech', {}),
                     "fibonacci": additional_data.get('fibonacci', {}),
                     "gann": additional_data.get('gann', {}),
                     "news": additional_data.get('news', {}),
-                    "forecast": additional_data.get('forecast', {})
+                    "forecast": additional_data.get('forecast', {}),
+                    "fase2_metrics": fase2_metrics
                 }
         
         # 6. Costruisci prompt con TUTTO il contesto
@@ -917,9 +951,37 @@ Evolved params (guidance):
                     # Aggiungi crash guard reason al rationale
                     valid_dec.rationale = f"{crash_guard_reason} Original: {valid_dec.rationale}"
                 
+                # FASE 2: VOLATILITY FILTER (anti-chop)
+                # Block entry if volatility (ATR/price) is too low
+                min_volatility_threshold = float(os.getenv("MIN_VOLATILITY_PCT", "0.0025"))
+                fase2_metrics = enriched_assets_data.get(symbol, {}).get('fase2_metrics', {})
+                volatility_pct = fase2_metrics.get('volatility_pct', 0)
+                
+                if valid_dec.action in ["OPEN_LONG", "OPEN_SHORT"] and volatility_pct < min_volatility_threshold:
+                    volatility_blocked_reason = (
+                        f"VOLATILITY_FILTER: Blocked {valid_dec.action} due to low volatility "
+                        f"(volatility={volatility_pct:.4f} < threshold={min_volatility_threshold}). "
+                        f"Market in consolidation/chop mode - avoiding entry."
+                    )
+                    logger.warning(f"🚫 {volatility_blocked_reason}")
+                    
+                    # Convert to HOLD
+                    valid_dec.action = "HOLD"
+                    valid_dec.leverage = 0
+                    valid_dec.size_pct = 0
+                    
+                    # Add to blocked_by
+                    current_blocked = list(valid_dec.blocked_by or [])
+                    if "LOW_VOLATILITY" not in current_blocked:
+                        current_blocked.append("LOW_VOLATILITY")
+                    valid_dec.blocked_by = current_blocked
+                    
+                    # Add to rationale
+                    valid_dec.rationale = f"{volatility_blocked_reason} Original: {valid_dec.rationale}"
+                
                 valid_decisions.append(valid_dec)
                 
-                # Salva la decisione per la dashboard
+                # Salva la decisione per la dashboard (including FASE 2 metrics)
                 save_ai_decision({
                     'symbol': valid_dec.symbol,
                     'action': valid_dec.action,
@@ -933,7 +995,12 @@ Evolved params (guidance):
                     'source': 'master_ai',
                     'setup_confirmations': valid_dec.setup_confirmations or [],
                     'blocked_by': valid_dec.blocked_by or [],
-                    'direction_considered': valid_dec.direction_considered or 'NONE'
+                    'direction_considered': valid_dec.direction_considered or 'NONE',
+                    # FASE 2 metrics
+                    'regime': fase2_metrics.get('regime', 'UNKNOWN'),
+                    'trend_strength': fase2_metrics.get('trend_strength', 0),
+                    'volatility_pct': fase2_metrics.get('volatility_pct', 0),
+                    'adx': fase2_metrics.get('adx', 0)
                 })
             except Exception as e: 
                 logger.warning(f"Invalid decision: {e}")
