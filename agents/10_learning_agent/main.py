@@ -5,7 +5,7 @@ import asyncio
 from datetime import datetime, timedelta
 from typing import Dict, List, Any, Optional
 from fastapi import FastAPI
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from openai import OpenAI
 
 logging.basicConfig(level=logging.INFO)
@@ -26,6 +26,7 @@ EVOLUTION_LOG_FILE = f"{DATA_DIR}/evolution_log.json"
 STRATEGY_ARCHIVE_DIR = f"{DATA_DIR}/strategy_archive"
 API_COSTS_FILE = f"{DATA_DIR}/api_costs.json"
 
+EVENTS_LOG_FILE = os.getenv("EVENTS_LOG_FILE", f"{DATA_DIR}/events_log.json")
 # Default parameters
 DEFAULT_PARAMS = {
     "rsi_overbought": 70,
@@ -89,6 +90,24 @@ class TradeRecord(BaseModel):
     size_pct: float
     duration_minutes: Optional[int] = None
     market_conditions: Dict[str, Any] = {}
+
+class EventRecord(BaseModel):
+    """Generic event record coming from other services (e.g. position manager).
+
+    Backward-compatible with legacy payloads:
+    - accepts extra keys
+    - timestamp can be omitted (server will fill it)
+    """
+    model_config = ConfigDict(extra="allow")
+
+    timestamp: Optional[str] = None
+    event_type: str
+    symbol: str
+    side: Optional[str] = None
+    reason: Optional[str] = None
+    data: Dict[str, Any] = {}
+
+
 
 
 def ensure_directories():
@@ -514,6 +533,54 @@ async def record_trade(trade: TradeRecord):
     except Exception as e:
         logger.error(f"Error recording trade: {e}")
         return {"status": "error", "message": str(e)}
+
+
+@app.post("/record_event")
+async def record_event(event: EventRecord):
+    """Record a generic event for later analysis/debugging (accepts legacy payloads)."""
+    try:
+        ensure_directories()
+
+        # Normalize: fill timestamp if missing
+        if not event.timestamp:
+            event.timestamp = datetime.utcnow().isoformat()
+
+        # Move unknown extra fields into data (legacy compatibility)
+        raw = event.model_dump()
+        known = {"timestamp", "event_type", "symbol", "side", "reason", "data"}
+        extra = {k: v for k, v in raw.items() if k not in known}
+        if extra:
+            raw["data"] = {**(raw.get("data") or {}), **extra}
+            for k in extra.keys():
+                raw.pop(k, None)
+
+        events = load_json_file(EVENTS_LOG_FILE, [])
+        if not isinstance(events, list):
+            events = []
+
+        events.append(raw)
+
+        # Keep only last 2000 events to avoid unlimited growth
+        events = events[-2000:]
+
+        save_json_file(EVENTS_LOG_FILE, events)
+
+        logger.info(f"📌 Recorded event: {raw.get('event_type')} {raw.get('symbol')} side={raw.get('side')}")
+        return {"status": "success", "message": "Event recorded"}
+    except Exception as e:
+        logger.error(f"Error recording event: {e}")
+        return {"status": "error", "message": str(e)}
+
+
+@app.get("/events_log")
+
+async def get_events_log(limit: int = 100):
+    """Get last N events (debug endpoint)."""
+    events = load_json_file(EVENTS_LOG_FILE, [])
+    if not isinstance(events, list):
+        events = []
+    limit = max(1, min(int(limit), 2000))
+    return {"events": events[-limit:]}
 
 
 @app.post("/trigger_evolution")

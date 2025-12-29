@@ -12,7 +12,6 @@ from fastapi import FastAPI
 from pydantic import BaseModel
 from threading import Thread, Lock
 import sys
-sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 from shared.trading_state import get_trading_state, OrderIntent, OrderStatus, PositionMetadata, Cooldown
 app = FastAPI()
 # =========================================================
@@ -179,13 +178,13 @@ def normalize_position_side(side_raw: str) -> Optional[str]:
     if s in ("short", "sell"):
         return "short"
     return None
-def side_to_order_side(direction: str) -> str:
+def side_to_order_side(side: str) -> str:
     """
     'long' -> 'buy'
     'short' -> 'sell'
     """
-    return "buy" if direction == "long" else "sell"
-def direction_to_position_idx(direction: str) -> int:
+    return "buy" if side == "long" else "sell"
+def side_to_position_idx(side: str) -> int:
     """
     Bybit Hedge Mode:
       long  -> positionIdx 1
@@ -195,7 +194,7 @@ def direction_to_position_idx(direction: str) -> int:
     """
     if not HEDGE_MODE:
         return 0
-    return 1 if direction == "long" else 2
+    return 1 if side == "long" else 2
 def get_position_idx_from_position(p: dict) -> int:
     """
     Se Bybit/CCXT riporta positionIdx in info, usalo.
@@ -208,7 +207,7 @@ def get_position_idx_from_position(p: dict) -> int:
         return idx_f
     side_dir = normalize_position_side(p.get("side", ""))
     if side_dir:
-        return direction_to_position_idx(side_dir)
+        return side_to_position_idx(side_dir)
     return 0
 # =========================================================
 # JSON MEMORY (thread-safe)
@@ -368,7 +367,15 @@ def check_time_based_exits():
         for pos_metadata in expired_positions:
             symbol = pos_metadata.symbol
             side = pos_metadata.side
-            time_in_trade = pos_metadata.time_in_trade_seconds()
+            if hasattr(pos_metadata, "time_in_trade_seconds") and callable(getattr(pos_metadata, "time_in_trade_seconds")):
+                time_in_trade = int(pos_metadata.time_in_trade_seconds())
+            else:
+                # Backward compatible: compute from opened_at
+                try:
+                    opened = datetime.fromisoformat(pos_metadata.opened_at)
+                    time_in_trade = int((datetime.utcnow() - opened).total_seconds())
+                except Exception:
+                    time_in_trade = 0
             limit_sec = pos_metadata.time_in_trade_limit_sec
             
             print(f"⏰ TIME-BASED EXIT CHECK: {symbol} {side} - in trade for {time_in_trade}s (limit: {limit_sec}s)")
@@ -410,7 +417,7 @@ def check_time_based_exits():
                             json={
                                 "event_type": "time_exit_extended",
                                 "symbol": symbol,
-                                "direction": side,
+                                "side": side,
                                 "time_in_trade_sec": time_in_trade,
                                 "original_limit_sec": limit_sec,
                                 "new_limit_sec": new_limit,
@@ -444,7 +451,7 @@ def check_time_based_exits():
                         json={
                             "event_type": "time_based_exit",
                             "symbol": symbol,
-                            "direction": side,
+                            "side": side,
                             "time_in_trade_sec": time_in_trade,
                             "limit_sec": limit_sec,
                             "exit_reason": exit_reason,
@@ -837,7 +844,7 @@ def request_reverse_analysis(symbol: str, position_data: dict) -> Optional[dict]
 # =========================================================
 # TRADE LOGGING TO EQUITY HISTORY
 # =========================================================
-EQUITY_HISTORY_FILE = os.getenv("EQUITY_HISTORY_FILE", "dashboard/data/equity_history.json")
+EQUITY_HISTORY_FILE = os.getenv("EQUITY_HISTORY_FILE", "/data/equity_history.json")
 
 def log_trade_to_equity_history(
     symbol: str,
@@ -857,6 +864,7 @@ def log_trade_to_equity_history(
     and analytics. Each trade record includes entry/exit prices, PnL metrics, and metadata.
     """
     try:
+# removed debug print
         ensure_parent_dir(EQUITY_HISTORY_FILE)
         
         # Load existing equity history
@@ -902,6 +910,7 @@ def log_trade_to_equity_history(
 # CLOSE / REVERSE EXECUTION
 # =========================================================
 def execute_close_position(symbol: str, exit_reason: str = "manual") -> bool:
+# removed debug print# removed debug print# removed debug print
     if not exchange:
         return False
     try:
@@ -930,6 +939,7 @@ def execute_close_position(symbol: str, exit_reason: str = "manual") -> bool:
         size = to_float(position.get("contracts"), 0.0)
         close_side = "sell" if side_dir == "long" else "buy"
         print(f"🔒 Chiudo posizione {sym_ccxt}: {side_dir} size={size} idx={position_idx}")
+# removed debug print
         params = {"category": "linear", "reduceOnly": True}
         if HEDGE_MODE:
             params["positionIdx"] = position_idx
@@ -973,12 +983,13 @@ def execute_close_position(symbol: str, exit_reason: str = "manual") -> bool:
                 cooldown_sec = COOLDOWN_MINUTES * 60
             
             # Add cooldown to trading_state
+            # DEBUG (removed): broken print caused SyntaxError
             cooldown = Cooldown(
                 symbol=sym_id,
                 side=side_dir,
-                closed_at=datetime.now().isoformat(),
-                reason="Position closed",
-                cooldown_sec=cooldown_sec
+                closed_at=datetime.utcnow().isoformat(),
+                reason="position_closed",
+                cooldown_sec=int(cooldown_sec),
             )
             trading_state.add_cooldown(cooldown)
             
@@ -995,9 +1006,9 @@ def execute_close_position(symbol: str, exit_reason: str = "manual") -> bool:
             try:
                 ensure_parent_dir(COOLDOWN_FILE)
                 cooldowns = load_json(COOLDOWN_FILE, default={})
-                direction_key = f"{sym_id}_{side_dir}"
+                side_key = f"{sym_id}_{side_dir}"
                 now_ts = time.time()
-                cooldowns[direction_key] = now_ts
+                cooldowns[side_key] = now_ts
                 cooldowns[sym_id] = now_ts
                 save_json(COOLDOWN_FILE, cooldowns)
             except Exception as e2:
@@ -1050,7 +1061,7 @@ def execute_reverse(symbol: str, current_side_raw: str, recovery_size_pct: float
         sl_pct = DEFAULT_INITIAL_SL_PCT
         sl_price = price * (1 - sl_pct) if new_dir == "long" else price * (1 + sl_pct)
         sl_str = exchange.price_to_precision(sym_ccxt, sl_price)
-        pos_idx = direction_to_position_idx(new_dir)
+        pos_idx = side_to_position_idx(new_dir)
         print(
             f"🔄 REVERSE {sym_ccxt}: {current_dir} -> {new_dir}, "
             f"size={recovery_size_pct*100:.1f}%, qty={final_qty}, idx={pos_idx}"
@@ -1089,14 +1100,14 @@ def check_recent_closes_and_save_cooldown():
                 continue
             symbol_raw = (item.get("symbol") or "").upper()  # es: BTCUSDT
             side = (item.get("side") or "").lower()          # buy/sell
-            direction = "long" if side == "buy" else "short"
-            direction_key = f"{symbol_raw}_{direction}"
-            existing_time = to_float(cooldowns.get(direction_key), 0.0)
+            side = "long" if side == "buy" else "short"
+            side_key = f"{symbol_raw}_{side}"
+            existing_time = to_float(cooldowns.get(side_key), 0.0)
             if close_time_sec > existing_time:
-                cooldowns[direction_key] = close_time_sec
+                cooldowns[side_key] = close_time_sec
                 cooldowns[symbol_raw] = close_time_sec
                 changed = True
-                print(f"💾 Cooldown auto-salvato per {direction_key} (chiusura Bybit)")
+                print(f"💾 Cooldown auto-salvato per {side_key} (chiusura Bybit)")
                 # learning record
                 try:
                     entry_price = to_float(item.get("avgEntryPrice"), 0.0)
@@ -1106,7 +1117,7 @@ def check_recent_closes_and_save_cooldown():
                     duration_minutes = int((close_time_ms - created_time_ms) / 1000 / 60)
                     record_trade_for_learning(
                         symbol=symbol_raw,
-                        side_raw=direction,
+                        side_raw=side,
                         entry_price=entry_price,
                         exit_price=exit_price,
                         leverage=leverage,
@@ -1472,9 +1483,9 @@ def open_position(order: OrderRequest):
                             "intent_id": intent_id
                         }
                     else:
-                        # Opposite direction requested
+                        # Opposite side requested
                         if not HEDGE_MODE:
-                            # In One-Way mode, cannot have opposite direction - must close first
+                            # In One-Way mode, cannot have opposite side - must close first
                             print(f"⚠️ ONE-WAY MODE: Cannot open {requested_dir} while {existing_dir} position exists on {sym_ccxt}")
                             trading_state.update_intent_status(intent_id, OrderStatus.CANCELLED, 
                                                               error_message="One-Way mode: close existing position first")
@@ -1536,7 +1547,7 @@ def open_position(order: OrderRequest):
         if order.tp_pct and float(order.tp_pct) > 0:
             tp_price = price * (1 + order.tp_pct) if requested_dir == "long" else price * (1 - order.tp_pct)
             tp_str = exchange.price_to_precision(sym_ccxt, tp_price)
-        pos_idx = direction_to_position_idx(requested_dir)
+        pos_idx = side_to_position_idx(requested_dir)
         # Log scalping parameters
         scalping_info = ""
         if order.time_in_trade_limit_sec:
@@ -1579,7 +1590,7 @@ def open_position(order: OrderRequest):
             "id": exchange_order_id,
             "intent_id": intent_id,
             "symbol": sym_id,
-            "direction": requested_dir
+            "side": requested_dir
         }
     except Exception as e:
         print(f"❌ Order Error: {e}")
