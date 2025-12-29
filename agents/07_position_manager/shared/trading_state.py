@@ -97,6 +97,7 @@ class Cooldown:
     def is_expired(self) -> bool:
         return datetime.now() > datetime.fromisoformat(self.expires_at)
 
+
 class TradingState: 
     _instance = None
     _lock = threading.Lock()
@@ -116,14 +117,47 @@ class TradingState:
         self._state = self._load_state()
         self._initialized = True
 
+    def _default_state(self) -> dict:
+        """Default/required schema for the trading state file."""
+        return {
+            "version": "1.0.0",
+            "last_updated": datetime.utcnow().isoformat(),
+            "intents": {},
+            "positions": {},
+            "cooldowns": [],
+            "trailing_stops": {}
+        }
+
+    def _normalize_state(self, state: Any) -> dict:
+        """Backward-compatible normalization of the raw JSON state."""
+        defaults = self._default_state()
+        if not isinstance(state, dict):
+            return defaults
+
+        for k, v in defaults.items():
+            if k not in state:
+                state[k] = v
+
+        if not isinstance(state.get("intents"), dict):
+            state["intents"] = {}
+        if not isinstance(state.get("positions"), dict):
+            state["positions"] = {}
+        if not isinstance(state.get("trailing_stops"), dict):
+            state["trailing_stops"] = {}
+        if not isinstance(state.get("cooldowns"), list):
+            state["cooldowns"] = []
+
+        return state
+
+
     def _load_state(self) -> dict:
         try: 
             if os.path.exists(TRADING_STATE_FILE):
                 with open(TRADING_STATE_FILE, 'r') as f:
-                    return json.load(f)
+                    return self._normalize_state(json.load(f))
         except Exception as e:
             print(f"⚠️ Error loading trading state: {e}")
-        return {"intents": {}, "positions": {}, "cooldowns": [], "trailing_stops": {}}
+        return self._default_state()
 
     def _save_state(self):
         with self._file_lock:

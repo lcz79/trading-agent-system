@@ -61,6 +61,7 @@ services:
       REVERSE_THRESHOLD: "-0.03"          # -6% ROI lev
       HARD_STOP_THRESHOLD: "-0.05"        # -10% ROI lev
       TRAILING_ACTIVATION_PCT: "0.005"    # +0.5% per attivare trailing   
+      EQUITY_HISTORY_FILE: "/data/equity_history.json"
     build: ./agents/07_position_manager
     container_name: 07_position_manager
     ports:

@@ -2,6 +2,9 @@ FROM python:3.10-slim
 
 WORKDIR /app
 
+# Force IPv4 for apt (fixes exit code 100 on some hosts with flaky IPv6)
+RUN printf 'Acquire::ForceIPv4 "true";\n' > /etc/apt/apt.conf.d/99force-ipv4
+
 # Build dependencies for ccxt/pandas/numpy
 RUN apt-get update && apt-get install -y \
     build-essential \
