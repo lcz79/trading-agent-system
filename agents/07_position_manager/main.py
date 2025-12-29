@@ -367,11 +367,11 @@ def check_time_based_exits():
         
         for pos_metadata in expired_positions:
             symbol = pos_metadata.symbol
-            direction = pos_metadata.direction
+            side = pos_metadata.side
             time_in_trade = pos_metadata.time_in_trade_seconds()
             limit_sec = pos_metadata.time_in_trade_limit_sec
             
-            print(f"⏰ TIME-BASED EXIT CHECK: {symbol} {direction} - in trade for {time_in_trade}s (limit: {limit_sec}s)")
+            print(f"⏰ TIME-BASED EXIT CHECK: {symbol} {side} - in trade for {time_in_trade}s (limit: {limit_sec}s)")
             
             # FASE 2: Check ADX to determine if we should extend
             should_extend = False
@@ -410,7 +410,7 @@ def check_time_based_exits():
                             json={
                                 "event_type": "time_exit_extended",
                                 "symbol": symbol,
-                                "direction": direction,
+                                "direction": side,
                                 "time_in_trade_sec": time_in_trade,
                                 "original_limit_sec": limit_sec,
                                 "new_limit_sec": new_limit,
@@ -436,7 +436,7 @@ def check_time_based_exits():
             success = execute_close_position(symbol, exit_reason=exit_reason)
             
             if success:
-                print(f"✅ Time-based exit executed for {symbol} {direction}")
+                print(f"✅ Time-based exit executed for {symbol} {side}")
                 # Record this to learning agent with specific reason
                 try:
                     requests.post(
@@ -444,7 +444,7 @@ def check_time_based_exits():
                         json={
                             "event_type": "time_based_exit",
                             "symbol": symbol,
-                            "direction": direction,
+                            "direction": side,
                             "time_in_trade_sec": time_in_trade,
                             "limit_sec": limit_sec,
                             "exit_reason": exit_reason,
@@ -456,7 +456,7 @@ def check_time_based_exits():
                 except Exception as e:
                     print(f"⚠️ Failed to record time-based exit to learning agent: {e}")
             else:
-                print(f"❌ Failed to execute time-based exit for {symbol} {direction}")
+                print(f"❌ Failed to execute time-based exit for {symbol} {side}")
                 
     except Exception as e:
         print(f"⚠️ Error in check_time_based_exits: {e}")
@@ -835,6 +835,70 @@ def request_reverse_analysis(symbol: str, position_data: dict) -> Optional[dict]
         print(f"⚠️ Reverse analysis error: {e}")
         return None
 # =========================================================
+# TRADE LOGGING TO EQUITY HISTORY
+# =========================================================
+EQUITY_HISTORY_FILE = os.getenv("EQUITY_HISTORY_FILE", "dashboard/data/equity_history.json")
+
+def log_trade_to_equity_history(
+    symbol: str,
+    side: str,
+    entry_price: float,
+    exit_price: float,
+    pnl_pct: float,
+    pnl_dollars: float,
+    leverage: float,
+    size: float,
+    exit_reason: str = "manual"
+):
+    """
+    Log closed trade details to dashboard/data/equity_history.json
+    
+    This function appends trade data to the equity history file for dashboard visualization
+    and analytics. Each trade record includes entry/exit prices, PnL metrics, and metadata.
+    """
+    try:
+        ensure_parent_dir(EQUITY_HISTORY_FILE)
+        
+        # Load existing equity history
+        equity_data = load_json(EQUITY_HISTORY_FILE, default={"history": []})
+        
+        # Ensure it has the correct structure
+        if not isinstance(equity_data, dict):
+            equity_data = {"history": []}
+        if "history" not in equity_data:
+            equity_data["history"] = []
+        
+        # Create trade record
+        trade_record = {
+            "timestamp": datetime.now().isoformat(),
+            "symbol": symbol,
+            "side": side,
+            "entry_price": entry_price,
+            "exit_price": exit_price,
+            "pnl_pct": round(pnl_pct, 2),
+            "pnl_dollars": round(pnl_dollars, 2),
+            "leverage": leverage,
+            "size": size,
+            "exit_reason": exit_reason,
+            "type": "trade"  # Mark as trade entry vs equity snapshot
+        }
+        
+        # Append trade record to history
+        equity_data["history"].append(trade_record)
+        
+        # Keep last 1000 records to prevent file from growing too large
+        if len(equity_data["history"]) > 1000:
+            equity_data["history"] = equity_data["history"][-1000:]
+        
+        # Save updated equity history
+        save_json(EQUITY_HISTORY_FILE, equity_data)
+        
+        print(f"💰 Trade logged to equity_history.json: {symbol} {side} PnL={pnl_pct:.2f}%")
+        
+    except Exception as e:
+        print(f"⚠️ Failed to log trade to equity_history.json: {e}")
+
+# =========================================================
 # CLOSE / REVERSE EXECUTION
 # =========================================================
 def execute_close_position(symbol: str, exit_reason: str = "manual") -> bool:
@@ -870,6 +934,23 @@ def execute_close_position(symbol: str, exit_reason: str = "manual") -> bool:
         if HEDGE_MODE:
             params["positionIdx"] = position_idx
         exchange.create_order(sym_ccxt, "market", close_side, size, params=params)
+        
+        # Calculate PnL in dollars (unrealized PnL from position)
+        pnl_dollars = to_float(position.get("unrealizedPnl"), 0.0)
+        
+        # Log trade to equity history
+        log_trade_to_equity_history(
+            symbol=sym_id,
+            side=side_dir,
+            entry_price=entry_price,
+            exit_price=mark_price,
+            pnl_pct=pnl_pct,
+            pnl_dollars=pnl_dollars,
+            leverage=leverage,
+            size=size,
+            exit_reason=exit_reason
+        )
+        
         record_trade_for_learning(
             symbol=sym_id,
             side_raw=side_dir,
@@ -894,7 +975,7 @@ def execute_close_position(symbol: str, exit_reason: str = "manual") -> bool:
             # Add cooldown to trading_state
             cooldown = Cooldown(
                 symbol=sym_id,
-                direction=side_dir,
+                side=side_dir,
                 closed_at=datetime.now().isoformat(),
                 reason="Position closed",
                 cooldown_sec=cooldown_sec
