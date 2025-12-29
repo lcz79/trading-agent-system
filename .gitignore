@@ -17,7 +17,7 @@ data/
 backup_snapshot/
 
 # Local config overrides
-docker-compose.override. yml
+docker-compose.override.yml
 
 # Backtests (local experiments)
 backtests/
