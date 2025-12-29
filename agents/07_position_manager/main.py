@@ -868,9 +868,6 @@ def log_trade_to_equity_history(
         if "history" not in equity_data:
             equity_data["history"] = []
         
-        # Calculate profit/loss percentage (leveraged)
-        profit_loss_pct = pnl_pct  # Already calculated with leverage
-        
         # Create trade record
         trade_record = {
             "timestamp": datetime.now().isoformat(),
@@ -883,7 +880,6 @@ def log_trade_to_equity_history(
             "leverage": leverage,
             "size": size,
             "exit_reason": exit_reason,
-            "profit_loss_pct": round(profit_loss_pct, 2),
             "type": "trade"  # Mark as trade entry vs equity snapshot
         }
         

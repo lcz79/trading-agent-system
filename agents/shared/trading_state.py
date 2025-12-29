@@ -2,7 +2,7 @@
 Unified Trading State Management
 
 This module provides a single source of truth for all trading state including:
-- Cooldowns (per symbol+direction)
+- Cooldowns (per symbol+side)
 - Order intents and executions (idempotency)
 - Position metadata
 - Trailing stop states
@@ -123,7 +123,7 @@ class TradingState:
     
     This class provides thread-safe access to all trading state:
     - Order intents (for idempotency)
-    - Cooldowns (per symbol+direction)
+    - Cooldowns (per symbol+side)
     - Position metadata
     - Trailing stop states
     """
@@ -262,10 +262,10 @@ class TradingState:
         
         return active
     
-    def is_in_cooldown(self, symbol: str, direction: str) -> bool:
-        """Check if a symbol+direction is currently in cooldown"""
+    def is_in_cooldown(self, symbol: str, side: str) -> bool:
+        """Check if a symbol+side is currently in cooldown"""
         for cd in self.get_active_cooldowns():
-            if cd.symbol == symbol and cd.side.lower() == direction.lower():
+            if cd.symbol == symbol and cd.side.lower() == side.lower():
                 return True
         return False
     
@@ -295,19 +295,19 @@ class TradingState:
         self._save_raw_state(state)
         print(f"📊 Position metadata added: {key}")
     
-    def get_position(self, symbol: str, direction: str) -> Optional[PositionMetadata]:
+    def get_position(self, symbol: str, side: str) -> Optional[PositionMetadata]:
         """Get position metadata"""
         state = self._load_raw_state()
-        key = f"{symbol}_{direction}"
+        key = f"{symbol}_{side}"
         pos_data = state["position_metadata"].get(key)
         if pos_data:
             return PositionMetadata(**pos_data)
         return None
     
-    def remove_position(self, symbol: str, direction: str):
+    def remove_position(self, symbol: str, side: str):
         """Remove position metadata (called on close)"""
         state = self._load_raw_state()
-        key = f"{symbol}_{direction}"
+        key = f"{symbol}_{side}"
         if key in state["position_metadata"]:
             del state["position_metadata"][key]
             self._save_raw_state(state)
@@ -338,19 +338,19 @@ class TradingState:
         state["trailing_stops"][key] = asdict(trailing_stop)
         self._save_raw_state(state)
     
-    def get_trailing_stop(self, symbol: str, direction: str) -> Optional[TrailingStopState]:
+    def get_trailing_stop(self, symbol: str, side: str) -> Optional[TrailingStopState]:
         """Get trailing stop state"""
         state = self._load_raw_state()
-        key = f"{symbol}_{direction}"
+        key = f"{symbol}_{side}"
         ts_data = state["trailing_stops"].get(key)
         if ts_data:
             return TrailingStopState(**ts_data)
         return None
     
-    def remove_trailing_stop(self, symbol: str, direction: str):
+    def remove_trailing_stop(self, symbol: str, side: str):
         """Remove trailing stop state (called on close)"""
         state = self._load_raw_state()
-        key = f"{symbol}_{direction}"
+        key = f"{symbol}_{side}"
         if key in state["trailing_stops"]:
             del state["trailing_stops"][key]
             self._save_raw_state(state)

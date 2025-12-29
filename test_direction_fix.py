@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """
-Test to verify that the .direction attribute fix works correctly.
+Test to verify the .direction attribute fix and PnL logging functionality.
 This test ensures that PositionMetadata, Cooldown, and TrailingStopState
-all use .side attribute instead of .direction.
+all use .side attribute instead of .direction, and that the PnL logging
+function is correctly implemented.
 """
 import sys
 import os
