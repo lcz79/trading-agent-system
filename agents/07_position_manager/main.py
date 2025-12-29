@@ -596,7 +596,7 @@ def get_trailing_distance_pct(symbol: str, mark_price: float, aggressive: bool =
             mult = float(ATR_MULTIPLIER_AGGRESSIVE)
         else:
             mult = float(ATR_MULTIPLIERS.get(base, ATR_MULTIPLIER_DEFAULT))
-        pct = min(0.08, max(0.01, (atr * mult) / price))
+        pct = min(0.08, max(0.005, (atr * mult) / price))
         mode = "AGGR" if aggressive else "NORM"
         print(f"📊 ATR {symbol}: {atr:.6f}, mult={mult} ({mode}), trailing={pct*100:.2f}%")
         return pct
@@ -1480,7 +1480,7 @@ def open_position(order: OrderRequest):
         # Store position metadata for time-based exit
         position_metadata = PositionMetadata(
             symbol=sym_id,
-            direction=requested_dir,
+            side=requested_dir,
             opened_at=datetime.now().isoformat(),
             intent_id=intent_id,
             time_in_trade_limit_sec=order.time_in_trade_limit_sec,

@@ -24,6 +24,10 @@ CRITICAL_LOSS_PCT_LEV = float(os.getenv("CRITICAL_LOSS_PCT_LEV", "12.0"))  # Sog
 # Requires 2 consecutive cycles with CLOSE action to execute
 pending_critical_closes = {}
 
+# --- COOLDOWN AFTER CLOSE (prevent immediate re-entry) ---
+# Tracks last close time per symbol. Format: {symbol: datetime}
+last_close_times = {}
+COOLDOWN_AFTER_CLOSE_SEC = 300  # 5 minuti di cooldown dopo chiusura
 # --- AI PARAMS VALIDATION CONFIG (no silent clamping) ---
 # These are used for warnings only - Master AI should follow these ranges
 MIN_LEVERAGE = 3
@@ -401,6 +405,9 @@ async def analysis_cycle():
                                         )
                                         close_json = close_resp.json()
                                         print(f"        ✅ Close result: {close_json}")
+                                        # Registra cooldown per evitare re-entry immediato
+                                        last_close_times[symbol] = datetime.now()
+                                        print(f"        ⏳ Cooldown attivato per {symbol}: {COOLDOWN_AFTER_CLOSE_SEC}s")
 
                                         if close_json.get("status") not in ("executed", "no_position"):
                                             print(f"        ⚠️ Close returned status={close_json.get('status')}, retrying once...")
@@ -500,6 +507,18 @@ async def analysis_cycle():
         
         # 3. FILTER - Solo asset senza posizione aperta
         scan_list = [s for s in SYMBOLS if s not in active_symbols]
+        
+        # 3b. FILTER - Rimuovi asset in cooldown (recentemente chiusi)
+        now = datetime.now()
+        for sym in list(scan_list):
+            if sym in last_close_times: 
+                elapsed = (now - last_close_times[sym]).total_seconds()
+                if elapsed < COOLDOWN_AFTER_CLOSE_SEC:
+                    remaining = int(COOLDOWN_AFTER_CLOSE_SEC - elapsed)
+                    print(f"        ⏳ {sym} in cooldown:  {remaining}s rimanenti")
+                    scan_list.remove(sym)
+                else:
+                    del last_close_times[sym]  # Cooldown scaduto, rimuovi
         if not scan_list:
             print("        ⚠️ Nessun asset disponibile per scan")
             return

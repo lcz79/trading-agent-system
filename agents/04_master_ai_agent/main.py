@@ -51,15 +51,15 @@ TRADING_HISTORY_FILE = "/data/trading_history.json"
 # Possono essere sovrascritti da variabili d'ambiente se necessario
 LOSS_THRESHOLD_PCT = float(os.getenv("LOSS_THRESHOLD_PCT", "-5"))  # Soglia perdita trade
 MAX_RECENT_LOSSES = int(os.getenv("MAX_RECENT_LOSSES", "10"))  # Numero max perdite recenti
-MIN_CONFIRMATIONS_REQUIRED = 3  # Numero minimo di conferme per aprire una posizione
+MIN_CONFIRMATIONS_REQUIRED = 2  # Numero minimo di conferme per aprire una posizione
 CONFIDENCE_THRESHOLD_LOW = 50  # Soglia confidenza bassa per blocco automatico
 
 # Cooldown configuration
-COOLDOWN_MINUTES = 15
+COOLDOWN_MINUTES = 5
 
 # Crash Guard configuration - momentum filters to avoid knife catching
 CRASH_GUARD_5M_LONG_BLOCK_PCT = float(os.getenv("CRASH_GUARD_5M_LONG_BLOCK_PCT", "0.6"))  # Block LONG if return_5m <= -0.6%
-CRASH_GUARD_5M_SHORT_BLOCK_PCT = float(os.getenv("CRASH_GUARD_5M_SHORT_BLOCK_PCT", "0.6"))  # Block SHORT if return_5m >= +0.6%
+CRASH_GUARD_5M_SHORT_BLOCK_PCT = float(os.getenv("CRASH_GUARD_5M_SHORT_BLOCK_PCT", "1.5"))  # Block SHORT if return_5m >= +0.6%
 
 file_lock = Lock()
 
@@ -332,7 +332,7 @@ BLOCKER_REASONS = Literal[
     "MAX_POSITIONS",
     "COOLDOWN",
     "DRAWDOWN_GUARD",
-    "PATTERN_LOSING",
+    "",
     "CONFLICTING_SIGNALS",
     "LOW_CONFIDENCE",
     "CRASH_GUARD"
@@ -542,7 +542,7 @@ Il tuo obiettivo è MASSIMIZZARE I PROFITTI con strategie di SCALPING AGGRESSIVE
 - **MAX_POSITIONS**: Massimo numero posizioni raggiunto
 - **COOLDOWN**: Posizione chiusa di recente nella stessa direzione (evita revenge trading)
 - **DRAWDOWN_GUARD**: Sistema in drawdown eccessivo (< -10%)
-- **PATTERN_LOSING**: Pattern con storico di perdite ripetute
+- ****: Pattern con storico di perdite ripetute
 - **CONFLICTING_SIGNALS**: Segnali contrastanti tra indicatori (evita chop)
 - **LOW_CONFIDENCE**: Confidenza < 50%
 - **CRASH_GUARD**: Movimento violento contro la direzione (no knife catching)
@@ -590,6 +590,16 @@ Esempio CORRETTO per OPEN_SHORT con scalping:
 ## GESTIONE RISCHIO DINAMICA
 
 ## REGOLE RSI (ANTI-CONTRADDIZIONE)
+
+## BOOST CONFIDENCE SCALPING (REGOLA OBBLIGATORIA)
+- **RSI 15m > 80** → Confidence BASE per SHORT = 70% minimo (ipercomprato estremo = setup FORTE)
+- **RSI 15m < 25** → Confidence BASE per LONG = 70% minimo (ipervenduto estremo = setup FORTE)
+- **RSI 15m > 75** → Confidence BASE per SHORT = 60% minimo
+- **RSI 15m < 30** → Confidence BASE per LONG = 60% minimo
+- Il momentum contrario È NORMALE per mean-reversion, NON penalizzare la confidence!
+- IGNORA losing patterns storici - ogni trade è indipendente
+- Se RSI è estremo (>80 o <25), bastano 2 conferme per aprire
+
 - Mean-reversion (default per scalping):
   - Se direction_considered = "LONG": RSI basso (< 35) è a favore del LONG (possibile rimbalzo). RSI alto (> 65) è contro LONG.
   - Se direction_considered = "SHORT": RSI alto (> 65) è a favore dello SHORT (possibile ritracciamento). RSI basso (< 35) è contro SHORT.
@@ -633,7 +643,7 @@ Considera anche:
       "confirmations": ["lista conferme generali (backward compat)"],
       "risk_factors": ["lista rischi identificati (backward compat)"],
       "setup_confirmations": ["conferme specifiche per la direzione considerata"],
-      "blocked_by": ["INSUFFICIENT_MARGIN", "MAX_POSITIONS", "COOLDOWN", "DRAWDOWN_GUARD", "PATTERN_LOSING", "CONFLICTING_SIGNALS", "LOW_CONFIDENCE", "CRASH_GUARD"],
+      "blocked_by": ["INSUFFICIENT_MARGIN", "MAX_POSITIONS", "COOLDOWN", "DRAWDOWN_GUARD", "", "CONFLICTING_SIGNALS", "LOW_CONFIDENCE", "CRASH_GUARD"],
       "direction_considered": "LONG|SHORT|NONE",
       "tp_pct": 0.02,
       "sl_pct": 0.015,
@@ -693,13 +703,13 @@ async def decide_batch(payload: AnalysisPayload):
                 tf_15m = timeframes.get('15m', {})
                 
                 # Volatility filter (anti-chop): volatility = ATR / price
-                atr = tf_15m.get('atr', 0)
-                price = tf_15m.get('price', 0)
+                atr = tf_15m.get('atr') or 0
+                price = tf_15m.get('price') or 0
                 volatility_pct = (atr / price) if price > 0 else 0
                 
                 # Market regime detection: trend_strength = abs((EMA20 - EMA200) / EMA200)
-                ema_20 = tf_15m.get('ema_20', 0)
-                ema_200 = tf_15m.get('ema_200', 0)
+                ema_20 = tf_15m.get('ema_20') or 0
+                ema_200 = tf_15m.get('ema_200') or 0
                 trend_strength = abs((ema_20 - ema_200) / ema_200) if ema_200 > 0 else 0
                 
                 # Regime classification: TREND if trend_strength > 0.005, else RANGE
@@ -707,7 +717,7 @@ async def decide_batch(payload: AnalysisPayload):
                 regime = "TREND" if trend_strength > regime_threshold else "RANGE"
                 
                 # ADX for trend confirmation
-                adx = tf_15m.get('adx', 0)
+                adx = tf_15m.get('adx') or 0
                 
                 # Add FASE 2 metrics to technical data
                 fase2_metrics = {
