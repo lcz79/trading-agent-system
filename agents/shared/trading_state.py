@@ -62,7 +62,7 @@ class OrderIntent:
 class Cooldown:
     """Represents a cooldown after closing a position"""
     symbol: str
-    direction: str  # long or short
+    side: str  # long or short
     closed_at: str  # ISO timestamp
     reason: str
     cooldown_sec: int  # Duration in seconds
@@ -83,7 +83,7 @@ class Cooldown:
 class PositionMetadata:
     """Metadata for an open position"""
     symbol: str
-    direction: str  # long or short
+    side: str  # long or short
     opened_at: str  # ISO timestamp
     intent_id: str  # Link to order intent
     time_in_trade_limit_sec: Optional[int] = None
@@ -110,7 +110,7 @@ class PositionMetadata:
 class TrailingStopState:
     """State for trailing stop per position"""
     symbol: str
-    direction: str
+    side: str
     highest_roi: float  # Highest ROI reached
     current_sl_price: float  # Current stop loss price
     last_updated: str  # ISO timestamp
@@ -248,7 +248,7 @@ class TradingState:
         state["cooldowns"] = state["cooldowns"][-100:]
         
         self._save_raw_state(state)
-        print(f"💾 Cooldown added: {cooldown.symbol} {cooldown.direction}")
+        print(f"💾 Cooldown added: {cooldown.symbol} {cooldown.side}")
     
     def get_active_cooldowns(self) -> List[Cooldown]:
         """Get all currently active cooldowns"""
@@ -265,7 +265,7 @@ class TradingState:
     def is_in_cooldown(self, symbol: str, direction: str) -> bool:
         """Check if a symbol+direction is currently in cooldown"""
         for cd in self.get_active_cooldowns():
-            if cd.symbol == symbol and cd.direction.lower() == direction.lower():
+            if cd.symbol == symbol and cd.side.lower() == direction.lower():
                 return True
         return False
     
@@ -290,7 +290,7 @@ class TradingState:
     def add_position(self, position: PositionMetadata):
         """Add metadata for an open position"""
         state = self._load_raw_state()
-        key = f"{position.symbol}_{position.direction}"
+        key = f"{position.symbol}_{position.side}"
         state["position_metadata"][key] = asdict(position)
         self._save_raw_state(state)
         print(f"📊 Position metadata added: {key}")
@@ -334,7 +334,7 @@ class TradingState:
     def update_trailing_stop(self, trailing_stop: TrailingStopState):
         """Update trailing stop state for a position"""
         state = self._load_raw_state()
-        key = f"{trailing_stop.symbol}_{trailing_stop.direction}"
+        key = f"{trailing_stop.symbol}_{trailing_stop.side}"
         state["trailing_stops"][key] = asdict(trailing_stop)
         self._save_raw_state(state)
     
