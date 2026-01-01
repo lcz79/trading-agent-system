@@ -661,7 +661,399 @@ RICORDA:
 - Mantieni coerenza tra direction_considered, setup_confirmations e action
 - **SEMPRE** fornisci tp_pct, sl_pct, time_in_trade_limit_sec quando apri posizione
 - Rispetta SEMPRE i vincoli di crash guard e margin insufficiente
+
+## PRE_SCORE (base_confidence) — REGOLA DI COERENZA OBBLIGATORIA
+Nel contesto troverai, per ogni simbolo:
+market_data[SYMBOL].pre_score.LONG.base_confidence
+market_data[SYMBOL].pre_score.SHORT.base_confidence
+
+Questi valori rappresentano una stima quantitativa "prior" della qualità del setup (0–100).
+- Se il migliore tra LONG e SHORT è >= 68, devi prendere una decisione esplicita: OPEN nella direzione migliore OPPURE HOLD.
+- HOLD è ammesso solo se fornisci almeno 2 motivazioni specifiche basate sui dati (esempi: segnali multi-timeframe contrari, crash_guard risk, low volatility, cooldown, distanza S/R sfavorevole per la direzione proposta, regime chop con ADX molto basso, news/sentiment fortemente contrari).
+- Non usare HOLD per motivazioni generiche tipo "incertezza" o "setup non chiaro" se pre_score>=68 senza spiegazioni concrete.
+- Se scegli OPEN, la tua confidence deve essere coerente: non più di base_confidence + 10.
+
+
+## RANGE_SCORE — PLAYBOOK MEAN-REVERSION (RANGE)
+Nel contesto troverai anche:
+market_data[SYMBOL].range_score.LONG.base_confidence
+market_data[SYMBOL].range_score.SHORT.base_confidence
+
+Usa RANGE_SCORE solo per strategie mean-reversion in regime RANGE.
+- Puoi aprire un trade con playbook RANGE se range_score (nella direzione scelta) >= MIN_RANGE_SCORE.
+- Nel rationale devi indicare esplicitamente: "Playbook: RANGE" oppure "Playbook: TREND".
+
+
+## PLAYBOOK RANGE — PARAMETRI DI RISCHIO (LEVA + DYNAMIC SL)
+Quando scegli "Playbook: RANGE" (mean-reversion su 15m), i parametri TP/SL devono essere ragionati in termini di ROI sul margine (leva inclusa), non solo in % prezzo.
+
+Profili consigliati (scalping 15m):
+A) Majors (BTC/ETH)
+- ROI target tipico: +3% .. +6% (sul margine)
+- ROI rischio iniziale/worst-case: -2% .. -4% (sul margine)
+- time_in_trade_limit_sec: 600 .. 1800 (10–30 min)
+- trail_activation_roi: +1% .. +2% (attiva presto)
+
+B) Volatili (es. SOL / alts liquide)
+- ROI target tipico: +4% .. +8% (sul margine)
+- ROI rischio iniziale/worst-case: -3% .. -5% (sul margine)
+- time_in_trade_limit_sec: 900 .. 2100 (15–35 min)
+- trail_activation_roi: +1.5% .. +2.5%
+
+Conversione coerente con la leva:
+- tp_pct (su prezzo) ≈ ROI_target / leverage
+- sl_pct (su prezzo) ≈ ROI_risk / leverage
+
+Importante:
+- Non sovrascrivere o "bloccare" il sistema di stop loss dinamico già implementato: sl_pct è un riferimento iniziale/fallback, mentre la gestione dinamica/trailing può stringere o gestire l'uscita secondo le regole del sistema.
+
+
+Linee guida (scalping 15m, majors):
+- ROI target tipico: +3% .. +6% (sul margine)
+- ROI rischio iniziale/worst-case: -2% .. -4% (sul margine)
+- time_in_trade_limit_sec: 600 .. 1800 (10–30 min)
+- trail_activation_roi: +1% .. +2% (attiva presto)
+
+Conversione coerente con la leva:
+- tp_pct (su prezzo) ≈ ROI_target / leverage
+- sl_pct (su prezzo) ≈ ROI_risk / leverage
+
+Importante:
+- Non sovrascrivere o "bloccare" il sistema di stop loss dinamico già implementato: sl_pct è un riferimento iniziale/fallback, mentre la gestione dinamica/trailing può stringere o gestire l'uscita secondo le regole del sistema.
+
+
+
 """
+
+
+MIN_PRE_SCORE = int(os.getenv("MIN_PRE_SCORE", "68"))  # Minimum base confidence required to allow OPEN_LONG/OPEN_SHORT
+MIN_RANGE_SCORE = int(os.getenv("MIN_RANGE_SCORE", "70"))  # Minimum range score required to allow OPEN_LONG/OPEN_SHORT in RANGE playbook
+
+def _safe_float(x, default=0.0):
+    try:
+        if x is None:
+            return default
+        if isinstance(x, (int, float)):
+            return float(x)
+        if isinstance(x, str):
+            return float(x.strip())
+        return default
+    except Exception:
+        return default
+
+
+def _extract_numeric_levels_from_dict(d):
+    levels = []
+    if isinstance(d, dict):
+        for v in d.values():
+            try:
+                fv = float(v)
+                if fv > 0:
+                    levels.append(fv)
+            except Exception:
+                pass
+    return levels
+
+
+def _nearest_sr(price, levels):
+    if not price or price <= 0 or not levels:
+        return None, None
+    below = [x for x in levels if x <= price]
+    above = [x for x in levels if x >= price]
+    support = max(below) if below else None
+    resistance = min(above) if above else None
+    return support, resistance
+
+
+def _sr_bonus(direction, price, fib, gann):
+    levels = []
+    fib_levels = (fib or {}).get("fib_levels") or {}
+    gann_levels = (gann or {}).get("next_important_levels") or {}
+    levels += _extract_numeric_levels_from_dict(fib_levels)
+    levels += _extract_numeric_levels_from_dict(gann_levels)
+
+    support, resistance = _nearest_sr(price, levels)
+
+    def dist_pct(level):
+        if level is None or price <= 0:
+            return None
+        return abs(price - level) / price
+
+    support_dist = dist_pct(support)
+    resist_dist = dist_pct(resistance)
+
+    chosen = support_dist if direction == "LONG" else resist_dist
+
+    bonus = 0
+    if chosen is not None:
+        if chosen <= 0.0010:
+            bonus = 12
+        elif chosen <= 0.0025:
+            bonus = 8
+        elif chosen <= 0.0050:
+            bonus = 4
+
+    return bonus, {
+        "levels_count": len(levels),
+        "support": support,
+        "resistance": resistance,
+        "support_dist_pct": support_dist,
+        "resistance_dist_pct": resist_dist,
+        "chosen_dist_pct": chosen,
+        "bonus": bonus,
+    }
+
+
+def _compute_base_score(direction, tf_15m, fase2_metrics, fib, gann):
+    """
+    Tuning v2 (15m scalping, "pro" / low-bias):
+    - Trend/structure matters but doesn't dominate
+    - Needs strength (ADX) or a trigger (momentum/volume)
+    - Rewards location (S/R proximity) heavily
+    - Penalizes chop only when ADX is weak (to avoid bias against healthy ranges/compressions)
+    - Keeps RSI sanity small (avoid "overbought/oversold anchoring")
+    """
+    breakdown = {}
+    score = 0
+
+    price = _safe_float((tf_15m or {}).get("price"), 0.0)
+
+    trend = str((tf_15m or {}).get("trend") or "").lower()
+    rsi = _safe_float((tf_15m or {}).get("rsi"), 0.0)
+    ret15 = _safe_float((tf_15m or {}).get("return_15m"), 0.0)
+    adx = _safe_float((tf_15m or {}).get("adx"), 0.0)
+    macd_mom_raw = (tf_15m or {}).get("macd_momentum")
+    macd_state_raw = (tf_15m or {}).get("macd")
+    macd_mom = _safe_float(macd_mom_raw, 0.0)  # compat if numeric in future
+    vol_spike = bool((tf_15m or {}).get("volume_spike_15m"))
+    ema20 = _safe_float((tf_15m or {}).get("ema_20"), 0.0)
+    ema50 = _safe_float((tf_15m or {}).get("ema_50"), 0.0)
+    ema200 = _safe_float((tf_15m or {}).get("ema_200"), 0.0)
+
+    regime = str((fase2_metrics or {}).get("regime") or "").upper()
+    range_15m_pct = _safe_float((tf_15m or {}).get("range_15m_pct"), 0.0)
+
+    # A) Trend & structure (max 30)
+    trend_alignment = 0
+    ema_stacking = 0
+
+    if direction == "LONG":
+        trend_ok = (trend == "bullish") or (ema20 and ema200 and ema20 > ema200)
+        if trend_ok:
+            trend_alignment = 18
+        if ema20 and ema50 and ema200 and (ema20 > ema50 > ema200):
+            ema_stacking = 12
+    else:
+        trend_ok = (trend == "bearish") or (ema20 and ema200 and ema20 < ema200)
+        if trend_ok:
+            trend_alignment = 18
+        if ema20 and ema50 and ema200 and (ema20 < ema50 < ema200):
+            ema_stacking = 12
+
+    score += trend_alignment + ema_stacking
+    breakdown["trend_alignment"] = trend_alignment
+    breakdown["ema_stacking"] = ema_stacking
+
+    # B) Strength (ADX) (max 20)
+    adx_points = 0
+    if adx >= 25:
+        adx_points = 20
+    elif adx >= 18:
+        adx_points = 12
+    elif adx >= 14:
+        adx_points = 6
+
+    score += adx_points
+    breakdown["adx"] = adx_points
+    breakdown["adx_value"] = adx
+
+    # C) Trigger (momentum + volume) (max 25)
+    mom_points = 0
+    if direction == "LONG":
+        if ret15 > 0:
+            mom_points += 8
+        if macd_mom > 0:
+            mom_points += 10
+    else:
+        if ret15 < 0:
+            mom_points += 8
+        if macd_mom < 0:
+            mom_points += 10
+
+    vol_points = 7 if vol_spike else 0
+
+    score += mom_points + vol_points
+    breakdown["momentum"] = mom_points
+    breakdown["volume_spike_15m"] = vol_points
+    breakdown["return_15m"] = ret15
+    breakdown["macd_momentum"] = macd_mom
+    # MACD string signals (tech agent returns strings like NEGATIVE/POSITIVE and RISING/FALLING)
+    macd_sig_points = 0
+    mom_s = str(macd_mom_raw or "").upper()
+    state_s = str(macd_state_raw or "").upper()
+    if direction == "LONG":
+        if mom_s == "RISING":
+            macd_sig_points += 6
+        if state_s == "POSITIVE":
+            macd_sig_points += 4
+    else:
+        if mom_s == "FALLING":
+            macd_sig_points += 6
+        if state_s == "NEGATIVE":
+            macd_sig_points += 4
+    score += macd_sig_points
+    breakdown["macd_signal_points"] = macd_sig_points
+    breakdown["macd_state_raw"] = macd_state_raw
+    breakdown["macd_momentum_raw"] = macd_mom_raw
+
+    # D) Location (S/R proximity) (max 20)
+    _sr_points_raw, sr_details = _sr_bonus(direction, price, fib, gann)
+    chosen_dist = sr_details.get("chosen_dist_pct", None)
+
+    sr_points = 0
+    if isinstance(chosen_dist, (int, float)):
+        if chosen_dist <= 0.0010:
+            sr_points = 20
+        elif chosen_dist <= 0.0025:
+            sr_points = 14
+        elif chosen_dist <= 0.0050:
+            sr_points = 8
+        elif chosen_dist <= 0.0100:
+            sr_points = 4
+
+    score += sr_points
+    breakdown["sr_bonus"] = sr_points
+    breakdown["sr_details"] = sr_details
+
+    # E) Chop filter (penalty up to -20, only when ADX weak)
+    chop_pen = 0
+    if adx < 14:
+        chop_pen -= 10
+        if 0 < range_15m_pct < 0.10:
+            chop_pen -= 10
+
+    if regime == "RANGE" and adx < 18:
+        chop_pen -= 4
+
+    score += chop_pen
+    breakdown["chop_penalty"] = chop_pen
+    breakdown["regime"] = regime
+    breakdown["range_15m_pct"] = range_15m_pct
+
+    # F) RSI sanity (small, max ±12)
+    rsi_adj = 0
+    if direction == "LONG":
+        if rsi >= 72:
+            rsi_adj -= 12
+        elif rsi >= 65:
+            rsi_adj -= 6
+        elif 45 <= rsi <= 60:
+            rsi_adj += 4
+    else:
+        if rsi <= 28:
+            rsi_adj -= 12
+        elif rsi <= 35:
+            rsi_adj -= 6
+        elif 40 <= rsi <= 55:
+            rsi_adj += 4
+
+    score += rsi_adj
+    breakdown["rsi_adjust"] = rsi_adj
+    breakdown["rsi"] = rsi
+
+    score = max(0, min(100, int(round(score))))
+    breakdown["final_score"] = score
+    return score, breakdown
+
+
+
+def _compute_range_score(direction, tf_15m, fase2_metrics, fib, gann):
+    """
+    RANGE playbook score (15m mean reversion).
+    Purpose: allow trades in RANGE regime without lowering trend threshold.
+    """
+    breakdown = {}
+    score = 0
+
+    price = _safe_float((tf_15m or {}).get("price"), 0.0)
+    rsi = _safe_float((tf_15m or {}).get("rsi"), 0.0)
+    ret15 = _safe_float((tf_15m or {}).get("return_15m"), 0.0)
+    adx = _safe_float((tf_15m or {}).get("adx"), 0.0)
+
+    regime = str((fase2_metrics or {}).get("regime") or "").upper()
+    breakdown["regime"] = regime
+    breakdown["adx_value"] = adx
+    breakdown["rsi"] = rsi
+    breakdown["return_15m"] = ret15
+
+    # 1) Must be RANGE
+    if regime != "RANGE":
+        breakdown["regime_gate"] = 0
+        return 0, breakdown
+    breakdown["regime_gate"] = 20
+    score += 20
+
+    # 2) Tradable range ADX band (12..22 best)
+    adx_points = 0
+    if 12 <= adx <= 22:
+        adx_points = 20
+    elif 10 <= adx < 12 or 22 < adx <= 25:
+        adx_points = 10
+    else:
+        adx_points = 0
+    score += adx_points
+    breakdown["adx_band"] = adx_points
+
+    # 3) Location at S/R (very important)
+    _sr_points_raw, sr_details = _sr_bonus(direction, price, fib, gann)
+    chosen_dist = sr_details.get("chosen_dist_pct", None)
+
+    loc_points = 0
+    if isinstance(chosen_dist, (int, float)):
+        if chosen_dist <= 0.0010:
+            loc_points = 35
+        elif chosen_dist <= 0.0025:
+            loc_points = 25
+        elif chosen_dist <= 0.0050:
+            loc_points = 12
+        else:
+            loc_points = 0
+    score += loc_points
+    breakdown["location_points"] = loc_points
+    breakdown["sr_details"] = sr_details
+
+    # 4) RSI mean-reversion filter (moderate weight)
+    rsi_points = 0
+    if direction == "LONG":
+        if 40 <= rsi <= 55:
+            rsi_points = 15
+        elif 55 < rsi <= 62:
+            rsi_points = 8
+        elif rsi >= 70:
+            rsi_points = -10
+    else:
+        if 45 <= rsi <= 60:
+            rsi_points = 15
+        elif 38 <= rsi < 45:
+            rsi_points = 8
+        elif rsi <= 30:
+            rsi_points = -10
+    score += rsi_points
+    breakdown["rsi_points"] = rsi_points
+
+    # 5) Anti-chase: avoid entering after an extended move
+    chase_pen = 0
+    if direction == "LONG" and ret15 > 0.20:
+        chase_pen = -10
+    if direction == "SHORT" and ret15 < -0.20:
+        chase_pen = -10
+    score += chase_pen
+    breakdown["chase_penalty"] = chase_pen
+
+    score = max(0, min(100, int(round(score))))
+    breakdown["final_score"] = score
+    return score, breakdown
+
 
 @app.post("/decide_batch")
 async def decide_batch(payload: AnalysisPayload):
@@ -696,11 +1088,30 @@ async def decide_batch(payload: AnalysisPayload):
             for symbol, asset_data in payload.assets_data.items():
                 # Raccoglie dati da Fibonacci, Gann, News, Forecast
                 additional_data = await collect_full_analysis(symbol, http_client)
+                if os.getenv("DEBUG_TF_KEYS", "0") == "1":
+                    try:
+                        logger.info(f"[DEBUG] {symbol} additional_data keys: {sorted(list(additional_data.keys()))}")
+                        fib = additional_data.get("fibonacci") or {}
+                        gann = additional_data.get("gann") or {}
+                        logger.info(f"[DEBUG] {symbol} fibonacci keys: {sorted(list(fib.keys()))}")
+                        logger.info(f"[DEBUG] {symbol} fib_levels sample: {str(fib.get('fib_levels'))[:400]}")
+                        logger.info(f"[DEBUG] {symbol} gann next_important_levels sample: {str(gann.get('next_important_levels'))[:400]}")
+
+                        logger.info(f"[DEBUG] {symbol} gann keys: {sorted(list(gann.keys()))}")
+                    except Exception as e:
+                        logger.info(f"[DEBUG] {symbol} additional_data debug failed: {e}")
+
                 
                 # FASE 2: Compute volatility and regime metrics
                 tech_data = asset_data.get('tech', {})
                 timeframes = tech_data.get('timeframes', {})
                 tf_15m = timeframes.get('15m', {})
+
+                if os.getenv("DEBUG_TF_KEYS", "0") == "1":
+                    logger.info(f"[DEBUG] {symbol} tf_15m keys: {sorted(tf_15m.keys())}")
+                    logger.info(f"[DEBUG] {symbol} macd={tf_15m.get('macd')} macd_momentum={tf_15m.get('macd_momentum')}")
+
+
                 
                 # Volatility filter (anti-chop): volatility = ATR / price
                 atr = tf_15m.get('atr') or 0
@@ -739,6 +1150,30 @@ async def decide_batch(payload: AnalysisPayload):
                     "forecast": additional_data.get('forecast', {}),
                     "fase2_metrics": fase2_metrics
                 }
+                # Pre-score (deterministic) used as base_confidence and guardrail
+                tf_15m_local = asset_data.get('tech', {}).get('timeframes', {}).get('15m', {}) or {}
+                fib = additional_data.get('fibonacci', {}) or {}
+                gann = additional_data.get('gann', {}) or {}
+                long_score, long_breakdown = _compute_base_score('LONG', tf_15m_local, fase2_metrics, fib, gann)
+                short_score, short_breakdown = _compute_base_score('SHORT', tf_15m_local, fase2_metrics, fib, gann)
+                enriched_assets_data[symbol]['pre_score'] = {
+                    'LONG': {'base_confidence': long_score, 'breakdown': long_breakdown},
+                    'SHORT': {'base_confidence': short_score, 'breakdown': short_breakdown},
+                }
+                # Range-score (deterministic) used as alternative playbook guardrail
+                range_long_score, range_long_breakdown = _compute_range_score('LONG', tf_15m_local, fase2_metrics, fib, gann)
+                range_short_score, range_short_breakdown = _compute_range_score('SHORT', tf_15m_local, fase2_metrics, fib, gann)
+                enriched_assets_data[symbol]['range_score'] = {
+                    'LONG': {'base_confidence': range_long_score, 'breakdown': range_long_breakdown},
+                    'SHORT': {'base_confidence': range_short_score, 'breakdown': range_short_breakdown},
+                }
+                if os.getenv("DEBUG_TF_KEYS", "0") == "1":
+                    logger.info(f"[PRESCORE] {symbol} LONG={long_score} SHORT={short_score}")
+                    logger.info(f"[RANGE_SCORE] {symbol} LONG={range_long_score} SHORT={range_short_score}")
+
+                    logger.info(f"[PRESCORE_BREAKDOWN] {symbol} LONG={json.dumps(long_breakdown, default=str)[:800]}")
+                    logger.info(f"[PRESCORE_BREAKDOWN] {symbol} SHORT={json.dumps(short_breakdown, default=str)[:800]}")
+
         
         # 6. Costruisci prompt con TUTTO il contesto
         # Estrai informazioni dal payload (tutte da portfolio e global_data)
@@ -900,6 +1335,56 @@ Evolved params (guidance):
                         conf = min(conf, 75)
                     valid_dec.confidence = max(0, min(100, conf))
 
+                # PRE-SCORE + RANGE-SCORE GUARDRAIL:
+                # Allow OPEN only if either:
+                # - trend pre_score >= MIN_PRE_SCORE
+                # - range_score >= MIN_RANGE_SCORE
+                if valid_dec.action in ["OPEN_LONG", "OPEN_SHORT"]:
+                    ps = enriched_assets_data.get(valid_dec.symbol, {}).get('pre_score', {}) or {}
+                    rs = enriched_assets_data.get(valid_dec.symbol, {}).get('range_score', {}) or {}
+
+                    dir_key = 'LONG' if valid_dec.action == 'OPEN_LONG' else 'SHORT'
+
+                    base_conf = ps.get(dir_key, {}).get('base_confidence', None)
+                    range_conf = rs.get(dir_key, {}).get('base_confidence', None)
+
+                    base_conf_i = int(base_conf) if isinstance(base_conf, (int, float)) else None
+                    range_conf_i = int(range_conf) if isinstance(range_conf, (int, float)) else None
+
+                    passes_trend = (base_conf_i is not None and base_conf_i >= MIN_PRE_SCORE)
+                    passes_range = (range_conf_i is not None and range_conf_i >= MIN_RANGE_SCORE)
+
+                    if not (passes_trend or passes_range):
+                        current_blocked = list(valid_dec.blocked_by or [])
+                        if 'LOW_PRE_SCORE' not in current_blocked:
+                            current_blocked.append('LOW_PRE_SCORE')
+                        if 'LOW_RANGE_SCORE' not in current_blocked:
+                            current_blocked.append('LOW_RANGE_SCORE')
+                        valid_dec.blocked_by = current_blocked
+                        valid_dec.action = 'HOLD'
+                        valid_dec.leverage = 0
+                        valid_dec.size_pct = 0
+                        valid_dec.rationale = (
+                            f"Blocked: trend_base_conf={base_conf_i} (min={MIN_PRE_SCORE}), "
+                            f"range_base_conf={range_conf_i} (min={MIN_RANGE_SCORE}). "
+                            f"Original: {valid_dec.rationale}"
+                        )
+                    else:
+                        # Cap confidence to the best available score (+10)
+                        best = None
+                        if passes_trend:
+                            best = base_conf_i
+                        if passes_range and (best is None or (range_conf_i is not None and range_conf_i > best)):
+                            best = range_conf_i
+
+                        if best is not None:
+                            if valid_dec.confidence is None:
+                                valid_dec.confidence = best
+                            else:
+                                try:
+                                    valid_dec.confidence = min(int(valid_dec.confidence), best + 10)
+                                except Exception:
+                                    valid_dec.confidence = best
                 # HARD CONSTRAINT: blocca OPEN_LONG/OPEN_SHORT se margine insufficiente
                 if not can_open_new_positions and valid_dec.action in ["OPEN_LONG", "OPEN_SHORT"]:
                     logger.warning(
@@ -963,14 +1448,28 @@ Evolved params (guidance):
                 
                 # FASE 2: VOLATILITY FILTER (anti-chop)
                 # Block entry if volatility (ATR/price) is too low
-                min_volatility_threshold = float(os.getenv("MIN_VOLATILITY_PCT", "0.0025"))
+                # Volatility filter thresholds (trend vs range playbook)
+                min_volatility_trend = float(os.getenv("MIN_VOLATILITY_PCT_TREND", os.getenv("MIN_VOLATILITY_PCT", "0.0025")))
+                min_volatility_range = float(os.getenv("MIN_VOLATILITY_PCT_RANGE", "0.0010"))
                 fase2_metrics = enriched_assets_data.get(symbol, {}).get('fase2_metrics', {})
                 volatility_pct = fase2_metrics.get('volatility_pct', 0)
                 
-                if valid_dec.action in ["OPEN_LONG", "OPEN_SHORT"] and volatility_pct < min_volatility_threshold:
+                # Choose threshold based on whether RANGE playbook is eligible for this direction
+                selected_threshold = min_volatility_trend
+                try:
+                    rs = enriched_assets_data.get(valid_dec.symbol, {}).get("range_score", {}) or {}
+                    dir_key = "LONG" if valid_dec.action == "OPEN_LONG" else "SHORT"
+                    range_conf = rs.get(dir_key, {}).get("base_confidence", None)
+                    range_conf_i = int(range_conf) if isinstance(range_conf, (int, float)) else None
+                    if range_conf_i is not None and range_conf_i >= MIN_RANGE_SCORE:
+                        selected_threshold = min_volatility_range
+                except Exception:
+                    selected_threshold = min_volatility_trend
+
+                if valid_dec.action in ["OPEN_LONG", "OPEN_SHORT"] and volatility_pct < selected_threshold:
                     volatility_blocked_reason = (
                         f"VOLATILITY_FILTER: Blocked {valid_dec.action} due to low volatility "
-                        f"(volatility={volatility_pct:.4f} < threshold={min_volatility_threshold}). "
+                        f"(volatility={volatility_pct:.4f} < threshold={selected_threshold}). "
                         f"Market in consolidation/chop mode - avoiding entry."
                     )
                     logger.warning(f"🚫 {volatility_blocked_reason}")
