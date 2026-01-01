@@ -276,6 +276,14 @@ async def manage_cycle():
 async def analysis_cycle():
     async with httpx.AsyncClient(timeout=60) as c:
         learning_params = await fetch_learning_params(c)
+        # Manage existing positions (trailing, reverse, time-exit)
+                # Manage existing positions (trailing, reverse, time-exit)
+        try:
+            await c.post(f"{URLS['pos']}/manage_active_positions", timeout=60)
+        except Exception as e:
+            print(f"        ⚠️ manage_active_positions error: {e}")
+
+
         
         # 1. DATA COLLECTION
         portfolio = {}
@@ -600,8 +608,53 @@ async def analysis_cycle():
                     print(f"        🚫 HOLD on {sym}: {rationale}")
                     print(f"           Wallet: available={available_for_new:.2f} USDT (source: {available_source})")
                     continue
-
                 if action in ["OPEN_LONG", "OPEN_SHORT"]:
+                    # HARD GATE: do not trade if AI itself flagged blockers / low confidence
+                    confidence = float(d.get("confidence", 0) or 0)
+                    blocked_by = d.get("blocked_by") or []
+                    if blocked_by:
+                        print(f"        🧱 SKIP {action} on {sym}: blocked_by={blocked_by}")
+                        continue
+                    if confidence < 70:
+                        print(f"        🧱 SKIP {action} on {sym}: low confidence ({confidence} < 70)")
+                        continue                    # Always fetch open positions before opening (fail-closed).
+                    try:
+                        _rpos = await c.get(f"{URLS['pos']}/get_open_positions")
+                        open_positions = _rpos.json() or []
+                    except Exception as _e:
+                        print(f"        ⚠️ Cannot fetch open positions; skipping open to prevent churn: {_e}")
+                        continue
+
+                    # Guardrail: in one-way mode (HedgeMode False) do NOT open another position on the same symbol.
+                    desired_side = "long" if action == "OPEN_LONG" else "short"
+                    try:
+                        existing = None
+                        for p0 in (open_positions or []):
+                            if (p0.get('symbol') or '').upper() != sym.upper():
+                                continue
+                            qty = 0.0
+                            for k in ('contracts','size','positionAmt','qty'):
+                                try:
+                                    v = p0.get(k)
+                                    if v is None:
+                                        continue
+                                    qty = float(v)
+                                    break
+                                except Exception:
+                                    pass
+                            if abs(qty) > 0:
+                                existing = p0
+                                break
+                        if existing is not None and not HEDGE_MODE:
+                            ex_side = (existing.get('side') or '').lower()
+                            print(
+                                f"        🧯 SKIP {action} on {sym}: existing open position detected in one-way mode "
+                                f"(existing_side={ex_side or 'unknown'}). Preventing flip/churn."
+                            )
+                            continue
+                    except Exception as e:
+                        print(f"        ⚠️ Could not evaluate existing position for {sym}: {e}")
+
                     # Get AI-provided params with fallback to conservative defaults
                     leverage = d.get('leverage', MIN_LEVERAGE)
                     size_pct = d.get('size_pct', MIN_SIZE_PCT)
