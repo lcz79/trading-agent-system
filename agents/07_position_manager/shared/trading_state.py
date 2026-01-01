@@ -227,6 +227,29 @@ class TradingState:
                 expired.append(pos)
         return expired
 
+    def prune_positions(self, active_keys: set) -> List[str]:
+        """Remove positions from state that are not currently active on the exchange.
+
+        active_keys must contain entries like 'ETHUSDT_long' or 'ETHUSDT_short'.
+        Returns list of removed keys.
+        """
+        removed: List[str] = []
+        positions = self._state.get("positions", {})
+        if not isinstance(positions, dict):
+            return removed
+        for k in list(positions.keys()):
+            if k not in active_keys:
+                removed.append(k)
+                del positions[k]
+                # also prune trailing stop state for stale positions
+                ts = self._state.get("trailing_stops", {})
+                if isinstance(ts, dict) and k in ts:
+                    del ts[k]
+        if removed:
+            self._state["positions"] = positions
+            self._save_state()
+        return removed
+
     # --- Cooldown Management ---
     def add_cooldown(self, cooldown: Cooldown):
         self._state["cooldowns"].append(cooldown.to_dict())

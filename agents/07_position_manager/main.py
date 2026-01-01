@@ -38,7 +38,7 @@ TECHNICAL_ANALYZER_URL = os.getenv("TECHNICAL_ANALYZER_URL", "http://01_technica
 FALLBACK_TRAILING_PCT = float(os.getenv("FALLBACK_TRAILING_PCT", "0.025"))  # 2.5%
 DEFAULT_INITIAL_SL_PCT = float(os.getenv("DEFAULT_INITIAL_SL_PCT", "0.04"))  # 4%
 # --- BREAK-EVEN PROTECTION ---
-BREAKEVEN_ACTIVATION_PCT = float(os.getenv("BREAKEVEN_ACTIVATION_PCT", "0.02"))  # 2% ROI
+BREAKEVEN_ACTIVATION_PCT = float(os.getenv("BREAKEVEN_ACTIVATION_PCT", "0.006"))  # 0.6% ROI (leveraged)
 BREAKEVEN_MARGIN_PCT = float(os.getenv("BREAKEVEN_MARGIN_PCT", "0.001"))  # 0.1% margin
 # --- PARAMETRI AI REVIEW / REVERSE ---
 ENABLE_AI_REVIEW = os.getenv("ENABLE_AI_REVIEW", "true").lower() == "true"
@@ -302,6 +302,25 @@ def state_cleanup_loop():
     while True:
         try:
             trading_state = get_trading_state()
+            # Prune stale positions from local state (e.g. positions closed on exchange but left in trading_state.json)
+            try:
+                active_keys = set()
+                if exchange:
+                    live = exchange.fetch_positions(None, params={"category": "linear"})
+                    for p in live:
+                        contracts = to_float(p.get("contracts"), 0.0)
+                        if contracts <= 0:
+                            continue
+                        sym = p.get("symbol") or ""
+                        side = (p.get("side") or "").lower()
+                        if sym and side in ("long", "short"):
+                            active_keys.add(f"{sym}_{side}")
+                removed = trading_state.prune_positions(active_keys)
+                if removed:
+                    print(f"🧹 Pruned stale positions from trading_state: {removed}")
+            except Exception as e:
+                print(f"⚠️ Failed to prune stale positions: {e}")
+
             
             # Clean up intents older than 6 hours (TTL)
             trading_state.cleanup_old_intents(days=0.25)  # 6 hours = 0.25 days
@@ -353,6 +372,25 @@ def check_time_based_exits():
     """
     try:
         trading_state = get_trading_state()
+        # Prune stale positions from local state (positions closed on exchange but still in trading_state.json)
+        try:
+            active_keys = set()
+            if exchange:
+                live = exchange.fetch_positions(None, params={"category": "linear"})
+                for p in live:
+                    contracts = to_float(p.get("contracts"), 0.0)
+                    if contracts <= 0:
+                        continue
+                    sym = p.get("symbol") or ""
+                    side = (p.get("side") or "").lower()
+                    if sym and side in ("long", "short"):
+                        active_keys.add(f"{sym}_{side}")
+            removed = trading_state.prune_positions(active_keys)
+            if removed:
+                print(f"🧹 Pruned stale positions from trading_state (time-exit): {removed}")
+        except Exception as e:
+            print(f"⚠️ Failed to prune stale positions (time-exit): {e}")
+
         expired_positions = trading_state.get_expired_positions()
         
         if not expired_positions:
@@ -437,14 +475,84 @@ def check_time_based_exits():
                     # Continue with close if extension fails
             
             # Close the position (either no extension or extension failed)
-            exit_reason = "time_exit_flat" if adx_value is None or adx_value <= adx_threshold else "time_exit_no_extension"
-            print(f"   🔒 Closing position: reason={exit_reason}, ADX={adx_value}")
-            
+            # NEW STRATEGY: avoid closing 'flat' (fees kill).
+            # At time limit, close ONLY if leveraged ROI is sufficiently positive or sufficiently negative.
+            min_profit_lev_pct = float(os.getenv("TIME_EXIT_MIN_PROFIT_ROI_LEV_PCT", "0.6"))
+            max_loss_lev_pct = float(os.getenv("TIME_EXIT_MAX_LOSS_ROI_LEV_PCT", "-1.2"))
+            max_extensions = int(os.getenv("TIME_EXIT_MAX_EXTENSIONS", "1"))
+
+            # Track extensions on metadata (best-effort)
+            extensions_used = int(getattr(pos_metadata, "time_exit_extensions", 0) or 0)
+
+            roi_lev_pct = None
+            try:
+                if exchange:
+                    sym_id = bybit_symbol_id(symbol)
+                    sym_ccxt = ccxt_symbol_from_id(exchange, sym_id) or symbol
+                    positions = exchange.fetch_positions([sym_ccxt], params={"category": "linear"})
+                    pos = None
+                    for p0 in positions:
+                        if to_float(p0.get("contracts"), 0.0) > 0:
+                            pos = p0
+                            break
+                    if pos:
+                        entry_price = to_float(pos.get("entryPrice"), 0.0)
+                        mark_price = to_float(pos.get("markPrice"), entry_price)
+                        leverage = max(1.0, to_float(pos.get("leverage"), 1.0))
+                        side_dir = normalize_position_side(pos.get("side", "")) or side
+                        if entry_price > 0:
+                            roi_raw = (mark_price - entry_price) / entry_price if side_dir == "long" else (entry_price - mark_price) / entry_price
+                            roi_lev_pct = roi_raw * leverage * 100.0
+            except Exception as e:
+                print(f"   ⚠️ Failed to compute ROI for time-exit decision on {symbol}: {e}")
+
+            if roi_lev_pct is not None:
+                print(f"   📈 TIME-EXIT ROI CHECK {symbol} {side}: roi_lev={roi_lev_pct:.3f}% (min_profit={min_profit_lev_pct:.3f}%, max_loss={max_loss_lev_pct:.3f}%)")
+
+            # Decide close/extend/hold
+            if roi_lev_pct is not None and roi_lev_pct >= min_profit_lev_pct:
+                exit_reason = "time_exit_profit"
+            elif roi_lev_pct is not None and roi_lev_pct <= max_loss_lev_pct:
+                exit_reason = "time_exit_loss"
+            else:
+                # Not enough profit/loss to justify closing. Prefer extend (once) to avoid fee-driven flat exits.
+                if extensions_used < max_extensions:
+                    try:
+                        new_limit = limit_sec + extension_time_sec
+                        pos_metadata.time_in_trade_limit_sec = new_limit
+                        setattr(pos_metadata, "time_exit_extensions", extensions_used + 1)
+                        trading_state.add_position(pos_metadata)
+                        print(f"   ⏱️ Flat ROI - extending position: new limit={new_limit}s (extensions {extensions_used+1}/{max_extensions})")
+                        # Record extension event
+                        try:
+                            requests.post(
+                                f"{LEARNING_AGENT_URL}/record_event",
+                                json={
+                                    "event_type": "time_exit_extended_flat_roi",
+                                    "symbol": symbol,
+                                    "side": side,
+                                    "time_in_trade_sec": time_in_trade,
+                                    "original_limit_sec": limit_sec,
+                                    "new_limit_sec": new_limit,
+                                    "adx": adx_value,
+                                    "roi_lev_pct": roi_lev_pct,
+                                    "reason": "Flat ROI at time limit; extended to avoid fee-driven exit"
+                                },
+                                timeout=5.0
+                            )
+                        except Exception as e:
+                            print(f"   ⚠️ Failed to record flat-roi extension event: {e}")
+                        continue
+                    except Exception as e:
+                        print(f"   ⚠️ Failed to extend position on flat ROI: {e}")
+                print(f"   🧊 TIME-EXIT HOLD {symbol} {side}: flat ROI and max extensions reached; holding position")
+                # Do not close flat
+                continue
+
+            print(f"   🔒 Closing position: reason={exit_reason}, ADX={adx_value}, roi_lev_pct={roi_lev_pct}")
             success = execute_close_position(symbol, exit_reason=exit_reason)
-            
             if success:
                 print(f"✅ Time-based exit executed for {symbol} {side}")
-                # Record this to learning agent with specific reason
                 try:
                     requests.post(
                         f"{LEARNING_AGENT_URL}/record_event",
@@ -456,6 +564,7 @@ def check_time_based_exits():
                             "limit_sec": limit_sec,
                             "exit_reason": exit_reason,
                             "adx": adx_value,
+                            "roi_lev_pct": roi_lev_pct,
                             "reason": f"Position exceeded max holding time ({exit_reason})"
                         },
                         timeout=5.0
@@ -642,6 +751,7 @@ def check_and_update_trailing_stops():
             else:
                 roi_raw = (entry_price - mark_price) / entry_price
             roi = roi_raw * leverage
+            roi_lev = roi  # alias for leveraged ROI (used by break-even logic)
             # DEBUG: stampa ROI anche quando non scatta (solo BTC)
             try:
                 sym_id_dbg = bybit_symbol_id(symbol)
@@ -713,20 +823,20 @@ def check_and_update_trailing_stops():
                 peak = max(peak, mark_price)
                 trailing_state[k] = {**st, "peak_mark": peak, "updated_at": datetime.utcnow().isoformat()}
                 target_sl = peak * (1 - trailing_distance)
+                # Bybit constraint: LONG stopLoss must stay below last/mark price
+                long_min_under_last_pct = float(os.getenv("TRAIL_LONG_MIN_UNDER_LAST_PCT", "0.0015"))
+                max_sl_under_last = mark_price * (1 - long_min_under_last_pct)
+                target_sl = min(target_sl, max_sl_under_last)
                 # PROTEZIONE CRITICA: per LONG, SL non deve MAI essere <= entry
                 # altrimenti chiuderemmo in perdita o breakeven!
-                if target_sl <= entry_price:
-                    if sym_id_dbg in DEBUG_SYMBOLS:
-                        print(f"⚠️ LONG {symbol}: SL calcolato {target_sl:.2f} <= entry {entry_price:.2f}, skip")
-                    continue
                 # BREAK-EVEN PROTECTION: se in profitto sufficiente, SL minimo = entry + margine
-                if roi >= BREAKEVEN_ACTIVATION_PCT:
+                if roi_lev >= BREAKEVEN_ACTIVATION_PCT:
                     min_sl = entry_price * (1 + BREAKEVEN_MARGIN_PCT)
                     if target_sl < min_sl:
                         target_sl = min_sl
                         print(f"🛡️ BREAK-EVEN PROTECTION {symbol}: SL alzato a {target_sl:.2f} (entry+margin)")
                 last_sl = to_float(st.get("last_sl"), 0.0)
-                baseline = max([v for v in (sl_current, last_sl) if v > 0.0], default=0.0)
+                baseline = sl_current if sl_current and sl_current > 0.0 else last_sl
                 hardened = max(target_sl, baseline)
                 if baseline == 0.0 or hardened > baseline:
                     new_sl_price = hardened
@@ -745,20 +855,21 @@ def check_and_update_trailing_stops():
                 trough = min(trough, mark_price)
                 trailing_state[k] = {**st, "trough_mark": trough, "updated_at": datetime.utcnow().isoformat()}
                 target_sl = trough * (1 + trailing_distance)
-                # PROTEZIONE CRITICA:  per SHORT, SL non deve MAI essere >= entry
-                # altrimenti chiuderemmo in perdita o breakeven!
-                if target_sl >= entry_price:
-                    if sym_id_dbg in DEBUG_SYMBOLS:
-                        print(f"⚠️ SHORT {symbol}: SL calcolato {target_sl:.2f} >= entry {entry_price:.2f}, skip")
-                    continue
+                # Bybit constraint: SHORT stopLoss must stay above last/mark price
+                short_min_over_last_pct = float(os.getenv("TRAIL_SHORT_MIN_OVER_LAST_PCT", "0.0015"))
+                min_sl_over_last = mark_price * (1 + short_min_over_last_pct)
+                target_sl = max(target_sl, min_sl_over_last)
+                # PROTEZIONE CRITICA (SHORT):
+                # Evita di impostare uno SL *sotto o uguale* all'entry prima della logica di breakeven/profit-lock.
+                # Uno SL sopra entry è normale per una posizione SHORT.
                 # BREAK-EVEN PROTECTION per short
-                if roi >= BREAKEVEN_ACTIVATION_PCT:
+                if roi_lev >= BREAKEVEN_ACTIVATION_PCT:
                     max_sl = entry_price * (1 - BREAKEVEN_MARGIN_PCT)
                     if target_sl > max_sl:
                         target_sl = max_sl
                         print(f"🛡️ BREAK-EVEN PROTECTION {symbol}: SL abbassato a {target_sl:.2f} (entry-margin)")
                 last_sl = to_float(st.get("last_sl"), 0.0)
-                baseline = min([v for v in (sl_current, last_sl) if v > 0.0], default=0.0)
+                baseline = sl_current if sl_current and sl_current > 0.0 else last_sl
                 
                 # For SHORT: SL must be able to LOWER (numerically decrease) to protect profit
                 # when price drops. Only update if target_sl is lower than current baseline.
@@ -774,6 +885,7 @@ def check_and_update_trailing_stops():
                     # target_sl >= baseline, don't raise SL (would reduce protection)
                     if sym_id_dbg in DEBUG_SYMBOLS:
                         print(f"   ⏸️ SHORT SL NOT updated: target_sl {target_sl:.2f} >= baseline {baseline:.2f} (would reduce protection)")
+
             if not new_sl_price:
                 continue
             price_str = exchange.price_to_precision(symbol, new_sl_price)
