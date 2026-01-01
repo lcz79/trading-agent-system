@@ -620,7 +620,8 @@ async def analysis_cycle():
                     open_positions = []  # default to avoid NameError if fetch fails
                     try:
                         _rpos = await c.get(f"{URLS['pos']}/get_open_positions")
-                        open_positions = _rpos.json() or []
+                        _pos_data = _rpos.json() or {}
+                        open_positions = _pos_data.get('details') or []
                     except Exception as _e:
                         print(f"        ⚠️ Cannot fetch open positions; skipping open to prevent churn: {_e}")
                         continue
