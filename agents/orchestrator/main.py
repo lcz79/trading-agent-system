@@ -5,9 +5,6 @@ import requests
 POSITION_MANAGER_BASE_URL = "http://07_position_manager:8000"
 
 
-# Fetch open positions from position_manager (source of truth)
-open_positions = _pm_get_open_positions(POSITION_MANAGER_BASE_URL)
-
 def _pm_get_open_positions(pm_base_url: str):
     """Return list of open positions from position_manager or [] on error."""
     try:
@@ -25,6 +22,9 @@ def _pm_get_open_positions(pm_base_url: str):
         return out
     except Exception:
         return []
+
+# Fetch open positions from position_manager (source of truth)
+open_positions = _pm_get_open_positions(POSITION_MANAGER_BASE_URL)
 
 
 URLS = {
