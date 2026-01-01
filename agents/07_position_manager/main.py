@@ -372,24 +372,10 @@ def check_time_based_exits():
     """
     try:
         trading_state = get_trading_state()
-        # Prune stale positions from local state (positions closed on exchange but still in trading_state.json)
-        try:
-            active_keys = set()
-            if exchange:
-                live = exchange.fetch_positions(None, params={"category": "linear"})
-                for p in live:
-                    contracts = to_float(p.get("contracts"), 0.0)
-                    if contracts <= 0:
-                        continue
-                    sym = p.get("symbol") or ""
-                    side = (p.get("side") or "").lower()
-                    if sym and side in ("long", "short"):
-                        active_keys.add(f"{sym}_{side}")
-            removed = trading_state.prune_positions(active_keys)
-            if removed:
-                print(f"🧹 Pruned stale positions from trading_state (time-exit): {removed}")
-        except Exception as e:
-            print(f"⚠️ Failed to prune stale positions (time-exit): {e}")
+        # NOTE:
+        # Do NOT prune positions here before evaluating time-based exits.
+        # Pruning here can remove still-open exchange positions from local state, causing desync.
+        # Stale position pruning is handled by state_cleanup_loop() using exchange truth.
 
         expired_positions = trading_state.get_expired_positions()
         
