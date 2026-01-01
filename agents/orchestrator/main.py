@@ -1,5 +1,31 @@
 import asyncio, httpx, json, os, uuid
 from datetime import datetime
+import requests
+
+POSITION_MANAGER_BASE_URL = "http://07_position_manager:8000"
+
+
+# Fetch open positions from position_manager (source of truth)
+open_positions = _pm_get_open_positions(POSITION_MANAGER_BASE_URL)
+
+def _pm_get_open_positions(pm_base_url: str):
+    """Return list of open positions from position_manager or [] on error."""
+    try:
+        r = requests.get(f"{pm_base_url}/get_open_positions", timeout=2)
+        r.raise_for_status()
+        data = r.json() if r.content else {}
+        details = data.get("details") or []
+        # normalize to list of dicts with symbol/side at least
+        out = []
+        for p in details:
+            sym = p.get("symbol")
+            side = (p.get("side") or "").lower()
+            if sym and side in ("long", "short"):
+                out.append({"symbol": sym, "side": side, **p})
+        return out
+    except Exception:
+        return []
+
 
 URLS = {
     "tech": "http://01_technical_analyzer:8000",
