@@ -1,6 +1,5 @@
 import asyncio, httpx, json, os, uuid
 from datetime import datetime
-
 URLS = {
     "tech": "http://01_technical_analyzer:8000",
     "pos": "http://07_position_manager:8000",
@@ -618,9 +617,11 @@ async def analysis_cycle():
                     if confidence < 70:
                         print(f"        🧱 SKIP {action} on {sym}: low confidence ({confidence} < 70)")
                         continue                    # Always fetch open positions before opening (fail-closed).
+                    open_positions = []  # default to avoid NameError if fetch fails
                     try:
                         _rpos = await c.get(f"{URLS['pos']}/get_open_positions")
-                        open_positions = _rpos.json() or []
+                        _pos_data = _rpos.json() or {}
+                        open_positions = _pos_data.get('details') or []
                     except Exception as _e:
                         print(f"        ⚠️ Cannot fetch open positions; skipping open to prevent churn: {_e}")
                         continue
