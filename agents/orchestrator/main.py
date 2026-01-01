@@ -73,9 +73,6 @@ async def fetch_learning_params(c: httpx.AsyncClient) -> dict:
             return r.json() or {}
     except Exception as e:
         print(f"        ⚠️ Learning params fetch failed: {e}")
-                    if not _openpos_ok:
-                        print("        ⚠️ Skipping open: could not fetch open_positions from position_manager")
-                        continue
     return {}
 
 
@@ -621,11 +618,9 @@ async def analysis_cycle():
                         print(f"        🧱 SKIP {action} on {sym}: low confidence ({confidence} < 70)")
                         continue                    # Always fetch open positions before opening (fail-closed).
                     open_positions = []  # default to avoid NameError if fetch fails
-                    _openpos_ok = False
                     try:
                         _rpos = await c.get(f"{URLS['pos']}/get_open_positions")
                         open_positions = _rpos.json() or []
-                        _openpos_ok = True
                     except Exception as _e:
                         print(f"        ⚠️ Cannot fetch open positions; skipping open to prevent churn: {_e}")
                         continue
