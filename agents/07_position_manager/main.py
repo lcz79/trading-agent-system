@@ -1082,12 +1082,13 @@ def execute_close_position(symbol: str, exit_reason: str = "manual") -> bool:
             
             # Add cooldown to trading_state
             # DEBUG (removed): broken print caused SyntaxError
+            # Persist cooldown using TradingState schema (Cooldown expects expires_at)
+            _now = datetime.utcnow()
             cooldown = Cooldown(
                 symbol=sym_id,
                 side=side_dir,
-                closed_at=datetime.utcnow().isoformat(),
+                expires_at=(_now + timedelta(seconds=int(cooldown_sec))).isoformat(),
                 reason="position_closed",
-                cooldown_sec=int(cooldown_sec),
             )
             trading_state.add_cooldown(cooldown)
             
