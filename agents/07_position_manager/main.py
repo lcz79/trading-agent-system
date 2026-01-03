@@ -28,9 +28,9 @@ HEDGE_MODE = os.getenv("BYBIT_HEDGE_MODE", "false").lower() == "true"
 TRAILING_ACTIVATION_PCT = float(os.getenv("TRAILING_ACTIVATION_PCT", "0.01"))  # 1% (leveraged ROI fraction) - more aggressive
 ATR_MULTIPLIER_DEFAULT = float(os.getenv("ATR_MULTIPLIER_DEFAULT", "2.5"))
 ATR_MULTIPLIERS = {
-    "BTC": 2.0,
-    "ETH": 2.0,
-    "SOL": 3.0,
+    "BTC": 2.6,
+    "ETH": 2.8,
+    "SOL": 3.4,
     "DOGE": 3.5,
     "PEPE": 4.0,
 }
@@ -681,10 +681,13 @@ def get_atr_for_symbol(symbol: str) -> Tuple[Optional[float], Optional[float]]:
             r = client.post(f"{TECHNICAL_ANALYZER_URL}/analyze_multi_tf", json={"symbol": clean_id})
             if r.status_code == 200:
                 d = r.json()
-                # FIX: estrarre da timeframes.15m
-                tf_15m = d.get("timeframes", {}).get("15m", {})
-                atr = tf_15m.get("atr")
-                price = tf_15m.get("price")
+                # Prefer 4h ATR for less noise (intra-day), fallback to 15m
+                tfs = d.get("timeframes", {}) or {}
+                tf_4h = tfs.get("4h", {}) or {}
+                tf_15m = tfs.get("15m", {}) or {}
+                src = tf_4h if (tf_4h.get("atr") and tf_4h.get("price")) else tf_15m
+                atr = src.get("atr")
+                price = src.get("price")
                 if atr and price:
                     return float(atr), float(price)
     except Exception:
@@ -1600,6 +1603,62 @@ def open_position(order: OrderRequest):
                             print(f"🔄 HEDGE MODE: REVERSE allowed: {existing_dir} → {requested_dir} su {sym_ccxt}")
         except Exception as e:
             print(f"⚠️ Errore check posizioni esistenti: {e}")
+        # === COOLDOWN (file-based, robust) ===
+        # trading_state.cooldowns may be empty due to persistence issues; closed_cooldown.json is the reliable source.
+        try:
+            now_ts = time.time()
+            cooldown_sec = int(order.cooldown_sec or (COOLDOWN_MINUTES * 60))
+            anti_flip_sec = int(os.getenv("ANTI_FLIP_SECONDS", "3600"))
+
+            cooldowns = load_json(COOLDOWN_FILE, default={})
+
+            side_key = f"{sym_id}_{requested_dir}"
+            opp_dir = "short" if requested_dir == "long" else "long"
+            opp_side_key = f"{sym_id}_{opp_dir}"
+
+            last_close_same = to_float(cooldowns.get(side_key), 0.0)
+            last_close_any = to_float(cooldowns.get(sym_id), 0.0)
+            last_close_opp = to_float(cooldowns.get(opp_side_key), 0.0)
+
+            # Same-side cooldown (standard)
+            if last_close_same > 0 and (now_ts - last_close_same) < cooldown_sec:
+                remaining = int(cooldown_sec - (now_ts - last_close_same))
+                print(f"⏳ COOLDOWN(FILE): {sym_ccxt} {requested_dir} remaining={remaining}s (last_close={last_close_same})")
+                trading_state.update_intent_status(intent_id, OrderStatus.CANCELLED,
+                                                  error_message="Cooldown active (file-based)")
+                return {
+                    "status": "cooldown",
+                    "msg": f"Cooldown attivo per {sym_ccxt} {requested_dir} (file) - {remaining}s rimanenti",
+                    "intent_id": intent_id
+                }
+
+            # Anti-flip: block opposite direction shortly after any recent close
+            # (prevents churn OPEN_LONG -> close -> OPEN_SHORT immediately)
+            if last_close_opp > 0 and (now_ts - last_close_opp) < anti_flip_sec:
+                remaining = int(anti_flip_sec - (now_ts - last_close_opp))
+                print(f"⛔ ANTI-FLIP(FILE): {sym_ccxt} block {requested_dir} remaining={remaining}s (opp_close={last_close_opp})")
+                trading_state.update_intent_status(intent_id, OrderStatus.CANCELLED,
+                                                  error_message="Anti-flip cooldown active (file-based)")
+                return {
+                    "status": "cooldown",
+                    "msg": f"Anti-flip attivo per {sym_ccxt}: blocco {requested_dir} per altri {remaining}s",
+                    "intent_id": intent_id
+                }
+
+            # Optional: also respect symbol-wide cooldown timestamp if present
+            if last_close_any > 0 and (now_ts - last_close_any) < cooldown_sec:
+                remaining = int(cooldown_sec - (now_ts - last_close_any))
+                print(f"⏳ COOLDOWN(FILE-any): {sym_ccxt} remaining={remaining}s (last_close={last_close_any})")
+                trading_state.update_intent_status(intent_id, OrderStatus.CANCELLED,
+                                                  error_message="Cooldown active (symbol-wide, file-based)")
+                return {
+                    "status": "cooldown",
+                    "msg": f"Cooldown attivo per {sym_ccxt} (file) - {remaining}s rimanenti",
+                    "intent_id": intent_id
+                }
+        except Exception as e:
+            print(f"⚠️ Errore check cooldown file-based: {e}")
+
         # Cooldown check using trading_state
         if trading_state.is_in_cooldown(sym_id, requested_dir):
             print(f"⏳ COOLDOWN: {sym_ccxt} {requested_dir} is in cooldown")
@@ -1653,9 +1712,8 @@ def open_position(order: OrderRequest):
             scalping_info = f" MaxTime={order.time_in_trade_limit_sec}s"
         print(f"🚀 ORDER {sym_ccxt}: side={requested_side} qty={final_qty} SL={sl_str}" + 
               (f" TP={tp_str}" if tp_str else "") + f" idx={pos_idx}{scalping_info}")
-        params = {"category": "linear", "stopLoss": sl_str}
-        if tp_str:
-            params["takeProfit"] = tp_str
+        # Create market order WITHOUT embedding TP/SL (avoid immediate trigger on LastPrice)
+        params = {"category": "linear"}
         if HEDGE_MODE:
             params["positionIdx"] = pos_idx
         # Mark intent as EXECUTING
@@ -1663,6 +1721,24 @@ def open_position(order: OrderRequest):
         
         res = exchange.create_order(sym_ccxt, "market", requested_side, final_qty, params=params)
         exchange_order_id = res.get("id")
+
+        # After entry: set StopLoss server-side via trading_stop using MarkPrice (prevents immediate LastPrice trigger)
+        try:
+            req = {
+                "category": "linear",
+                "symbol": sym_id,
+                "tpslMode": "Full",
+                "stopLoss": sl_str,
+                "slTriggerBy": "MarkPrice",
+                "takeProfit": "0",
+                "tpTriggerBy": "MarkPrice",
+            }
+            if HEDGE_MODE:
+                req["positionIdx"] = pos_idx
+            exchange.private_post_v5_position_trading_stop(req)
+            print(f"✅ Entry SL set via trading_stop: {sym_id} SL={sl_str} trigger=MarkPrice")
+        except Exception as e:
+            print(f"⚠️ Could not set entry SL via trading_stop (non-fatal): {e}")
         
         # Mark intent as EXECUTED
         trading_state.update_intent_status(intent_id, OrderStatus.EXECUTED, 
@@ -1709,7 +1785,7 @@ def close_position(req: CloseRequest):
     if manual_only:
         return {"status": "manual_only"}
     try:
-        ok = execute_close_position(req.symbol)
+        ok = execute_close_position(req.symbol, exit_reason=req.exit_reason)
         if ok:
             return {"status": "executed"}
         # execute_close_position ritorna False anche quando NON esiste una posizione.
