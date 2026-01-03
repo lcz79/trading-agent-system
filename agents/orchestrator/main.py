@@ -407,7 +407,7 @@ async def analysis_cycle():
                                     try:
                                         close_resp = await c.post(
                                             f"{URLS['pos']}/close_position",
-                                            json={"symbol": symbol},
+                                            json={"symbol": symbol, "exit_reason": "critical_mgmt_close"},
                                             timeout=20.0
                                         )
                                         close_json = close_resp.json()
@@ -420,7 +420,7 @@ async def analysis_cycle():
                                             print(f"        ⚠️ Close returned status={close_json.get('status')}, retrying once...")
                                             close_resp2 = await c.post(
                                                 f"{URLS['pos']}/close_position",
-                                                json={"symbol": symbol},
+                                                json={"symbol": symbol, "exit_reason": "critical_mgmt_close"},
                                                 timeout=20.0
                                             )
                                             close_json2 = close_resp2.json()
@@ -443,7 +443,7 @@ async def analysis_cycle():
                                     try:
                                         close_resp = await c.post(
                                             f"{URLS['pos']}/close_position",
-                                            json={"symbol": symbol},
+                                            json={"symbol": symbol, "exit_reason": "critical_mgmt_close"},
                                             timeout=20.0
                                         )
                                         close_json = close_resp.json()

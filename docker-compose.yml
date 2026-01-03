@@ -54,13 +54,13 @@ services:
   07_position_manager:
     environment:
       POSITION_MANAGER_ENABLE_REVERSE: "true"
-      POSITION_MANAGER_MANUAL_ONLY: "false"
+      POSITION_MANAGER_MANUAL_ONLY: "true"
       DEBUG_SYMBOLS:  "BTCUSDT,ETHUSDT,SOLUSDT"
       WARNING_THRESHOLD: "-0.02"          # -2% ROI lev
       AI_REVIEW_THRESHOLD: "-0.025"        # -4% ROI lev  
       REVERSE_THRESHOLD: "-0.03"          # -6% ROI lev
       HARD_STOP_THRESHOLD: "-0.05"        # -10% ROI lev
-      TRAILING_ACTIVATION_PCT: "0.005"    # +0.5% per attivare trailing   
+      TRAILING_ACTIVATION_PCT: "0.012"    # +0.5% per attivare trailing   
       EQUITY_HISTORY_FILE: "/data/equity_history.json"
     build: ./agents/07_position_manager
     container_name: 07_position_manager
