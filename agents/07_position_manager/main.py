@@ -899,13 +899,17 @@ def check_and_update_trailing_stops():
             try:
                 req = {
                     "category": "linear",
-                    "symbol": market_id,
+                    "symbol": bybit_symbol_id(symbol),
                     "tpslMode": "Full",
                     "stopLoss": price_str,
+                    "slTriggerBy": "MarkPrice",
                     "positionIdx": position_idx,
                 }
-                exchange.private_post_v5_position_trading_stop(req)
-                print("✅ SL Aggiornato con successo su Bybit")
+                resp = exchange.private_post_v5_position_trading_stop(req)
+                if isinstance(resp, dict):
+                    print(f"✅ SL updated via trading_stop retCode={resp.get('retCode')} retMsg={resp.get('retMsg')}")
+                else:
+                    print("✅ SL updated via trading_stop")
             except Exception as api_err:
                 print(f"❌ Errore API Bybit (trading_stop): {api_err}")
         _save_trailing_state(trailing_state)
@@ -1759,21 +1763,40 @@ def open_position(order: OrderRequest):
         res = exchange.create_order(sym_ccxt, "market", requested_side, final_qty, params=params)
         exchange_order_id = res.get("id")
 
-        # After entry: set StopLoss server-side via trading_stop using MarkPrice (prevents immediate LastPrice trigger)
-        try:
-            req = {
-                "category": "linear",
-                "symbol": sym_id,
-                "tpslMode": "Full",
-                "stopLoss": sl_str,
-                "slTriggerBy": "MarkPrice",
-                                            }
-            if HEDGE_MODE:
-                req["positionIdx"] = pos_idx
-            exchange.private_post_v5_position_trading_stop(req)
-            print(f"✅ Entry SL set via trading_stop: {sym_id} SL={sl_str} trigger=MarkPrice")
-        except Exception as e:
-            print(f"⚠️ Could not set entry SL via trading_stop (non-fatal): {e}")
+        # After entry: set StopLoss server-side via trading_stop using MarkPrice (robust retry)
+        req = {
+            "category": "linear",
+            "symbol": sym_id,
+            "tpslMode": "Full",
+            "stopLoss": sl_str,
+            "slTriggerBy": "MarkPrice",
+        }
+        if HEDGE_MODE:
+            req["positionIdx"] = pos_idx
+
+        _sl_ok = False
+        _last_err = None
+        for _i, _sleep in enumerate([0.4, 0.8, 1.2, 2.0, 3.0], start=1):
+            try:
+                resp = exchange.private_post_v5_position_trading_stop(req)
+                if isinstance(resp, dict) and str(resp.get("retCode")) == "0":
+                    print(f"✅ Entry SL set via trading_stop: {sym_id} SL={sl_str} trigger=MarkPrice (try={_i})")
+                    _sl_ok = True
+                    break
+                if isinstance(resp, dict):
+                    _last_err = f"retCode={resp.get('retCode')} retMsg={resp.get('retMsg')}"
+                else:
+                    _last_err = f"unexpected_response={type(resp).__name__}"
+                print(f"⚠️ Entry SL trading_stop rejected (try={_i}): {_last_err}")
+            except Exception as e:
+                _last_err = repr(e)
+                print(f"⚠️ Entry SL trading_stop error (try={_i}): {e}")
+            import time as _t
+            _t.sleep(_sleep)
+
+        if not _sl_ok:
+            print(f"❌ CRITICAL: Entry SL NOT set for {sym_id} after retries. LastErr={_last_err}")
+            execute_close_position(sym_id, exit_reason="emergency")
         
         # Mark intent as EXECUTED
         trading_state.update_intent_status(intent_id, OrderStatus.EXECUTED, 
