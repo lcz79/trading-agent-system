@@ -318,6 +318,16 @@ def state_cleanup_loop():
                 removed = trading_state.prune_positions(active_keys)
                 if removed:
                     print(f"🧹 Pruned stale positions from trading_state: {removed}")
+                    # If a position disappeared from exchange, treat it as closed and apply cooldown
+                    try:
+                        for key in removed:
+                            if "_" in key:
+                                sym, side = key.split("_", 1)
+                                if side in ("long", "short"):
+                                    _save_cooldown(sym.upper(), side)
+                    except Exception as e:
+                        print(f"⚠️ Failed to apply cooldown on stale prune: {e}")
+
             except Exception as e:
                 print(f"⚠️ Failed to prune stale positions: {e}")
 
@@ -1180,6 +1190,23 @@ def execute_reverse(symbol: str, current_side_raw: str, recovery_size_pct: float
 # =========================================================
 # AUTO-COOLDOWN FROM CLOSED PNL
 # =========================================================
+
+def _save_cooldown(symbol_raw: str, side: str, close_time_sec: float | None = None):
+    """Save cooldown timestamps to legacy /data/closed_cooldown.json."""
+    try:
+        ensure_parent_dir(COOLDOWN_FILE)
+        cooldowns = load_json(COOLDOWN_FILE, default={})
+        ts = float(close_time_sec) if close_time_sec else time.time()
+        side_key = f"{symbol_raw}_{side}"
+        existing_time = to_float(cooldowns.get(side_key), 0.0)
+        if ts > existing_time:
+            cooldowns[side_key] = ts
+            cooldowns[symbol_raw] = ts
+            save_json(COOLDOWN_FILE, cooldowns)
+            print(f"[COOLDOWN] saved {side_key} ts={ts}")
+    except Exception as e:
+        print(f"[COOLDOWN] failed save for {symbol_raw} {side}: {e}")
+
 def check_recent_closes_and_save_cooldown():
     if not exchange:
         return
@@ -1188,9 +1215,14 @@ def check_recent_closes_and_save_cooldown():
             "category": "linear",
             "limit": 20,
         })
-        if not res or res.get("retCode") != 0:
+        if not res:
+            print("closed_pnl: empty response")
+            return
+        if res.get("retCode") != 0:
+            print("closed_pnl retCode=" + str(res.get("retCode")) + " retMsg=" + str(res.get("retMsg")))
             return
         items = (res.get("result", {}) or {}).get("list", []) or []
+        print(f"closed_pnl items={len(items)}")
         current_time = time.time()
         ensure_parent_dir(COOLDOWN_FILE)
         cooldowns = load_json(COOLDOWN_FILE, default={})
