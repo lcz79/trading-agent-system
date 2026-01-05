@@ -1021,6 +1021,13 @@ def log_trade_to_equity_history(
 # CLOSE / REVERSE EXECUTION
 # =========================================================
 def execute_close_position(symbol: str, exit_reason: str = "manual") -> bool:
+    # POLICY: positions must close ONLY via exchange SL/trailing.
+    # Exception: allow software close only for emergency kill switch.
+    allowed = {"emergency", "kill_switch"}
+    if (exit_reason or "manual") not in allowed:
+        print(f"⛔ CLOSE BLOCKED by policy: symbol={symbol} exit_reason={exit_reason}")
+        return False
+
 # removed debug print# removed debug print# removed debug print
     if not exchange:
         return False
