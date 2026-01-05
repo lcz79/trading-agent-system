@@ -1740,8 +1740,8 @@ def open_position(order: OrderRequest):
         sl_pct = float(order.sl_pct) if order.sl_pct and float(order.sl_pct) > 0 else DEFAULT_INITIAL_SL_PCT
         sl_price = price * (1 - sl_pct) if requested_dir == "long" else price * (1 + sl_pct)
         sl_str = exchange.price_to_precision(sym_ccxt, sl_price)
-          # TP disabled by policy (use trailing SL only)
-          tp_str = None
+        # TP disabled by policy (use trailing SL only)
+        tp_str = None
         pos_idx = side_to_position_idx(requested_dir)
         # Log scalping parameters
         scalping_info = ""
