@@ -25,7 +25,7 @@ IS_TESTNET = os.getenv("BYBIT_TESTNET", "false").lower() == "true"
 # metti BYBIT_HEDGE_MODE=true. Se non sei sicuro, lascialo false.
 HEDGE_MODE = os.getenv("BYBIT_HEDGE_MODE", "false").lower() == "true"
 # --- PARAMETRI TRAILING STOP DINAMICO (ATR-BASED) ---
-TRAILING_ACTIVATION_PCT = float(os.getenv("TRAILING_ACTIVATION_PCT", "0.01"))  # 1% (leveraged ROI fraction) - more aggressive
+TRAILING_ACTIVATION_RAW_PCT = float(os.getenv("TRAILING_ACTIVATION_RAW_PCT", "0.01"))  # 1% (leveraged ROI fraction) - more aggressive
 ATR_MULTIPLIER_DEFAULT = float(os.getenv("ATR_MULTIPLIER_DEFAULT", "2.5"))
 ATR_MULTIPLIERS = {
     "BTC": 2.6,
@@ -38,7 +38,7 @@ TECHNICAL_ANALYZER_URL = os.getenv("TECHNICAL_ANALYZER_URL", "http://01_technica
 FALLBACK_TRAILING_PCT = float(os.getenv("FALLBACK_TRAILING_PCT", "0.025"))  # 2.5%
 DEFAULT_INITIAL_SL_PCT = float(os.getenv("DEFAULT_INITIAL_SL_PCT", "0.04"))  # 4%
 # --- BREAK-EVEN PROTECTION ---
-BREAKEVEN_ACTIVATION_PCT = float(os.getenv("BREAKEVEN_ACTIVATION_PCT", "0.006"))  # 0.6% ROI (leveraged)
+BREAKEVEN_ACTIVATION_RAW_PCT = float(os.getenv("BREAKEVEN_ACTIVATION_RAW_PCT", "0.006"))  # 0.6% ROI (leveraged)
 BREAKEVEN_MARGIN_PCT = float(os.getenv("BREAKEVEN_MARGIN_PCT", "0.001"))  # 0.1% margin
 # --- PARAMETRI AI REVIEW / REVERSE ---
 ENABLE_AI_REVIEW = os.getenv("ENABLE_AI_REVIEW", "true").lower() == "true"
@@ -318,6 +318,16 @@ def state_cleanup_loop():
                 removed = trading_state.prune_positions(active_keys)
                 if removed:
                     print(f"🧹 Pruned stale positions from trading_state: {removed}")
+                    # If a position disappeared from exchange, treat it as closed and apply cooldown
+                    try:
+                        for key in removed:
+                            if "_" in key:
+                                sym, side = key.split("_", 1)
+                                if side in ("long", "short"):
+                                    _save_cooldown(sym.upper(), side)
+                    except Exception as e:
+                        print(f"⚠️ Failed to apply cooldown on stale prune: {e}")
+
             except Exception as e:
                 print(f"⚠️ Failed to prune stale positions: {e}")
 
@@ -751,16 +761,16 @@ def check_and_update_trailing_stops():
                     f"🧾 TRAIL DEBUG {sym_id_dbg} side={side_dir} "
                     f"entry={entry_price:.2f} mark={mark_price:.2f} lev={leverage:.1f} "
                     f"roi_raw={roi_raw*100:.3f}% roi_lev={roi*100:.3f}% "
-                    f"need>={TRAILING_ACTIVATION_PCT*100:.3f}% (lev)"
+                    f"need>={TRAILING_ACTIVATION_RAW_PCT*100:.3f}% (lev)"
                 )
             position_idx = get_position_idx_from_position(p)
             k_pl = _trailing_key(symbol, side_dir, position_idx)
             # Activation gate
-            if roi < TRAILING_ACTIVATION_PCT:
+            if roi < TRAILING_ACTIVATION_RAW_PCT:
                 profit_lock_state.pop(k_pl, None)
                 # Log why trailing is not active for debugging
                 if sym_id_dbg in DEBUG_SYMBOLS:
-                    print(f"   ⏸️ Trailing NOT active: ROI {roi*100:.3f}% < activation threshold {TRAILING_ACTIVATION_PCT*100:.3f}%")
+                    print(f"   ⏸️ Trailing NOT active: ROI {roi*100:.3f}% < activation threshold {TRAILING_ACTIVATION_RAW_PCT*100:.3f}%")
                 continue
             # Profit-lock stage logic (B: confirm 90s, max backstep 0.3%, aggressive mult 1.2)
             stage = 1
@@ -811,6 +821,51 @@ def check_and_update_trailing_stops():
                     peak = mark_price
                 peak = max(peak, mark_price)
                 trailing_state[k] = {**st, "peak_mark": peak, "updated_at": datetime.utcnow().isoformat()}
+                # --- DWELL-TIME TIGHTENING (LONG) ---
+                # Se il prezzo resta vicino al peak per >= TRAIL_TIGHTEN_AFTER_SEC, stringi la distanza trailing a step.
+                tighten_after_sec = int(os.getenv("TRAIL_TIGHTEN_AFTER_SEC", "180"))
+                tighten_zone_pct = float(os.getenv("TRAIL_TIGHTEN_ZONE_PCT", "0.003"))
+                tighten_step = float(os.getenv("TRAIL_TIGHTEN_STEP", "0.85"))
+                tighten_min_pct = float(os.getenv("TRAIL_TIGHTEN_MIN_PCT", "0.008"))
+                tighten_max_steps = int(os.getenv("TRAIL_TIGHTEN_MAX_STEPS", "4"))
+
+                tighten_since = st.get("tighten_since")
+                tighten_level = int(st.get("tighten_level") or 0)
+
+                # "in zona": prezzo rimane molto vicino al massimo (no pullback significativo)
+                in_zone = mark_price >= peak * (1 - tighten_zone_pct)
+
+                if in_zone:
+                    if not tighten_since:
+                        trailing_state[k] = {**trailing_state[k], "tighten_since": datetime.utcnow().isoformat(), "tighten_level": tighten_level}
+                    else:
+                        try:
+                            since_dt = datetime.fromisoformat(tighten_since)
+                            dwell_sec = (datetime.utcnow() - since_dt).total_seconds()
+                        except Exception:
+                            dwell_sec = 0.0
+
+                        if dwell_sec >= tighten_after_sec and tighten_level < tighten_max_steps:
+                            # stringi la distanza ma non oltre tighten_min_pct
+                            tightened = max(trailing_distance * tighten_step, tighten_min_pct)
+                            if tightened < trailing_distance:
+                                tighten_level += 1
+                                trailing_distance = tightened
+                                trailing_state[k] = {**trailing_state[k], "tighten_since": datetime.utcnow().isoformat(), "tighten_level": tighten_level}
+                                if sym_id_dbg in DEBUG_SYMBOLS:
+                                    print(f"⏱️ TRAIL TIGHTEN LONG {symbol}: dwell>={tighten_after_sec}s near peak, level={tighten_level} dist={trailing_distance*100:.2f}%")
+                else:
+                    # fuori zona: reset timer (non resettiamo tighten_level)
+                    if tighten_since:
+                        trailing_state[k] = {**trailing_state[k], "tighten_since": None}
+                # Clamp trailing distance (raw) to avoid too-wide stops (never moves) or too-tight stops (stop-out)
+
+                trail_min = float(os.getenv("TRAIL_MIN_DIST_RAW_PCT", "0.010"))
+
+                trail_max = float(os.getenv("TRAIL_MAX_DIST_RAW_PCT", "0.025"))
+
+                trailing_distance = max(trail_min, min(trailing_distance, trail_max))
+
                 target_sl = peak * (1 - trailing_distance)
                 # Bybit constraint: LONG stopLoss must stay below last/mark price
                 long_min_under_last_pct = float(os.getenv("TRAIL_LONG_MIN_UNDER_LAST_PCT", "0.0015"))
@@ -819,7 +874,17 @@ def check_and_update_trailing_stops():
                 # PROTEZIONE CRITICA: per LONG, SL non deve MAI essere <= entry
                 # altrimenti chiuderemmo in perdita o breakeven!
                 # BREAK-EVEN PROTECTION: se in profitto sufficiente, SL minimo = entry + margine
-                if roi_lev >= BREAKEVEN_ACTIVATION_PCT:
+                # --- PROFIT LOCK (leveraged trigger, raw lock) ---
+                # Se ROI leveraged >= soglia, blocca un minimo profitto raw sopra entry.
+                pl1_act_lev = float(os.getenv("PROFIT_LOCK_1_ACTIVATION_LEV_PCT", "0.025"))
+                pl1_margin_raw = float(os.getenv("PROFIT_LOCK_1_MARGIN_RAW_PCT", "0.0018"))
+                if roi_lev >= pl1_act_lev:
+                    pl1_sl = entry_price * (1 + pl1_margin_raw)
+                    if target_sl < pl1_sl:
+                        target_sl = pl1_sl
+                        if sym_id_dbg in DEBUG_SYMBOLS:
+                            print(f"🧷 PROFIT LOCK LONG {symbol}: roi_lev>={pl1_act_lev*100:.2f}% => SL>={pl1_sl:.2f} (+{pl1_margin_raw*100:.2f}% raw)")
+                if roi_raw >= BREAKEVEN_ACTIVATION_RAW_PCT:
                     min_sl = entry_price * (1 + BREAKEVEN_MARGIN_PCT)
                     if target_sl < min_sl:
                         target_sl = min_sl
@@ -843,6 +908,48 @@ def check_and_update_trailing_stops():
                     trough = mark_price
                 trough = min(trough, mark_price)
                 trailing_state[k] = {**st, "trough_mark": trough, "updated_at": datetime.utcnow().isoformat()}
+                # --- DWELL-TIME TIGHTENING (SHORT) ---
+                tighten_after_sec = int(os.getenv("TRAIL_TIGHTEN_AFTER_SEC", "180"))
+                tighten_zone_pct = float(os.getenv("TRAIL_TIGHTEN_ZONE_PCT", "0.003"))
+                tighten_step = float(os.getenv("TRAIL_TIGHTEN_STEP", "0.85"))
+                tighten_min_pct = float(os.getenv("TRAIL_TIGHTEN_MIN_PCT", "0.008"))
+                tighten_max_steps = int(os.getenv("TRAIL_TIGHTEN_MAX_STEPS", "4"))
+
+                tighten_since = st.get("tighten_since")
+                tighten_level = int(st.get("tighten_level") or 0)
+
+                # "in zona": prezzo rimane vicino al minimo (no bounce significativo)
+                in_zone = mark_price <= trough * (1 + tighten_zone_pct)
+
+                if in_zone:
+                    if not tighten_since:
+                        trailing_state[k] = {**trailing_state[k], "tighten_since": datetime.utcnow().isoformat(), "tighten_level": tighten_level}
+                    else:
+                        try:
+                            since_dt = datetime.fromisoformat(tighten_since)
+                            dwell_sec = (datetime.utcnow() - since_dt).total_seconds()
+                        except Exception:
+                            dwell_sec = 0.0
+
+                        if dwell_sec >= tighten_after_sec and tighten_level < tighten_max_steps:
+                            tightened = max(trailing_distance * tighten_step, tighten_min_pct)
+                            if tightened < trailing_distance:
+                                tighten_level += 1
+                                trailing_distance = tightened
+                                trailing_state[k] = {**trailing_state[k], "tighten_since": datetime.utcnow().isoformat(), "tighten_level": tighten_level}
+                                if sym_id_dbg in DEBUG_SYMBOLS:
+                                    print(f"⏱️ TRAIL TIGHTEN SHORT {symbol}: dwell>={tighten_after_sec}s near trough, level={tighten_level} dist={trailing_distance*100:.2f}%")
+                else:
+                    if tighten_since:
+                        trailing_state[k] = {**trailing_state[k], "tighten_since": None}
+                # Clamp trailing distance (raw)
+
+                trail_min = float(os.getenv("TRAIL_MIN_DIST_RAW_PCT", "0.010"))
+
+                trail_max = float(os.getenv("TRAIL_MAX_DIST_RAW_PCT", "0.025"))
+
+                trailing_distance = max(trail_min, min(trailing_distance, trail_max))
+
                 target_sl = trough * (1 + trailing_distance)
                 # Bybit constraint: SHORT stopLoss must stay above last/mark price
                 short_min_over_last_pct = float(os.getenv("TRAIL_SHORT_MIN_OVER_LAST_PCT", "0.0015"))
@@ -852,7 +959,17 @@ def check_and_update_trailing_stops():
                 # Evita di impostare uno SL *sotto o uguale* all'entry prima della logica di breakeven/profit-lock.
                 # Uno SL sopra entry è normale per una posizione SHORT.
                 # BREAK-EVEN PROTECTION per short
-                if roi_lev >= BREAKEVEN_ACTIVATION_PCT:
+                # --- PROFIT LOCK (leveraged trigger, raw lock) ---
+                # Se ROI leveraged >= soglia, blocca un minimo profitto raw sopra entry.
+                pl1_act_lev = float(os.getenv("PROFIT_LOCK_1_ACTIVATION_LEV_PCT", "0.025"))
+                pl1_margin_raw = float(os.getenv("PROFIT_LOCK_1_MARGIN_RAW_PCT", "0.0018"))
+                if roi_lev >= pl1_act_lev:
+                    pl1_sl = entry_price * (1 + pl1_margin_raw)
+                    if target_sl < pl1_sl:
+                        target_sl = pl1_sl
+                        if sym_id_dbg in DEBUG_SYMBOLS:
+                            print(f"🧷 PROFIT LOCK LONG {symbol}: roi_lev>={pl1_act_lev*100:.2f}% => SL<={pl1_sl:.2f} (-{pl1_margin_raw*100:.2f}% raw)")
+                if roi_raw >= BREAKEVEN_ACTIVATION_RAW_PCT:
                     max_sl = entry_price * (1 - BREAKEVEN_MARGIN_PCT)
                     if target_sl > max_sl:
                         target_sl = max_sl
@@ -889,13 +1006,17 @@ def check_and_update_trailing_stops():
             try:
                 req = {
                     "category": "linear",
-                    "symbol": market_id,
+                    "symbol": bybit_symbol_id(symbol),
                     "tpslMode": "Full",
                     "stopLoss": price_str,
+                    "slTriggerBy": "MarkPrice",
                     "positionIdx": position_idx,
                 }
-                exchange.private_post_v5_position_trading_stop(req)
-                print("✅ SL Aggiornato con successo su Bybit")
+                resp = exchange.private_post_v5_position_trading_stop(req)
+                if isinstance(resp, dict):
+                    print(f"✅ SL updated via trading_stop retCode={resp.get('retCode')} retMsg={resp.get('retMsg')}")
+                else:
+                    print("✅ SL updated via trading_stop")
             except Exception as api_err:
                 print(f"❌ Errore API Bybit (trading_stop): {api_err}")
         _save_trailing_state(trailing_state)
@@ -1011,6 +1132,13 @@ def log_trade_to_equity_history(
 # CLOSE / REVERSE EXECUTION
 # =========================================================
 def execute_close_position(symbol: str, exit_reason: str = "manual") -> bool:
+    # POLICY: positions must close ONLY via exchange SL/trailing.
+    # Exception: allow software close only for emergency kill switch.
+    allowed = {"emergency", "kill_switch"}
+    if (exit_reason or "manual") not in allowed:
+        print(f"⛔ CLOSE BLOCKED by policy: symbol={symbol} exit_reason={exit_reason}")
+        return False
+
 # removed debug print# removed debug print# removed debug print
     if not exchange:
         return False
@@ -1180,6 +1308,23 @@ def execute_reverse(symbol: str, current_side_raw: str, recovery_size_pct: float
 # =========================================================
 # AUTO-COOLDOWN FROM CLOSED PNL
 # =========================================================
+
+def _save_cooldown(symbol_raw: str, side: str, close_time_sec: float | None = None):
+    """Save cooldown timestamps to legacy /data/closed_cooldown.json."""
+    try:
+        ensure_parent_dir(COOLDOWN_FILE)
+        cooldowns = load_json(COOLDOWN_FILE, default={})
+        ts = float(close_time_sec) if close_time_sec else time.time()
+        side_key = f"{symbol_raw}_{side}"
+        existing_time = to_float(cooldowns.get(side_key), 0.0)
+        if ts > existing_time:
+            cooldowns[side_key] = ts
+            cooldowns[symbol_raw] = ts
+            save_json(COOLDOWN_FILE, cooldowns)
+            print(f"[COOLDOWN] saved {side_key} ts={ts}")
+    except Exception as e:
+        print(f"[COOLDOWN] failed save for {symbol_raw} {side}: {e}")
+
 def check_recent_closes_and_save_cooldown():
     if not exchange:
         return
@@ -1188,9 +1333,14 @@ def check_recent_closes_and_save_cooldown():
             "category": "linear",
             "limit": 20,
         })
-        if not res or res.get("retCode") != 0:
+        if not res:
+            print("closed_pnl: empty response")
+            return
+        if res.get("retCode") != 0:
+            print("closed_pnl retCode=" + str(res.get("retCode")) + " retMsg=" + str(res.get("retMsg")))
             return
         items = (res.get("result", {}) or {}).get("list", []) or []
+        print(f"closed_pnl items={len(items)}")
         current_time = time.time()
         ensure_parent_dir(COOLDOWN_FILE)
         cooldowns = load_json(COOLDOWN_FILE, default={})
@@ -1198,7 +1348,9 @@ def check_recent_closes_and_save_cooldown():
         for item in items:
             close_time_ms = int(to_float(item.get("updatedTime"), 0))
             close_time_sec = close_time_ms / 1000.0
-            if (current_time - close_time_sec) > 600:
+            if (current_time - close_time_sec) > 7200:
+                # debug: too old for window
+                # print(f"closed_pnl: skipping old close {symbol_raw} updatedTime={close_time_ms}")
                 continue
             symbol_raw = (item.get("symbol") or "").upper()  # es: BTCUSDT
             side = (item.get("side") or "").lower()          # buy/sell
@@ -1699,19 +1851,15 @@ def open_position(order: OrderRequest):
         sl_pct = float(order.sl_pct) if order.sl_pct and float(order.sl_pct) > 0 else DEFAULT_INITIAL_SL_PCT
         sl_price = price * (1 - sl_pct) if requested_dir == "long" else price * (1 + sl_pct)
         sl_str = exchange.price_to_precision(sym_ccxt, sl_price)
-        
-        # Handle tp_pct if provided
+        # TP disabled by policy (use trailing SL only)
         tp_str = None
-        if order.tp_pct and float(order.tp_pct) > 0:
-            tp_price = price * (1 + order.tp_pct) if requested_dir == "long" else price * (1 - order.tp_pct)
-            tp_str = exchange.price_to_precision(sym_ccxt, tp_price)
         pos_idx = side_to_position_idx(requested_dir)
         # Log scalping parameters
         scalping_info = ""
         if order.time_in_trade_limit_sec:
             scalping_info = f" MaxTime={order.time_in_trade_limit_sec}s"
         print(f"🚀 ORDER {sym_ccxt}: side={requested_side} qty={final_qty} SL={sl_str}" + 
-              (f" TP={tp_str}" if tp_str else "") + f" idx={pos_idx}{scalping_info}")
+              "" + f" idx={pos_idx}{scalping_info}")
         # Create market order WITHOUT embedding TP/SL (avoid immediate trigger on LastPrice)
         params = {"category": "linear"}
         if HEDGE_MODE:
@@ -1722,23 +1870,40 @@ def open_position(order: OrderRequest):
         res = exchange.create_order(sym_ccxt, "market", requested_side, final_qty, params=params)
         exchange_order_id = res.get("id")
 
-        # After entry: set StopLoss server-side via trading_stop using MarkPrice (prevents immediate LastPrice trigger)
-        try:
-            req = {
-                "category": "linear",
-                "symbol": sym_id,
-                "tpslMode": "Full",
-                "stopLoss": sl_str,
-                "slTriggerBy": "MarkPrice",
-                "takeProfit": "0",
-                "tpTriggerBy": "MarkPrice",
-            }
-            if HEDGE_MODE:
-                req["positionIdx"] = pos_idx
-            exchange.private_post_v5_position_trading_stop(req)
-            print(f"✅ Entry SL set via trading_stop: {sym_id} SL={sl_str} trigger=MarkPrice")
-        except Exception as e:
-            print(f"⚠️ Could not set entry SL via trading_stop (non-fatal): {e}")
+        # After entry: set StopLoss server-side via trading_stop using MarkPrice (robust retry)
+        req = {
+            "category": "linear",
+            "symbol": sym_id,
+            "tpslMode": "Full",
+            "stopLoss": sl_str,
+            "slTriggerBy": "MarkPrice",
+        }
+        if HEDGE_MODE:
+            req["positionIdx"] = pos_idx
+
+        _sl_ok = False
+        _last_err = None
+        for _i, _sleep in enumerate([0.4, 0.8, 1.2, 2.0, 3.0], start=1):
+            try:
+                resp = exchange.private_post_v5_position_trading_stop(req)
+                if isinstance(resp, dict) and str(resp.get("retCode")) == "0":
+                    print(f"✅ Entry SL set via trading_stop: {sym_id} SL={sl_str} trigger=MarkPrice (try={_i})")
+                    _sl_ok = True
+                    break
+                if isinstance(resp, dict):
+                    _last_err = f"retCode={resp.get('retCode')} retMsg={resp.get('retMsg')}"
+                else:
+                    _last_err = f"unexpected_response={type(resp).__name__}"
+                print(f"⚠️ Entry SL trading_stop rejected (try={_i}): {_last_err}")
+            except Exception as e:
+                _last_err = repr(e)
+                print(f"⚠️ Entry SL trading_stop error (try={_i}): {e}")
+            import time as _t
+            _t.sleep(_sleep)
+
+        if not _sl_ok:
+            print(f"❌ CRITICAL: Entry SL NOT set for {sym_id} after retries. LastErr={_last_err}")
+            execute_close_position(sym_id, exit_reason="emergency")
         
         # Mark intent as EXECUTED
         trading_state.update_intent_status(intent_id, OrderStatus.EXECUTED, 
