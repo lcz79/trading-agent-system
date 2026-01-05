@@ -1740,19 +1740,15 @@ def open_position(order: OrderRequest):
         sl_pct = float(order.sl_pct) if order.sl_pct and float(order.sl_pct) > 0 else DEFAULT_INITIAL_SL_PCT
         sl_price = price * (1 - sl_pct) if requested_dir == "long" else price * (1 + sl_pct)
         sl_str = exchange.price_to_precision(sym_ccxt, sl_price)
-        
-        # Handle tp_pct if provided
-        tp_str = None
-        if order.tp_pct and float(order.tp_pct) > 0:
-            tp_price = price * (1 + order.tp_pct) if requested_dir == "long" else price * (1 - order.tp_pct)
-            tp_str = exchange.price_to_precision(sym_ccxt, tp_price)
+          # TP disabled by policy (use trailing SL only)
+          tp_str = None
         pos_idx = side_to_position_idx(requested_dir)
         # Log scalping parameters
         scalping_info = ""
         if order.time_in_trade_limit_sec:
             scalping_info = f" MaxTime={order.time_in_trade_limit_sec}s"
         print(f"🚀 ORDER {sym_ccxt}: side={requested_side} qty={final_qty} SL={sl_str}" + 
-              (f" TP={tp_str}" if tp_str else "") + f" idx={pos_idx}{scalping_info}")
+              "" + f" idx={pos_idx}{scalping_info}")
         # Create market order WITHOUT embedding TP/SL (avoid immediate trigger on LastPrice)
         params = {"category": "linear"}
         if HEDGE_MODE:
@@ -1771,9 +1767,7 @@ def open_position(order: OrderRequest):
                 "tpslMode": "Full",
                 "stopLoss": sl_str,
                 "slTriggerBy": "MarkPrice",
-                "takeProfit": "0",
-                "tpTriggerBy": "MarkPrice",
-            }
+                                            }
             if HEDGE_MODE:
                 req["positionIdx"] = pos_idx
             exchange.private_post_v5_position_trading_stop(req)
