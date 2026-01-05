@@ -25,7 +25,7 @@ IS_TESTNET = os.getenv("BYBIT_TESTNET", "false").lower() == "true"
 # metti BYBIT_HEDGE_MODE=true. Se non sei sicuro, lascialo false.
 HEDGE_MODE = os.getenv("BYBIT_HEDGE_MODE", "false").lower() == "true"
 # --- PARAMETRI TRAILING STOP DINAMICO (ATR-BASED) ---
-TRAILING_ACTIVATION_PCT = float(os.getenv("TRAILING_ACTIVATION_PCT", "0.01"))  # 1% (leveraged ROI fraction) - more aggressive
+TRAILING_ACTIVATION_RAW_PCT = float(os.getenv("TRAILING_ACTIVATION_RAW_PCT", "0.01"))  # 1% (leveraged ROI fraction) - more aggressive
 ATR_MULTIPLIER_DEFAULT = float(os.getenv("ATR_MULTIPLIER_DEFAULT", "2.5"))
 ATR_MULTIPLIERS = {
     "BTC": 2.6,
@@ -38,7 +38,7 @@ TECHNICAL_ANALYZER_URL = os.getenv("TECHNICAL_ANALYZER_URL", "http://01_technica
 FALLBACK_TRAILING_PCT = float(os.getenv("FALLBACK_TRAILING_PCT", "0.025"))  # 2.5%
 DEFAULT_INITIAL_SL_PCT = float(os.getenv("DEFAULT_INITIAL_SL_PCT", "0.04"))  # 4%
 # --- BREAK-EVEN PROTECTION ---
-BREAKEVEN_ACTIVATION_PCT = float(os.getenv("BREAKEVEN_ACTIVATION_PCT", "0.006"))  # 0.6% ROI (leveraged)
+BREAKEVEN_ACTIVATION_RAW_PCT = float(os.getenv("BREAKEVEN_ACTIVATION_RAW_PCT", "0.006"))  # 0.6% ROI (leveraged)
 BREAKEVEN_MARGIN_PCT = float(os.getenv("BREAKEVEN_MARGIN_PCT", "0.001"))  # 0.1% margin
 # --- PARAMETRI AI REVIEW / REVERSE ---
 ENABLE_AI_REVIEW = os.getenv("ENABLE_AI_REVIEW", "true").lower() == "true"
@@ -761,16 +761,16 @@ def check_and_update_trailing_stops():
                     f"🧾 TRAIL DEBUG {sym_id_dbg} side={side_dir} "
                     f"entry={entry_price:.2f} mark={mark_price:.2f} lev={leverage:.1f} "
                     f"roi_raw={roi_raw*100:.3f}% roi_lev={roi*100:.3f}% "
-                    f"need>={TRAILING_ACTIVATION_PCT*100:.3f}% (lev)"
+                    f"need>={TRAILING_ACTIVATION_RAW_PCT*100:.3f}% (lev)"
                 )
             position_idx = get_position_idx_from_position(p)
             k_pl = _trailing_key(symbol, side_dir, position_idx)
             # Activation gate
-            if roi < TRAILING_ACTIVATION_PCT:
+            if roi < TRAILING_ACTIVATION_RAW_PCT:
                 profit_lock_state.pop(k_pl, None)
                 # Log why trailing is not active for debugging
                 if sym_id_dbg in DEBUG_SYMBOLS:
-                    print(f"   ⏸️ Trailing NOT active: ROI {roi*100:.3f}% < activation threshold {TRAILING_ACTIVATION_PCT*100:.3f}%")
+                    print(f"   ⏸️ Trailing NOT active: ROI {roi*100:.3f}% < activation threshold {TRAILING_ACTIVATION_RAW_PCT*100:.3f}%")
                 continue
             # Profit-lock stage logic (B: confirm 90s, max backstep 0.3%, aggressive mult 1.2)
             stage = 1
@@ -821,6 +821,51 @@ def check_and_update_trailing_stops():
                     peak = mark_price
                 peak = max(peak, mark_price)
                 trailing_state[k] = {**st, "peak_mark": peak, "updated_at": datetime.utcnow().isoformat()}
+                # --- DWELL-TIME TIGHTENING (LONG) ---
+                # Se il prezzo resta vicino al peak per >= TRAIL_TIGHTEN_AFTER_SEC, stringi la distanza trailing a step.
+                tighten_after_sec = int(os.getenv("TRAIL_TIGHTEN_AFTER_SEC", "180"))
+                tighten_zone_pct = float(os.getenv("TRAIL_TIGHTEN_ZONE_PCT", "0.003"))
+                tighten_step = float(os.getenv("TRAIL_TIGHTEN_STEP", "0.85"))
+                tighten_min_pct = float(os.getenv("TRAIL_TIGHTEN_MIN_PCT", "0.008"))
+                tighten_max_steps = int(os.getenv("TRAIL_TIGHTEN_MAX_STEPS", "4"))
+
+                tighten_since = st.get("tighten_since")
+                tighten_level = int(st.get("tighten_level") or 0)
+
+                # "in zona": prezzo rimane molto vicino al massimo (no pullback significativo)
+                in_zone = mark_price >= peak * (1 - tighten_zone_pct)
+
+                if in_zone:
+                    if not tighten_since:
+                        trailing_state[k] = {**trailing_state[k], "tighten_since": datetime.utcnow().isoformat(), "tighten_level": tighten_level}
+                    else:
+                        try:
+                            since_dt = datetime.fromisoformat(tighten_since)
+                            dwell_sec = (datetime.utcnow() - since_dt).total_seconds()
+                        except Exception:
+                            dwell_sec = 0.0
+
+                        if dwell_sec >= tighten_after_sec and tighten_level < tighten_max_steps:
+                            # stringi la distanza ma non oltre tighten_min_pct
+                            tightened = max(trailing_distance * tighten_step, tighten_min_pct)
+                            if tightened < trailing_distance:
+                                tighten_level += 1
+                                trailing_distance = tightened
+                                trailing_state[k] = {**trailing_state[k], "tighten_since": datetime.utcnow().isoformat(), "tighten_level": tighten_level}
+                                if sym_id_dbg in DEBUG_SYMBOLS:
+                                    print(f"⏱️ TRAIL TIGHTEN LONG {symbol}: dwell>={tighten_after_sec}s near peak, level={tighten_level} dist={trailing_distance*100:.2f}%")
+                else:
+                    # fuori zona: reset timer (non resettiamo tighten_level)
+                    if tighten_since:
+                        trailing_state[k] = {**trailing_state[k], "tighten_since": None}
+                # Clamp trailing distance (raw) to avoid too-wide stops (never moves) or too-tight stops (stop-out)
+
+                trail_min = float(os.getenv("TRAIL_MIN_DIST_RAW_PCT", "0.010"))
+
+                trail_max = float(os.getenv("TRAIL_MAX_DIST_RAW_PCT", "0.025"))
+
+                trailing_distance = max(trail_min, min(trailing_distance, trail_max))
+
                 target_sl = peak * (1 - trailing_distance)
                 # Bybit constraint: LONG stopLoss must stay below last/mark price
                 long_min_under_last_pct = float(os.getenv("TRAIL_LONG_MIN_UNDER_LAST_PCT", "0.0015"))
@@ -829,7 +874,17 @@ def check_and_update_trailing_stops():
                 # PROTEZIONE CRITICA: per LONG, SL non deve MAI essere <= entry
                 # altrimenti chiuderemmo in perdita o breakeven!
                 # BREAK-EVEN PROTECTION: se in profitto sufficiente, SL minimo = entry + margine
-                if roi_lev >= BREAKEVEN_ACTIVATION_PCT:
+                # --- PROFIT LOCK (leveraged trigger, raw lock) ---
+                # Se ROI leveraged >= soglia, blocca un minimo profitto raw sopra entry.
+                pl1_act_lev = float(os.getenv("PROFIT_LOCK_1_ACTIVATION_LEV_PCT", "0.025"))
+                pl1_margin_raw = float(os.getenv("PROFIT_LOCK_1_MARGIN_RAW_PCT", "0.0018"))
+                if roi_lev >= pl1_act_lev:
+                    pl1_sl = entry_price * (1 + pl1_margin_raw)
+                    if target_sl < pl1_sl:
+                        target_sl = pl1_sl
+                        if sym_id_dbg in DEBUG_SYMBOLS:
+                            print(f"🧷 PROFIT LOCK LONG {symbol}: roi_lev>={pl1_act_lev*100:.2f}% => SL>={pl1_sl:.2f} (+{pl1_margin_raw*100:.2f}% raw)")
+                if roi_raw >= BREAKEVEN_ACTIVATION_RAW_PCT:
                     min_sl = entry_price * (1 + BREAKEVEN_MARGIN_PCT)
                     if target_sl < min_sl:
                         target_sl = min_sl
@@ -853,6 +908,48 @@ def check_and_update_trailing_stops():
                     trough = mark_price
                 trough = min(trough, mark_price)
                 trailing_state[k] = {**st, "trough_mark": trough, "updated_at": datetime.utcnow().isoformat()}
+                # --- DWELL-TIME TIGHTENING (SHORT) ---
+                tighten_after_sec = int(os.getenv("TRAIL_TIGHTEN_AFTER_SEC", "180"))
+                tighten_zone_pct = float(os.getenv("TRAIL_TIGHTEN_ZONE_PCT", "0.003"))
+                tighten_step = float(os.getenv("TRAIL_TIGHTEN_STEP", "0.85"))
+                tighten_min_pct = float(os.getenv("TRAIL_TIGHTEN_MIN_PCT", "0.008"))
+                tighten_max_steps = int(os.getenv("TRAIL_TIGHTEN_MAX_STEPS", "4"))
+
+                tighten_since = st.get("tighten_since")
+                tighten_level = int(st.get("tighten_level") or 0)
+
+                # "in zona": prezzo rimane vicino al minimo (no bounce significativo)
+                in_zone = mark_price <= trough * (1 + tighten_zone_pct)
+
+                if in_zone:
+                    if not tighten_since:
+                        trailing_state[k] = {**trailing_state[k], "tighten_since": datetime.utcnow().isoformat(), "tighten_level": tighten_level}
+                    else:
+                        try:
+                            since_dt = datetime.fromisoformat(tighten_since)
+                            dwell_sec = (datetime.utcnow() - since_dt).total_seconds()
+                        except Exception:
+                            dwell_sec = 0.0
+
+                        if dwell_sec >= tighten_after_sec and tighten_level < tighten_max_steps:
+                            tightened = max(trailing_distance * tighten_step, tighten_min_pct)
+                            if tightened < trailing_distance:
+                                tighten_level += 1
+                                trailing_distance = tightened
+                                trailing_state[k] = {**trailing_state[k], "tighten_since": datetime.utcnow().isoformat(), "tighten_level": tighten_level}
+                                if sym_id_dbg in DEBUG_SYMBOLS:
+                                    print(f"⏱️ TRAIL TIGHTEN SHORT {symbol}: dwell>={tighten_after_sec}s near trough, level={tighten_level} dist={trailing_distance*100:.2f}%")
+                else:
+                    if tighten_since:
+                        trailing_state[k] = {**trailing_state[k], "tighten_since": None}
+                # Clamp trailing distance (raw)
+
+                trail_min = float(os.getenv("TRAIL_MIN_DIST_RAW_PCT", "0.010"))
+
+                trail_max = float(os.getenv("TRAIL_MAX_DIST_RAW_PCT", "0.025"))
+
+                trailing_distance = max(trail_min, min(trailing_distance, trail_max))
+
                 target_sl = trough * (1 + trailing_distance)
                 # Bybit constraint: SHORT stopLoss must stay above last/mark price
                 short_min_over_last_pct = float(os.getenv("TRAIL_SHORT_MIN_OVER_LAST_PCT", "0.0015"))
@@ -862,7 +959,17 @@ def check_and_update_trailing_stops():
                 # Evita di impostare uno SL *sotto o uguale* all'entry prima della logica di breakeven/profit-lock.
                 # Uno SL sopra entry è normale per una posizione SHORT.
                 # BREAK-EVEN PROTECTION per short
-                if roi_lev >= BREAKEVEN_ACTIVATION_PCT:
+                # --- PROFIT LOCK (leveraged trigger, raw lock) ---
+                # Se ROI leveraged >= soglia, blocca un minimo profitto raw sopra entry.
+                pl1_act_lev = float(os.getenv("PROFIT_LOCK_1_ACTIVATION_LEV_PCT", "0.025"))
+                pl1_margin_raw = float(os.getenv("PROFIT_LOCK_1_MARGIN_RAW_PCT", "0.0018"))
+                if roi_lev >= pl1_act_lev:
+                    pl1_sl = entry_price * (1 + pl1_margin_raw)
+                    if target_sl < pl1_sl:
+                        target_sl = pl1_sl
+                        if sym_id_dbg in DEBUG_SYMBOLS:
+                            print(f"🧷 PROFIT LOCK LONG {symbol}: roi_lev>={pl1_act_lev*100:.2f}% => SL<={pl1_sl:.2f} (-{pl1_margin_raw*100:.2f}% raw)")
+                if roi_raw >= BREAKEVEN_ACTIVATION_RAW_PCT:
                     max_sl = entry_price * (1 - BREAKEVEN_MARGIN_PCT)
                     if target_sl > max_sl:
                         target_sl = max_sl

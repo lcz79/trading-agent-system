@@ -60,7 +60,23 @@ services:
       AI_REVIEW_THRESHOLD: "-0.025"        # -4% ROI lev  
       REVERSE_THRESHOLD: "-0.03"          # -6% ROI lev
       HARD_STOP_THRESHOLD: "-0.05"        # -10% ROI lev
-      TRAILING_ACTIVATION_PCT: "0.012"    # +0.5% per attivare trailing   
+      # --- TRAILING basato su movimento RAW (leverage independent) ---
+      TRAILING_ACTIVATION_RAW_PCT: "0.006"    # 0.6% raw
+      BREAKEVEN_ACTIVATION_RAW_PCT: "0.008"   # 0.8% raw
+
+      # clamp distanza trailing (raw)
+      TRAIL_MIN_DIST_RAW_PCT: "0.010"         # 1.0% min: non troppo vicino
+      TRAIL_MAX_DIST_RAW_PCT: "0.025"         # 2.5% max: evita trailing troppo largo (BE-blocco)
+
+      # dwell-time tightening (stringe solo dopo consolidamento)
+      TRAIL_TIGHTEN_AFTER_SEC: "180"          # 3 minuti
+      TRAIL_TIGHTEN_ZONE_PCT: "0.003"         # 0.30% zona vicino a peak/trough
+      TRAIL_TIGHTEN_STEP: "0.85"              # -15% distanza per step
+      TRAIL_TIGHTEN_MIN_PCT: "0.008"          # 0.8% minimo dopo tightening
+      TRAIL_TIGHTEN_MAX_STEPS: "4"
+      # profit-lock minimo quando ROI leveraged >= 2.5%
+      PROFIT_LOCK_1_ACTIVATION_LEV_PCT: "0.025"
+      PROFIT_LOCK_1_MARGIN_RAW_PCT: "0.0018"
       EQUITY_HISTORY_FILE: "/data/equity_history.json"
     build: ./agents/07_position_manager
     container_name: 07_position_manager
