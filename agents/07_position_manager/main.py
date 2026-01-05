@@ -1230,7 +1230,9 @@ def check_recent_closes_and_save_cooldown():
         for item in items:
             close_time_ms = int(to_float(item.get("updatedTime"), 0))
             close_time_sec = close_time_ms / 1000.0
-            if (current_time - close_time_sec) > 600:
+            if (current_time - close_time_sec) > 7200:
+                # debug: too old for window
+                # print(f"closed_pnl: skipping old close {symbol_raw} updatedTime={close_time_ms}")
                 continue
             symbol_raw = (item.get("symbol") or "").upper()  # es: BTCUSDT
             side = (item.get("side") or "").lower()          # buy/sell
