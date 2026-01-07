@@ -473,12 +473,13 @@ def check_time_based_exits():
             # Close the position (either no extension or extension failed)
             # NEW STRATEGY: avoid closing 'flat' (fees kill).
             # At time limit, close ONLY if leveraged ROI is sufficiently positive or sufficiently negative.
-            min_profit_lev_pct = float(os.getenv("TIME_EXIT_MIN_PROFIT_ROI_LEV_PCT", "0.6"))
-            max_loss_lev_pct = float(os.getenv("TIME_EXIT_MAX_LOSS_ROI_LEV_PCT", "-1.2"))
-            max_extensions = int(os.getenv("TIME_EXIT_MAX_EXTENSIONS", "1"))
+            min_profit_lev_pct = float(os.getenv("TIME_EXIT_MIN_PROFIT_ROI_LEV_PCT", "0.8"))
+            max_loss_lev_pct = float(os.getenv("TIME_EXIT_MAX_LOSS_ROI_LEV_PCT", "-3.0"))
+            max_extensions = int(os.getenv("TIME_EXIT_MAX_EXTENSIONS", "3"))
 
             # Track extensions on metadata (best-effort)
             extensions_used = int(getattr(pos_metadata, "time_exit_extensions", 0) or 0)
+            print(f"   🔁 TIME-EXIT EXTENSIONS {symbol} {side}: used={extensions_used}/{max_extensions} limit_sec={limit_sec}")
 
             roi_lev_pct = None
             try:
