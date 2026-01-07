@@ -717,6 +717,57 @@ def get_trailing_distance_pct(symbol: str, mark_price: float, aggressive: bool =
         return pct
     print(f"⚠️ ATR unavailable for {symbol}, using fallback {FALLBACK_TRAILING_PCT*100:.2f}%")
     return FALLBACK_TRAILING_PCT
+# =========================================================
+# ENTRY STOP LOSS (hard floor + ATR-based)
+# =========================================================
+ENTRY_SL_USE_ATR = str(os.getenv("ENTRY_SL_USE_ATR", "true")).lower() == "true"
+ATR_ENTRY_MULTIPLIER = float(os.getenv("ATR_ENTRY_MULTIPLIER", "2.0"))
+ENTRY_SL_MAX_PCT = float(os.getenv("ENTRY_SL_MAX_PCT", "0.02"))  # cap 2%
+ENTRY_SL_MIN_PCT_DEFAULT = float(os.getenv("ENTRY_SL_MIN_PCT_DEFAULT", "0.007"))
+ENTRY_SL_MIN_PCT_BY_SYMBOL = {
+    "ETH": float(os.getenv("ENTRY_SL_MIN_PCT_ETH", "0.007")),
+    "SOL": float(os.getenv("ENTRY_SL_MIN_PCT_SOL", "0.009")),
+    "BTC": float(os.getenv("ENTRY_SL_MIN_PCT_BTC", "0.006")),
+}
+
+def entry_sl_min_pct(symbol: str) -> float:
+    base = symbol_base(symbol)
+    return float(ENTRY_SL_MIN_PCT_BY_SYMBOL.get(base, ENTRY_SL_MIN_PCT_DEFAULT))
+
+def compute_entry_sl_pct(symbol: str, order) -> float:
+    """Compute entry SL percent (0.007 = 0.7%)."""
+    hard_floor = entry_sl_min_pct(symbol)
+
+    # Respect explicit order.sl_pct but enforce floor + cap
+    try:
+        if getattr(order, "sl_pct", None) and float(order.sl_pct) > 0:
+            return max(hard_floor, min(float(order.sl_pct), ENTRY_SL_MAX_PCT))
+    except Exception:
+        pass
+
+    sl_pct = float(DEFAULT_INITIAL_SL_PCT)
+
+    if ENTRY_SL_USE_ATR:
+        try:
+            atr, atr_price = get_atr_for_symbol(symbol)
+            if atr and atr_price and atr_price > 0:
+                atr_based = (float(atr) * float(ATR_ENTRY_MULTIPLIER)) / float(atr_price)
+                atr_based = min(float(ENTRY_SL_MAX_PCT), max(0.005, atr_based))
+                sl_pct = max(sl_pct, atr_based)
+                print(
+                    f"📊 ENTRY ATR {symbol}: atr={atr:.6f} price={atr_price:.2f} "
+                    f"mult={ATR_ENTRY_MULTIPLIER:.2f} -> atr_sl={atr_based*100:.2f}%"
+                )
+            else:
+                print(f"⚠️ ENTRY ATR unavailable for {symbol}, using DEFAULT_INITIAL_SL_PCT")
+        except Exception as e:
+            print(f"⚠️ ENTRY ATR calc failed for {symbol}: {e}")
+
+    sl_pct = max(hard_floor, sl_pct)
+    sl_pct = min(float(ENTRY_SL_MAX_PCT), sl_pct)
+    return sl_pct
+
+
 def check_and_update_trailing_stops():
     if not exchange:
         return
@@ -1895,10 +1946,15 @@ def open_position(order: OrderRequest):
         if final_qty_d < Decimal(str(min_qty)):
             final_qty_d = Decimal(str(min_qty))
         final_qty = float("{:f}".format(final_qty_d.normalize()))
-        # Use tp_pct if provided, otherwise use sl_pct for SL
-        sl_pct = float(order.sl_pct) if order.sl_pct and float(order.sl_pct) > 0 else DEFAULT_INITIAL_SL_PCT
+        # Compute SL pct with hard floor + ATR-based widening (unless order.sl_pct is explicitly provided)
+        sl_pct = compute_entry_sl_pct(sym_id, order)
         sl_price = price * (1 - sl_pct) if requested_dir == "long" else price * (1 + sl_pct)
         sl_str = exchange.price_to_precision(sym_ccxt, sl_price)
+
+        print(
+            f"🧱 ENTRY SL {sym_id}: pct={sl_pct*100:.2f}% "
+            f"(floor={entry_sl_min_pct(sym_id)*100:.2f}%, cap={ENTRY_SL_MAX_PCT*100:.2f}%) -> SL={sl_str}"
+        )
         # TP disabled by policy (use trailing SL only)
         tp_str = None
         pos_idx = side_to_position_idx(requested_dir)
