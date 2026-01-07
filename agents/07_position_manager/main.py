@@ -1453,7 +1453,8 @@ def check_recent_closes_and_save_cooldown():
                 continue
             symbol_raw = (item.get("symbol") or "").upper()  # es: BTCUSDT
             side = (item.get("side") or "").lower()          # buy/sell
-            side = "long" if side == "buy" else "short"
+            # closed_pnl.side is the closing order side: Buy closes SHORT, Sell closes LONG
+            side = "short" if side == "buy" else "long"
             side_key = f"{symbol_raw}_{side}"
             existing_time = to_float(cooldowns.get(side_key), 0.0)
             if close_time_sec > existing_time:
