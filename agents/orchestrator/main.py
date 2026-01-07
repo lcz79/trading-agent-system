@@ -1,5 +1,26 @@
 import asyncio, httpx, json, os, uuid
 from datetime import datetime
+import re
+from datetime import timedelta
+
+# Local backoff map: (SYMBOL, desired_side) -> datetime until which opens are blocked
+OPEN_BACKOFF_UNTIL = {}
+
+def _parse_cooldown_seconds(msg: str):
+    """
+    Parse messages like: "Anti-flip attivo per ETH/USDT:USDT: blocco long per altri 3589s"
+    Returns remaining seconds as int if found, else None.
+    """
+    if not msg:
+        return None
+    m = re.search(r"per altri\\s+(\\d+)\\s*s", msg)
+    if not m:
+        return None
+    try:
+        return int(m.group(1))
+    except Exception:
+        return None
+
 URLS = {
     "tech": "http://01_technical_analyzer:8000",
     "pos": "http://07_position_manager:8000",
@@ -628,6 +649,21 @@ async def analysis_cycle():
 
                     # Guardrail: in one-way mode (HedgeMode False) do NOT open another position on the same symbol.
                     desired_side = "long" if action == "OPEN_LONG" else "short"
+
+                    # Guardrail: respect AI blocked_by if present (prevents pointless opens)
+                    blocked_by = d.get("blocked_by") or []
+                    if blocked_by:
+                        print(f"        🧯 SKIP {action} on {sym}: blocked_by={blocked_by}")
+                        continue
+
+                    # Guardrail: local backoff to prevent spam retries when PM reports cooldown
+                    bk_key = (sym.upper(), desired_side)
+                    until = OPEN_BACKOFF_UNTIL.get(bk_key)
+                    now = datetime.now()
+                    if until and now < until:
+                        remaining = int((until - now).total_seconds())
+                        print(f"        🧯 SKIP {action} on {sym}: local backoff active for {remaining}s")
+                        continue
                     try:
                         existing = None
                         for p0 in (open_positions or []):
@@ -669,6 +705,25 @@ async def analysis_cycle():
                     time_in_trade_limit_sec = d.get('time_in_trade_limit_sec')  # Optional
                     cooldown_sec = d.get('cooldown_sec')  # Optional
                     trail_activation_roi = d.get('trail_activation_roi')  # Optional
+                    
+                    # --- Anti-churn floors (ETH/SOL) ---
+                    # Many losses come from frequent time-exit cycles on SOL/ETH.
+                    # Enforce minimum holding time + cooldown so we don't fee-grind.
+                    sym_u = sym.upper()
+                    if sym_u == "ETHUSDT":
+                        min_time = int(os.getenv("MIN_TIME_IN_TRADE_SEC_ETH", "2400"))
+                        min_cd = int(os.getenv("MIN_COOLDOWN_SEC_ETH", "1200"))
+                        if time_in_trade_limit_sec is None or int(time_in_trade_limit_sec) < min_time:
+                            time_in_trade_limit_sec = min_time
+                        if cooldown_sec is None or int(cooldown_sec) < min_cd:
+                            cooldown_sec = min_cd
+                    elif sym_u == "SOLUSDT":
+                        min_time = int(os.getenv("MIN_TIME_IN_TRADE_SEC_SOL", "3000"))
+                        min_cd = int(os.getenv("MIN_COOLDOWN_SEC_SOL", "1800"))
+                        if time_in_trade_limit_sec is None or int(time_in_trade_limit_sec) < min_time:
+                            time_in_trade_limit_sec = min_time
+                        if cooldown_sec is None or int(cooldown_sec) < min_cd:
+                            cooldown_sec = min_cd
                     
                     # Generate intent_id for idempotency
                     intent_id = str(uuid.uuid4())

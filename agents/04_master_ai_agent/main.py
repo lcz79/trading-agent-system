@@ -591,23 +591,21 @@ Esempio CORRETTO per OPEN_SHORT con scalping:
 
 ## REGOLE RSI (ANTI-CONTRADDIZIONE)
 
-## BOOST CONFIDENCE SCALPING (REGOLA OBBLIGATORIA)
-- **RSI 15m > 80** → Confidence BASE per SHORT = 70% minimo (ipercomprato estremo = setup FORTE)
-- **RSI 15m < 25** → Confidence BASE per LONG = 70% minimo (ipervenduto estremo = setup FORTE)
-- **RSI 15m > 75** → Confidence BASE per SHORT = 60% minimo
-- **RSI 15m < 30** → Confidence BASE per LONG = 60% minimo
-- Il momentum contrario È NORMALE per mean-reversion, NON penalizzare la confidence!
-- IGNORA losing patterns storici - ogni trade è indipendente
-- Se RSI è estremo (>80 o <25), bastano 2 conferme per aprire
+## BOOST CONFIDENCE + PLAYBOOK SELECTION (REGOLA OBBLIGATORIA)
+- Prima scegli il **Playbook**:
+  - "Playbook: TREND" se il contesto indica trend-following (pre_score alto, momentum e struttura EMA coerenti).
+  - "Playbook: RANGE" se il contesto indica mean-reversion (range_score alto + prezzo vicino support/resistenza).
+  - Se non sei sicuro -> HOLD.
 
-- Mean-reversion (default per scalping):
-  - Se direction_considered = "LONG": RSI basso (< 35) è a favore del LONG (possibile rimbalzo). RSI alto (> 65) è contro LONG.
-  - Se direction_considered = "SHORT": RSI alto (> 65) è a favore dello SHORT (possibile ritracciamento). RSI basso (< 35) è contro SHORT.
-- Eccezione trend-following (solo se trend MOLTO forte e confermato multi-timeframe):
-  - Puoi considerare SHORT anche con RSI basso (< 35) solo se ci sono conferme forti di continuazione ribassista.
-  - In questo caso scrivi nel rationale che stai seguendo il trend e che RSI oversold è un rischio di rimbalzo.
+- Losing patterns storici: non sono un blocco assoluto, ma se un pattern si ripete aumenta prudenza (riduci size/leverage, alza cooldown) e spiega nel rationale.
+  - RANGE: RSI 15m > 80 -> setup SHORT molto forte (ma solo se vicino resistenza e momentum NON è in accelerazione).
+  - RANGE: RSI 15m < 25 -> setup LONG molto forte (ma solo se vicino supporto e momentum NON è in accelerazione).
 
-Decidi TU leva e size in base alla tua confidenza e alle condizioni di mercato:
+- Il momentum contrario NON è “sempre normale”:
+  - In RANGE può esistere mean-reversion contro momentum SOLO se hai range_score >= MIN_RANGE_SCORE e almeno 1 conferma di livello (support/resistance) e segnali di rallentamento (es. return_5m non in accelerazione).
+  - In TREND evitare contrarian: se price è in EMA upstack e return_15m è positivo, SHORT è di norma un errore; viceversa per LONG in downstack.
+
+- Se RSI è estremo (>80 o <25) puoi aprire anche con 2 conferme SOLO in RANGE e SOLO se non violi crash_guard.
 - **Alta confidenza (90%+)**: leverage 7-10x, size 0.15-0.20
 - **Media confidenza (70-89%)**: leverage 5-7x, size 0.12-0.15
 - **Bassa confidenza (50-69%)**: leverage 3-5x, size 0.08-0.12
@@ -1407,6 +1405,44 @@ Evolved params (guidance):
                 symbol = valid_dec.symbol
                 tech_data = enriched_assets_data.get(symbol, {}).get('technical', {})
                 return_5m = tech_data.get('summary', {}).get('return_5m', 0)
+                return_15m = tech_data.get('summary', {}).get('return_15m', 0)
+
+                # AIRBAG (SOL only): block contrarian entries in moderate trend that may not trigger crash_guard
+                # This prevents "price rising -> OPEN_SHORT" / "price falling -> OPEN_LONG" churn on SOL.
+                try:
+                    sym_u = (symbol or "").upper()
+                    r15 = float(return_15m or 0)
+                    if sym_u == "SOLUSDT" and valid_dec.action in ["OPEN_LONG", "OPEN_SHORT"]:
+                        if valid_dec.action == "OPEN_SHORT" and r15 >= 0.25:
+                            reason = (
+                                f"MOMENTUM_15M_GUARD: Blocked OPEN_SHORT on SOL due to bullish 15m trend "
+                                f"(return_15m={r15:.2f}% >= +0.25%). Avoiding shorting strength."
+                            )
+                            logger.warning(f"🚫 {reason}")
+                            valid_dec.action = "HOLD"
+                            valid_dec.leverage = 0
+                            valid_dec.size_pct = 0
+                            cb = list(valid_dec.blocked_by or [])
+                            if "MOMENTUM_UP_15M" not in cb:
+                                cb.append("MOMENTUM_UP_15M")
+                            valid_dec.blocked_by = cb
+                            valid_dec.rationale = f"{reason} Original: {valid_dec.rationale}"
+                        elif valid_dec.action == "OPEN_LONG" and r15 <= -0.25:
+                            reason = (
+                                f"MOMENTUM_15M_GUARD: Blocked OPEN_LONG on SOL due to bearish 15m trend "
+                                f"(return_15m={r15:.2f}% <= -0.25%). Avoiding catching a falling knife."
+                            )
+                            logger.warning(f"🚫 {reason}")
+                            valid_dec.action = "HOLD"
+                            valid_dec.leverage = 0
+                            valid_dec.size_pct = 0
+                            cb = list(valid_dec.blocked_by or [])
+                            if "MOMENTUM_DOWN_15M" not in cb:
+                                cb.append("MOMENTUM_DOWN_15M")
+                            valid_dec.blocked_by = cb
+                            valid_dec.rationale = f"{reason} Original: {valid_dec.rationale}"
+                except Exception as _e:
+                    logger.warning(f"⚠️ MOMENTUM_15M_GUARD failed: {_e}")
                 
                 crash_guard_blocked = False
                 crash_guard_reason = ""

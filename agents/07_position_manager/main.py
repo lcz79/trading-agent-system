@@ -876,14 +876,40 @@ def check_and_update_trailing_stops():
                 # BREAK-EVEN PROTECTION: se in profitto sufficiente, SL minimo = entry + margine
                 # --- PROFIT LOCK (leveraged trigger, raw lock) ---
                 # Se ROI leveraged >= soglia, blocca un minimo profitto raw sopra entry.
-                pl1_act_lev = float(os.getenv("PROFIT_LOCK_1_ACTIVATION_LEV_PCT", "0.025"))
-                pl1_margin_raw = float(os.getenv("PROFIT_LOCK_1_MARGIN_RAW_PCT", "0.0018"))
-                if roi_lev >= pl1_act_lev:
-                    pl1_sl = entry_price * (1 + pl1_margin_raw)
-                    if target_sl < pl1_sl:
-                        target_sl = pl1_sl
-                        if sym_id_dbg in DEBUG_SYMBOLS:
-                            print(f"🧷 PROFIT LOCK LONG {symbol}: roi_lev>={pl1_act_lev*100:.2f}% => SL>={pl1_sl:.2f} (+{pl1_margin_raw*100:.2f}% raw)")
+                # --- PROFIT LOCK (raw steps, leverage-independent) ---
+                # Steps format: "trigger_raw:lock_raw,trigger_raw:lock_raw,..."
+                # Example: "0.006:0.0018,0.010:0.0035"
+                steps_raw = os.getenv(
+                    "PROFIT_LOCK_RAW_STEPS",
+                    "0.006:0.0018,0.010:0.0035,0.012:0.0060,0.016:0.0090,0.020:0.0120",
+                )
+
+                best_lock_raw = None
+                try:
+                    for part in (steps_raw or "").split(","):
+                        part = part.strip()
+                        if not part or ":" not in part:
+                            continue
+                        trig_s, lock_s = part.split(":", 1)
+                        trig = float(trig_s.strip())
+                        lock = float(lock_s.strip())
+                        if roi_raw >= trig:
+                            if best_lock_raw is None or lock > best_lock_raw:
+                                best_lock_raw = lock
+                except Exception as e:
+                    if sym_id_dbg in DEBUG_SYMBOLS:
+                        print(f"⚠️ PROFIT_LOCK_RAW_STEPS parse error for {symbol}: {e}")
+
+                if best_lock_raw is not None:
+                    pl_sl = entry_price * (1 + best_lock_raw)
+                    if target_sl < pl_sl:
+                        target_sl = pl_sl
+                    if sym_id_dbg in DEBUG_SYMBOLS:
+                        print(
+                            f"🧷 PROFIT LOCK STEP LONG {symbol}: roi_raw={roi_raw*100:.3f}% "
+                            f"=> lock_raw={best_lock_raw*100:.3f}% => SL>={target_sl:.2f}"
+                        )
+
                 if roi_raw >= BREAKEVEN_ACTIVATION_RAW_PCT:
                     min_sl = entry_price * (1 + BREAKEVEN_MARGIN_PCT)
                     if target_sl < min_sl:
@@ -959,16 +985,38 @@ def check_and_update_trailing_stops():
                 # Evita di impostare uno SL *sotto o uguale* all'entry prima della logica di breakeven/profit-lock.
                 # Uno SL sopra entry è normale per una posizione SHORT.
                 # BREAK-EVEN PROTECTION per short
-                # --- PROFIT LOCK (leveraged trigger, raw lock) ---
-                # Se ROI leveraged >= soglia, blocca un minimo profitto raw sopra entry.
-                pl1_act_lev = float(os.getenv("PROFIT_LOCK_1_ACTIVATION_LEV_PCT", "0.025"))
-                pl1_margin_raw = float(os.getenv("PROFIT_LOCK_1_MARGIN_RAW_PCT", "0.0018"))
-                if roi_lev >= pl1_act_lev:
-                    pl1_sl = entry_price * (1 + pl1_margin_raw)
-                    if target_sl < pl1_sl:
-                        target_sl = pl1_sl
-                        if sym_id_dbg in DEBUG_SYMBOLS:
-                            print(f"🧷 PROFIT LOCK LONG {symbol}: roi_lev>={pl1_act_lev*100:.2f}% => SL<={pl1_sl:.2f} (-{pl1_margin_raw*100:.2f}% raw)")
+                # --- PROFIT LOCK (raw steps, leverage-independent) ---
+                steps_raw = os.getenv(
+                    "PROFIT_LOCK_RAW_STEPS",
+                    "0.006:0.0018,0.010:0.0035,0.012:0.0060,0.016:0.0090,0.020:0.0120",
+                )
+
+                best_lock_raw = None
+                try:
+                    for part in (steps_raw or "").split(","):
+                        part = part.strip()
+                        if not part or ":" not in part:
+                            continue
+                        trig_s, lock_s = part.split(":", 1)
+                        trig = float(trig_s.strip())
+                        lock = float(lock_s.strip())
+                        if roi_raw >= trig:
+                            if best_lock_raw is None or lock > best_lock_raw:
+                                best_lock_raw = lock
+                except Exception as e:
+                    if sym_id_dbg in DEBUG_SYMBOLS:
+                        print(f"⚠️ PROFIT_LOCK_RAW_STEPS parse error for {symbol}: {e}")
+
+                if best_lock_raw is not None:
+                    pl_sl = entry_price * (1 - best_lock_raw)
+                    if target_sl > pl_sl:
+                        target_sl = pl_sl
+                    if sym_id_dbg in DEBUG_SYMBOLS:
+                        print(
+                            f"🧷 PROFIT LOCK STEP SHORT {symbol}: roi_raw={roi_raw*100:.3f}% "
+                            f"=> lock_raw={best_lock_raw*100:.3f}% => SL<={target_sl:.2f}"
+                        )
+
                 if roi_raw >= BREAKEVEN_ACTIVATION_RAW_PCT:
                     max_sl = entry_price * (1 - BREAKEVEN_MARGIN_PCT)
                     if target_sl > max_sl:
@@ -1336,7 +1384,7 @@ def check_recent_closes_and_save_cooldown():
         if not res:
             print("closed_pnl: empty response")
             return
-        if res.get("retCode") != 0:
+        if str(res.get("retCode")) != "0":
             print("closed_pnl retCode=" + str(res.get("retCode")) + " retMsg=" + str(res.get("retMsg")))
             return
         items = (res.get("result", {}) or {}).get("list", []) or []
@@ -1658,7 +1706,7 @@ def get_closed():
         return []
     try:
         res = exchange.private_get_v5_position_closed_pnl({"category": "linear", "limit": 20})
-        if res and res.get("retCode") == 0:
+        if res and str(res.get("retCode")) == "0":
             items = (res.get("result", {}) or {}).get("list", []) or []
             clean = []
             for i in items:
