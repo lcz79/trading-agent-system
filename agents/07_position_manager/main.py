@@ -25,7 +25,7 @@ IS_TESTNET = os.getenv("BYBIT_TESTNET", "false").lower() == "true"
 # metti BYBIT_HEDGE_MODE=true. Se non sei sicuro, lascialo false.
 HEDGE_MODE = os.getenv("BYBIT_HEDGE_MODE", "false").lower() == "true"
 # --- PARAMETRI TRAILING STOP DINAMICO (ATR-BASED) ---
-TRAILING_ACTIVATION_RAW_PCT = float(os.getenv("TRAILING_ACTIVATION_RAW_PCT", "0.01"))  # 1% (leveraged ROI fraction) - more aggressive
+TRAILING_ACTIVATION_RAW_PCT = float(os.getenv("TRAILING_ACTIVATION_RAW_PCT", "0.025"))  # 2.5% (leveraged ROI fraction) - give breathing room
 ATR_MULTIPLIER_DEFAULT = float(os.getenv("ATR_MULTIPLIER_DEFAULT", "2.5"))
 ATR_MULTIPLIERS = {
     "BTC": 2.6,
@@ -38,7 +38,7 @@ TECHNICAL_ANALYZER_URL = os.getenv("TECHNICAL_ANALYZER_URL", "http://01_technica
 FALLBACK_TRAILING_PCT = float(os.getenv("FALLBACK_TRAILING_PCT", "0.025"))  # 2.5%
 DEFAULT_INITIAL_SL_PCT = float(os.getenv("DEFAULT_INITIAL_SL_PCT", "0.04"))  # 4%
 # --- BREAK-EVEN PROTECTION ---
-BREAKEVEN_ACTIVATION_RAW_PCT = float(os.getenv("BREAKEVEN_ACTIVATION_RAW_PCT", "0.006"))  # 0.6% ROI (leveraged)
+BREAKEVEN_ACTIVATION_RAW_PCT = float(os.getenv("BREAKEVEN_ACTIVATION_RAW_PCT", "0.015"))  # 1.5% ROI (leveraged)
 BREAKEVEN_MARGIN_PCT = float(os.getenv("BREAKEVEN_MARGIN_PCT", "0.001"))  # 0.1% margin
 # --- PARAMETRI AI REVIEW / REVERSE ---
 ENABLE_AI_REVIEW = os.getenv("ENABLE_AI_REVIEW", "true").lower() == "true"
@@ -55,7 +55,7 @@ COOLDOWN_MINUTES = int(os.getenv("COOLDOWN_MINUTES", "5"))
 COOLDOWN_FILE = os.getenv("COOLDOWN_FILE", "/data/closed_cooldown.json")
 # --- SCALPING CONFIGURATION ---
 # Default time in trade limit for scalping mode (20-60 minutes)
-DEFAULT_TIME_IN_TRADE_LIMIT_SEC = int(os.getenv("DEFAULT_TIME_IN_TRADE_LIMIT_SEC", "2400"))  # 40 minutes default
+DEFAULT_TIME_IN_TRADE_LIMIT_SEC = int(os.getenv("DEFAULT_TIME_IN_TRADE_LIMIT_SEC", "7200"))  # 2 hours default - let trades develop
 # --- AI DECISIONS FILE ---
 AI_DECISIONS_FILE = os.getenv("AI_DECISIONS_FILE", "/data/ai_decisions.json")
 # --- TRAILING STATE FILE (prevents SL regression) ---
@@ -242,8 +242,8 @@ def _save_trailing_state(state: dict) -> None:
 # =========================================================
 PROFIT_LOCK_STATE_FILE = os.getenv("PROFIT_LOCK_STATE_FILE", "/data/profit_lock_state.json")
 PROFIT_LOCK_CONFIRM_SECONDS = int(os.getenv("PROFIT_LOCK_CONFIRM_SECONDS", "90"))
-# ROI values here are "leveraged ROI fraction" (e.g. 0.018 = 1.8% lev ROI)
-PROFIT_LOCK_ARM_ROI = float(os.getenv("PROFIT_LOCK_ARM_ROI", "0.018"))
+# ROI values here are "leveraged ROI fraction" (e.g. 0.06 = 6% lev ROI)
+PROFIT_LOCK_ARM_ROI = float(os.getenv("PROFIT_LOCK_ARM_ROI", "0.06"))  # 6% - avoid closing too early
 PROFIT_LOCK_MAX_BACKSTEP_ROI = float(os.getenv("PROFIT_LOCK_MAX_BACKSTEP_ROI", "0.003"))
 # When profit-lock is confirmed, tighten the ATR multiplier to protect more profit
 ATR_MULTIPLIER_AGGRESSIVE = float(os.getenv("ATR_MULTIPLIER_AGGRESSIVE", "1.2"))
@@ -930,10 +930,10 @@ def check_and_update_trailing_stops():
                 # Se ROI leveraged >= soglia, blocca un minimo profitto raw sopra entry.
                 # --- PROFIT LOCK (raw steps, leverage-independent) ---
                 # Steps format: "trigger_raw:lock_raw,trigger_raw:lock_raw,..."
-                # Example: "0.006:0.0018,0.010:0.0035"
+                # Example: "0.015:0.005,0.025:0.010" - less aggressive steps
                 steps_raw = os.getenv(
                     "PROFIT_LOCK_RAW_STEPS",
-                    "0.006:0.0018,0.010:0.0035,0.012:0.0060,0.016:0.0090,0.020:0.0120",
+                    "0.015:0.005,0.025:0.010,0.035:0.015,0.045:0.020,0.060:0.030",
                 )
 
                 best_lock_raw = None
@@ -1040,7 +1040,7 @@ def check_and_update_trailing_stops():
                 # --- PROFIT LOCK (raw steps, leverage-independent) ---
                 steps_raw = os.getenv(
                     "PROFIT_LOCK_RAW_STEPS",
-                    "0.006:0.0018,0.010:0.0035,0.012:0.0060,0.016:0.0090,0.020:0.0120",
+                    "0.015:0.005,0.025:0.010,0.035:0.015,0.045:0.020,0.060:0.030",
                 )
 
                 best_lock_raw = None
