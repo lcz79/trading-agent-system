@@ -289,7 +289,7 @@ def test_guardrails():
     assert result['direction_considered'] == 'LONG', "❌ Direction non corretta!"
     print(f"   ✅ OPEN_LONG con direction='SHORT' corretto a 'LONG'")
     
-    print("\n3. Test inferenza blocked_by per bassa confidence...")
+    print("\n3. Test inferenza soft_blockers per bassa confidence...")
     decision_dict = {
         "symbol": "SOLUSDT",
         "action": "HOLD",
@@ -297,14 +297,15 @@ def test_guardrails():
         "confidence": 40  # Bassa confidence
     }
     result = master_ai.enforce_decision_consistency(decision_dict)
-    assert 'LOW_CONFIDENCE' in result.get('blocked_by', []), "❌ Blocked by non inferito!"
-    print(f"   ✅ HOLD con confidence=40 -> blocked_by=['LOW_CONFIDENCE']")
+    assert 'LOW_CONFIDENCE' in result.get('soft_blockers', []), "❌ soft_blockers non inferito!"
+    assert not result.get('blocked_by'), "❌ blocked_by dovrebbe essere vuoto (LOW_CONFIDENCE è SOFT)"
+    print(f"   ✅ HOLD con confidence=40 -> soft_blockers=['LOW_CONFIDENCE']")
     
-    print("\n4. Test forzatura HOLD quando blocked_by presente...")
+    print("\n4. Test forzatura HOLD quando HARD blocked_by presente...")
     decision_dict = {
         "symbol": "ETHUSDT",
         "action": "OPEN_LONG",  # Inconsistente con blocked_by
-        "blocked_by": ["INSUFFICIENT_MARGIN"],
+        "blocked_by": ["INSUFFICIENT_MARGIN"],  # HARD blocker
         "rationale": "Voglio aprire ma non ho margine",
         "confidence": 80,
         "leverage": 5,
@@ -314,7 +315,7 @@ def test_guardrails():
     assert result['action'] == 'HOLD', "❌ Action non forzato a HOLD!"
     assert result['leverage'] == 1.0, "❌ Leverage non azzerato!"
     assert result['size_pct'] == 0.0, "❌ Size non azzerato!"
-    print(f"   ✅ OPEN_LONG con blocked_by forzato a HOLD")
+    print(f"   ✅ OPEN_LONG con HARD blocked_by forzato a HOLD")
     
     print("\n5. Test backward compatibility setup_confirmations...")
     decision_dict = {

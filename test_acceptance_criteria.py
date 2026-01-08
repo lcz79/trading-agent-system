@@ -198,10 +198,12 @@ def test_acceptance_criteria_3():
     
     result_hold = master_ai.enforce_decision_consistency(old_hold)
     
-    print("\n✅ Test 3B: Old HOLD con bassa confidence riceve blocked_by automaticamente")
-    assert result_hold.get('blocked_by'), "❌ Blocked by dovrebbe essere inferito"
-    assert 'LOW_CONFIDENCE' in result_hold['blocked_by'], "❌ Dovrebbe contenere LOW_CONFIDENCE"
-    print(f"   ✅ blocked_by inferito: {result_hold['blocked_by']}")
+    print("\n✅ Test 3B: Old HOLD con bassa confidence riceve soft_blockers automaticamente")
+    assert result_hold.get('soft_blockers'), "❌ soft_blockers dovrebbe essere inferito per LOW_CONFIDENCE"
+    assert 'LOW_CONFIDENCE' in result_hold['soft_blockers'], "❌ Dovrebbe contenere LOW_CONFIDENCE in soft_blockers"
+    assert not result_hold.get('blocked_by'), "❌ blocked_by dovrebbe essere vuoto (LOW_CONFIDENCE è SOFT, non HARD)"
+    print(f"   ✅ soft_blockers inferito: {result_hold['soft_blockers']}")
+    print(f"   ✅ blocked_by rimane vuoto: {result_hold.get('blocked_by', [])}")
     
     return True
 
