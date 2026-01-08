@@ -195,9 +195,10 @@ def enforce_decision_consistency(decision_dict: dict) -> dict:
     Applica guardrail per garantire coerenza nella decisione AI.
     Post-processa il JSON per:
     1. Garantire che direction_considered sia coerente con action
-    2. Garantire che blocked_by sia presente se action=HOLD con bassa confidence
-    3. Separare setup_confirmations da risk_factors
-    4. Validare che rationale non contenga contraddizioni
+    2. Separare HARD blockers (blocked_by) da SOFT flags (soft_blockers)
+    3. Garantire che HARD blockers forzino HOLD, SOFT flags no
+    4. Separare setup_confirmations da risk_factors
+    5. Validare che rationale non contenga contraddizioni
     """
     action = decision_dict.get('action', 'HOLD')
     confidence = decision_dict.get('confidence', 50)
@@ -224,23 +225,49 @@ def enforce_decision_consistency(decision_dict: dict) -> dict:
     if not decision_dict.get('setup_confirmations') and decision_dict.get('confirmations'):
         decision_dict['setup_confirmations'] = decision_dict['confirmations']
     
-    # 4. Inferisci blocked_by se action=HOLD con bassa confidence
-    if action == 'HOLD' and not decision_dict.get('blocked_by'):
-        if confidence < CONFIDENCE_THRESHOLD_LOW:
-            decision_dict['blocked_by'] = ['LOW_CONFIDENCE']
-            logger.info(f"✅ Inferito blocked_by=['LOW_CONFIDENCE'] per HOLD con confidence={confidence}")
-        elif not decision_dict.get('setup_confirmations') or len(decision_dict.get('setup_confirmations', [])) < MIN_CONFIRMATIONS_REQUIRED:
-            decision_dict['blocked_by'] = ['CONFLICTING_SIGNALS']
-            logger.info(f"✅ Inferito blocked_by=['CONFLICTING_SIGNALS'] per HOLD con poche conferme")
+    # 4. Backward compatibility: migrate legacy soft reasons from blocked_by to soft_blockers
+    blocked_by = decision_dict.get('blocked_by', [])
+    soft_blockers = decision_dict.get('soft_blockers', [])
     
-    # 5. Se ci sono blocked_by, action DEVE essere HOLD (o CLOSE se posizione aperta)
+    if blocked_by:
+        # Define soft reasons that should be migrated
+        soft_reasons = ['LOW_CONFIDENCE', 'CONFLICTING_SIGNALS']
+        hard_reasons = []
+        migrated_soft = []
+        
+        for reason in blocked_by:
+            if reason in soft_reasons:
+                migrated_soft.append(reason)
+            else:
+                hard_reasons.append(reason)
+        
+        # Update blocked_by to contain only hard reasons
+        decision_dict['blocked_by'] = hard_reasons
+        
+        # Merge migrated soft reasons into soft_blockers
+        if migrated_soft:
+            existing_soft = list(soft_blockers) if isinstance(soft_blockers, list) else []
+            combined_soft = list(set(existing_soft + migrated_soft))
+            decision_dict['soft_blockers'] = combined_soft
+            logger.info(f"✅ Migrated soft reasons from blocked_by to soft_blockers: {migrated_soft}")
+    
+    # 5. Inferisci soft_blockers se action=HOLD con bassa confidence e nessun hard blocker
+    if action == 'HOLD' and not decision_dict.get('blocked_by') and not decision_dict.get('soft_blockers'):
+        if confidence < CONFIDENCE_THRESHOLD_LOW:
+            decision_dict['soft_blockers'] = ['LOW_CONFIDENCE']
+            logger.info(f"✅ Inferito soft_blockers=['LOW_CONFIDENCE'] per HOLD con confidence={confidence}")
+        elif not decision_dict.get('setup_confirmations') or len(decision_dict.get('setup_confirmations', [])) < MIN_CONFIRMATIONS_REQUIRED:
+            decision_dict['soft_blockers'] = ['CONFLICTING_SIGNALS']
+            logger.info(f"✅ Inferito soft_blockers=['CONFLICTING_SIGNALS'] per HOLD con poche conferme")
+    
+    # 6. Se ci sono HARD blockers (blocked_by), action DEVE essere HOLD (o CLOSE se posizione aperta)
     if decision_dict.get('blocked_by') and action not in ['HOLD', 'CLOSE']:
-        logger.warning(f"⚠️ Incoerenza: blocked_by presente ma action={action}, forzato a HOLD")
+        logger.warning(f"⚠️ Incoerenza: HARD blocked_by presente ma action={action}, forzato a HOLD")
         decision_dict['action'] = 'HOLD'
         decision_dict['leverage'] = 1.0
         decision_dict['size_pct'] = 0.0
     
-    # 6. Valida rationale per contraddizioni comuni
+    # 7. Valida rationale per contraddizioni comuni
     rationale = decision_dict.get('rationale', '').lower()
     if action == 'OPEN_SHORT':
         # Non dovrebbe menzionare "long setup" o "buy" come setup considerato
@@ -311,6 +338,7 @@ def save_ai_decision(decision_data):
             # New structured fields
             'setup_confirmations': decision_data.get('setup_confirmations', []),
             'blocked_by': decision_data.get('blocked_by', []),
+            'soft_blockers': decision_data.get('soft_blockers', []),
             'direction_considered': decision_data.get('direction_considered', 'NONE')
         })
         
@@ -327,15 +355,26 @@ def save_ai_decision(decision_data):
 
 
 # Blocker reasons for structured decisions
-BLOCKER_REASONS = Literal[
+# HARD constraints that ALWAYS block OPEN actions
+HARD_BLOCKER_REASONS = Literal[
     "INSUFFICIENT_MARGIN",
     "MAX_POSITIONS",
     "COOLDOWN",
     "DRAWDOWN_GUARD",
-    "",
-    "CONFLICTING_SIGNALS",
+    "CRASH_GUARD",
+    "LOW_PRE_SCORE",
+    "LOW_RANGE_SCORE",
+    "MOMENTUM_UP_15M",
+    "MOMENTUM_DOWN_15M",
+    "LOW_VOLATILITY",
+    ""
+]
+
+# SOFT constraints that are warnings/flags but don't force HOLD
+SOFT_BLOCKER_REASONS = Literal[
     "LOW_CONFIDENCE",
-    "CRASH_GUARD"
+    "CONFLICTING_SIGNALS",
+    ""
 ]
 
 class Decision(BaseModel):
@@ -349,7 +388,8 @@ class Decision(BaseModel):
     risk_factors: Optional[List[str]] = None
     # New structured fields for coherence
     setup_confirmations: Optional[List[str]] = None
-    blocked_by: Optional[List[BLOCKER_REASONS]] = None
+    blocked_by: Optional[List[HARD_BLOCKER_REASONS]] = None  # HARD constraints only
+    soft_blockers: Optional[List[SOFT_BLOCKER_REASONS]] = None  # SOFT warnings/flags
     direction_considered: Optional[Literal["LONG", "SHORT", "NONE"]] = None
     # Scalping parameters
     tp_pct: Optional[float] = None  # Take profit percentage (e.g., 0.02 for 2%)
@@ -560,6 +600,7 @@ NON un ostacolo che blocca le tue decisioni quando vedi opportunità valide.
 - ✅ Sentiment/news non contrario e volume adeguato
 
 ## VINCOLI CHE BLOCCANO L'APERTURA (GUARDRAIL ASSOLUTI - HARD CONSTRAINTS)
+Questi vanno in `blocked_by` e DEVONO forzare action=HOLD:
 - **INSUFFICIENT_MARGIN**: Margine disponibile insufficiente (< 10 USDT disponibili)
 - **MAX_POSITIONS**: Massimo numero posizioni raggiunto
 - **COOLDOWN**: Posizione chiusa di recente nella stessa direzione (evita revenge trading)
@@ -567,24 +608,30 @@ NON un ostacolo che blocca le tue decisioni quando vedi opportunità valide.
 - **CRASH_GUARD**: Movimento violento contro la direzione (no knife catching)
   - Block LONG se return_5m <= -0.6% (crash in atto)
   - Block SHORT se return_5m >= +0.6% (pump violento in atto)
+- **LOW_PRE_SCORE + LOW_RANGE_SCORE**: Entrambi gli score sotto soglia E < 3 conferme
+- **MOMENTUM_UP_15M / MOMENTUM_DOWN_15M**: SOL airbag per evitare contrarian in trend forte
+- **LOW_VOLATILITY**: Volatilità troppo bassa, mercato in chop
 
-## VINCOLI SOFT (PUOI SUPERARE CON RATIONALE FORTE)
-- **LOW_PRE_SCORE / LOW_RANGE_SCORE**: Score matematici bassi - superabile con ≥3 conferme solide
-- **LOW_CONFIDENCE**: Confidenza < 50% - ma se hai buone ragioni, puoi aprire comunque
-- **CONFLICTING_SIGNALS**: Segnali contrastanti - valuta se uno è più importante
-- **Pattern perdenti storici**: Non è un blocco, aumenta solo prudenza
+## VINCOLI SOFT (FLAGS/WARNINGS - NON BLOCCANO APERTURA)
+Questi vanno in `soft_blockers` e NON forzano HOLD - puoi aprire comunque se giustificato:
+- **LOW_CONFIDENCE**: Confidenza < 50% - ma se hai buone ragioni e ≥3 conferme, puoi aprire
+- **CONFLICTING_SIGNALS**: Segnali contrastanti - valuta quale è più importante e giustifica
+- Pattern perdenti storici: Non è un blocco, aumenta solo prudenza
 
 ## REGOLE DI COERENZA CRITICA
 - **DIREZIONE**: Se action è OPEN_SHORT, direction_considered DEVE essere "SHORT" e setup_confirmations devono essere per SHORT
 - **SEPARAZIONE**: NON mescolare risk factors con setup confirmations
-- **BLOCCO HARD**: Se blocked_by contiene vincolo HARD, action DEVE essere HOLD
+- **SEPARAZIONE BLOCCHI**: HARD constraints vanno in `blocked_by`, SOFT in `soft_blockers`
+- **BLOCCO HARD**: Se `blocked_by` contiene vincolo HARD, action DEVE essere HOLD
+- **BLOCCHI SOFT**: Se `soft_blockers` contiene flags, puoi APRIRE se hai ≥3 conferme e rationale forte
 - **RATIONALE**: Spiega sempre perché superi un vincolo soft se lo fai
 
-Esempio CORRETTO per OPEN_SHORT con scalping:
+Esempio CORRETTO per OPEN_SHORT con scalping e soft blocker:
 - direction_considered: "SHORT"
-- setup_confirmations: ["Momentum 5m ribassista", "RSI > 65 (zona ipercomprato)", "Resistenza rifiutata"]
-- blocked_by: [] (vuoto se non bloccato)
-- rationale: "Setup SHORT scalping: momentum 5m bearish + RSI ipercomprato. Apertura SHORT con target 2%, SL 1.5%, max 60 min. Pre_score 48 (sotto soglia) ma 4 conferme solide giustificano apertura."
+- setup_confirmations: ["Momentum 5m ribassista", "RSI > 65 (zona ipercomprato)", "Resistenza rifiutata", "Volume conferma"]
+- blocked_by: [] (vuoto - nessun HARD blocker)
+- soft_blockers: ["LOW_CONFIDENCE"] (confidence 55% ma ho 4 conferme solide)
+- rationale: "Setup SHORT scalping: momentum 5m bearish + RSI ipercomprato + resistenza + volume. 4 conferme solide giustificano apertura nonostante confidence 55%. Apertura SHORT con target 2%, SL 1.5%, max 60 min."
 - tp_pct: 0.02
 - sl_pct: 0.015
 - time_in_trade_limit_sec: 3600
@@ -664,7 +711,8 @@ Considera anche:
       "confirmations": ["lista conferme generali (backward compat)"],
       "risk_factors": ["lista rischi identificati (backward compat)"],
       "setup_confirmations": ["conferme specifiche per la direzione considerata"],
-      "blocked_by": ["INSUFFICIENT_MARGIN", "MAX_POSITIONS", "COOLDOWN", "DRAWDOWN_GUARD", "", "CONFLICTING_SIGNALS", "LOW_CONFIDENCE", "CRASH_GUARD"],
+      "blocked_by": ["HARD constraints: INSUFFICIENT_MARGIN, MAX_POSITIONS, COOLDOWN, DRAWDOWN_GUARD, CRASH_GUARD, LOW_PRE_SCORE, LOW_RANGE_SCORE, MOMENTUM_UP_15M, MOMENTUM_DOWN_15M, LOW_VOLATILITY"],
+      "soft_blockers": ["SOFT warnings: LOW_CONFIDENCE, CONFLICTING_SIGNALS - NON bloccano apertura"],
       "direction_considered": "LONG|SHORT|NONE",
       "tp_pct": 0.02,
       "sl_pct": 0.015,
@@ -1416,6 +1464,13 @@ Evolved params (guidance):
                     valid_dec.action = "HOLD"
                     valid_dec.leverage = 0
                     valid_dec.size_pct = 0
+                    
+                    # Add INSUFFICIENT_MARGIN to blocked_by
+                    current_blocked = list(valid_dec.blocked_by or [])
+                    if "INSUFFICIENT_MARGIN" not in current_blocked:
+                        current_blocked.append("INSUFFICIENT_MARGIN")
+                    valid_dec.blocked_by = current_blocked
+                    
                     valid_dec.rationale = (
                         f"Blocked: insufficient free margin "
                         f"(available_for_new_trades={wallet_available_for_new_trades:.2f}, "
@@ -1563,6 +1618,7 @@ Evolved params (guidance):
                     'source': 'master_ai',
                     'setup_confirmations': valid_dec.setup_confirmations or [],
                     'blocked_by': valid_dec.blocked_by or [],
+                    'soft_blockers': valid_dec.soft_blockers or [],
                     'direction_considered': valid_dec.direction_considered or 'NONE',
                     # FASE 2 metrics
                     'regime': fase2_metrics.get('regime', 'UNKNOWN'),
