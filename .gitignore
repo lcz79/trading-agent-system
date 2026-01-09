@@ -36,3 +36,9 @@ __pycache__/
 # local stray files
 docker
 
+
+# local diagnostics / runtime outputs
+bot_diag_output.txt
+closed_positions.json
+pm_history.json
+pm_openapi.json
