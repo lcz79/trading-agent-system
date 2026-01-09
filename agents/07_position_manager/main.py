@@ -25,7 +25,7 @@ IS_TESTNET = os.getenv("BYBIT_TESTNET", "false").lower() == "true"
 # metti BYBIT_HEDGE_MODE=true. Se non sei sicuro, lascialo false.
 HEDGE_MODE = os.getenv("BYBIT_HEDGE_MODE", "false").lower() == "true"
 # --- PARAMETRI TRAILING STOP DINAMICO (ATR-BASED) ---
-TRAILING_ACTIVATION_RAW_PCT = float(os.getenv("TRAILING_ACTIVATION_RAW_PCT", "0.025"))  # 2.5% (leveraged ROI fraction) - give breathing room
+TRAILING_ACTIVATION_RAW_PCT = float(os.getenv("TRAILING_ACTIVATION_RAW_PCT", "0.0010"))  # 0.10% raw (scalping default)
 ATR_MULTIPLIER_DEFAULT = float(os.getenv("ATR_MULTIPLIER_DEFAULT", "2.5"))
 ATR_MULTIPLIERS = {
     "BTC": 2.6,
@@ -35,8 +35,14 @@ ATR_MULTIPLIERS = {
     "PEPE": 4.0,
 }
 TECHNICAL_ANALYZER_URL = os.getenv("TECHNICAL_ANALYZER_URL", "http://01_technical_analyzer:8000").strip()
-FALLBACK_TRAILING_PCT = float(os.getenv("FALLBACK_TRAILING_PCT", "0.025"))  # 2.5%
+FALLBACK_TRAILING_PCT = float(os.getenv("FALLBACK_TRAILING_PCT", "0.0040"))  # 0.40% raw fallback (scalping)
 DEFAULT_INITIAL_SL_PCT = float(os.getenv("DEFAULT_INITIAL_SL_PCT", "0.04"))  # 4%
+
+# --- MIN STEP (avoid Bybit "not modified" spam) ---
+MIN_SL_MOVE_BTC = float(os.getenv("MIN_SL_MOVE_BTC", "15.0"))
+MIN_SL_MOVE_ETH = float(os.getenv("MIN_SL_MOVE_ETH", "0.8"))
+MIN_SL_MOVE_SOL = float(os.getenv("MIN_SL_MOVE_SOL", "0.05"))
+MIN_SL_MOVE_DEFAULT = float(os.getenv("MIN_SL_MOVE_DEFAULT", "0.5"))
 # --- BREAK-EVEN PROTECTION ---
 BREAKEVEN_ACTIVATION_RAW_PCT = float(os.getenv("BREAKEVEN_ACTIVATION_RAW_PCT", "0.015"))  # 1.5% ROI (leveraged)
 BREAKEVEN_MARGIN_PCT = float(os.getenv("BREAKEVEN_MARGIN_PCT", "0.001"))  # 0.1% margin
@@ -67,6 +73,28 @@ DEFAULT_SIZE_PCT = float(os.getenv("DEFAULT_SIZE_PCT", "0.15"))
 # Comma-separated list of symbols to show detailed debug logs (e.g., "BTCUSDT,ETHUSDT")
 DEBUG_SYMBOLS = [s.strip() for s in os.getenv("DEBUG_SYMBOLS", "BTCUSDT").split(",") if s.strip()]
 file_lock = Lock()
+
+
+def _symbol_base_simple(symbol: str) -> str:
+    try:
+        sid = bybit_symbol_id(symbol)
+    except Exception:
+        sid = str(symbol or "")
+    sid = sid.upper().replace("/", "").replace(":USDT", "")
+    for base in ("BTC", "ETH", "SOL"):
+        if sid.startswith(base):
+            return base
+    return sid.replace("USDT", "").replace("USDC", "")[:10] or sid
+
+def min_sl_move_for_symbol(symbol: str) -> float:
+    base = _symbol_base_simple(symbol)
+    if base == "BTC":
+        return MIN_SL_MOVE_BTC
+    if base == "ETH":
+        return MIN_SL_MOVE_ETH
+    if base == "SOL":
+        return MIN_SL_MOVE_SOL
+    return MIN_SL_MOVE_DEFAULT
 # =========================================================
 # HELPERS
 # =========================================================
@@ -704,20 +732,45 @@ def get_atr_for_symbol(symbol: str) -> Tuple[Optional[float], Optional[float]]:
     except Exception:
         pass
     return None, None
-def get_trailing_distance_pct(symbol: str, mark_price: float, aggressive: bool = False) -> float:
+def get_trailing_distance_pct(symbol: str, mark_price: float, leverage: float, aggressive: bool = False) -> float:
+    """Return trailing distance as RAW fraction of price (e.g. 0.002 = 0.2%).
+    Leverage-aware clamps for scalping: higher leverage => tighter raw trailing.
+    """
     atr, price = get_atr_for_symbol(symbol)
     if atr and price and price > 0:
         base = symbol_base(symbol)
-        if aggressive:
-            mult = float(ATR_MULTIPLIER_AGGRESSIVE)
+        mult = float(ATR_MULTIPLIER_AGGRESSIVE) if aggressive else float(ATR_MULTIPLIERS.get(base, ATR_MULTIPLIER_DEFAULT))
+        pct_atr = (float(atr) * float(mult)) / float(price)
+
+        lev = max(1.0, float(leverage))
+        if lev <= 3:
+            min_pct = float(os.getenv("TRAIL_MIN_PCT_LEV_LE_3", "0.0020"))
+            max_pct = float(os.getenv("TRAIL_MAX_PCT_LEV_LE_3", "0.0060"))
+        elif lev <= 5:
+            min_pct = float(os.getenv("TRAIL_MIN_PCT_LEV_LE_5", "0.0015"))
+            max_pct = float(os.getenv("TRAIL_MAX_PCT_LEV_LE_5", "0.0045"))
+        elif lev <= 8:
+            min_pct = float(os.getenv("TRAIL_MIN_PCT_LEV_LE_8", "0.0012"))
+            max_pct = float(os.getenv("TRAIL_MAX_PCT_LEV_LE_8", "0.0035"))
         else:
-            mult = float(ATR_MULTIPLIERS.get(base, ATR_MULTIPLIER_DEFAULT))
-        pct = min(0.08, max(0.005, (atr * mult) / price))
+            min_pct = float(os.getenv("TRAIL_MIN_PCT_LEV_GE_9", "0.0010"))
+            max_pct = float(os.getenv("TRAIL_MAX_PCT_LEV_GE_9", "0.0025"))
+
+        if aggressive:
+            max_pct *= float(os.getenv("TRAIL_STAGE2_MAX_FACTOR", "0.80"))
+            min_pct *= float(os.getenv("TRAIL_STAGE2_MIN_FACTOR", "0.90"))
+
+        pct = min(float(max_pct), max(float(min_pct), float(pct_atr)))
         mode = "AGGR" if aggressive else "NORM"
-        print(f"📊 ATR {symbol}: {atr:.6f}, mult={mult} ({mode}), trailing={pct*100:.2f}%")
-        return pct
+        print(
+            f"📊 ATR {symbol}: atr={atr:.6f} mult={mult} ({mode}) "
+            f"pct_atr={pct_atr*100:.2f}% lev={lev:.1f} clamp=[{min_pct*100:.2f}%,{max_pct*100:.2f}%] "
+            f"-> trailing={pct*100:.2f}%"
+        )
+        return float(pct)
+
     print(f"⚠️ ATR unavailable for {symbol}, using fallback {FALLBACK_TRAILING_PCT*100:.2f}%")
-    return FALLBACK_TRAILING_PCT
+    return float(FALLBACK_TRAILING_PCT)
 # =========================================================
 # ENTRY STOP LOSS (hard floor + ATR-based)
 # =========================================================
@@ -813,16 +866,16 @@ def check_and_update_trailing_stops():
                     f"🧾 TRAIL DEBUG {sym_id_dbg} side={side_dir} "
                     f"entry={entry_price:.2f} mark={mark_price:.2f} lev={leverage:.1f} "
                     f"roi_raw={roi_raw*100:.3f}% roi_lev={roi*100:.3f}% "
-                    f"need>={TRAILING_ACTIVATION_RAW_PCT*100:.3f}% (lev)"
+                    f"need>={TRAILING_ACTIVATION_RAW_PCT*100:.3f}% (raw)"
                 )
             position_idx = get_position_idx_from_position(p)
             k_pl = _trailing_key(symbol, side_dir, position_idx)
             # Activation gate
-            if roi < TRAILING_ACTIVATION_RAW_PCT:
+            if roi_raw < TRAILING_ACTIVATION_RAW_PCT:
                 profit_lock_state.pop(k_pl, None)
                 # Log why trailing is not active for debugging
                 if sym_id_dbg in DEBUG_SYMBOLS:
-                    print(f"   ⏸️ Trailing NOT active: ROI {roi*100:.3f}% < activation threshold {TRAILING_ACTIVATION_RAW_PCT*100:.3f}%")
+                    print(f"   ⏸️ Trailing NOT active: ROI_raw {roi_raw*100:.3f}% < activation threshold {TRAILING_ACTIVATION_RAW_PCT*100:.3f}%")
                 continue
             # Profit-lock stage logic (B: confirm 90s, max backstep 0.3%, aggressive mult 1.2)
             stage = 1
@@ -863,7 +916,7 @@ def check_and_update_trailing_stops():
                     f"roi={roi*100:.2f}% (arm>={PROFIT_LOCK_ARM_ROI*100:.2f}%) "
                     f"confirm={PROFIT_LOCK_CONFIRM_SECONDS}s backstep<={PROFIT_LOCK_MAX_BACKSTEP_ROI*100:.2f}%"
                 )
-            trailing_distance = get_trailing_distance_pct(symbol, mark_price, aggressive=(stage == 2))
+            trailing_distance = get_trailing_distance_pct(symbol, mark_price, leverage, aggressive=(stage == 2))
             new_sl_price = None
             if side_dir == "long":
                 k = _trailing_key(symbol, side_dir, position_idx)
@@ -1104,6 +1157,19 @@ def check_and_update_trailing_stops():
                 f"SL(cur={sl_current}) -> {price_str} (dist={trailing_distance*100:.2f}%) idx={position_idx}"
             )
             try:
+                # Min-step guard to reduce Bybit 'not modified' spam
+                baseline_for_step = sl_current if sl_current and sl_current > 0.0 else to_float(st.get("last_sl"), 0.0)
+                min_step = float(min_sl_move_for_symbol(symbol))
+                if baseline_for_step and baseline_for_step > 0:
+                    if abs(float(new_sl_price) - float(baseline_for_step)) < min_step:
+                        if sym_id_dbg in DEBUG_SYMBOLS:
+                            print(
+                                f"🧱 Skip SL update (min-step): {symbol} "
+                                f"new={new_sl_price:.4f} baseline={baseline_for_step:.4f} "
+                                f"Δ={abs(new_sl_price-baseline_for_step):.4f} < {min_step}"
+                            )
+                        continue
+
                 req = {
                     "category": "linear",
                     "symbol": bybit_symbol_id(symbol),
