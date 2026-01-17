@@ -32,10 +32,17 @@ DISABLED_SYMBOLS = os.getenv("DISABLED_SYMBOLS", "").split(",")  # Comma-separat
 DISABLED_SYMBOLS = [s.strip() for s in DISABLED_SYMBOLS if s.strip()]  # Clean up empty strings
 
 # --- CONFIGURAZIONE OTTIMIZZAZIONE ---
-MAX_POSITIONS = 3  # Numero massimo posizioni contemporanee
+MAX_POSITIONS = int(os.getenv("MAX_POSITIONS", "10"))  # Numero massimo posizioni contemporanee
+MAX_ORDERS_PER_SYMBOL = int(os.getenv("MAX_ORDERS_PER_SYMBOL", "5"))  # Max limit orders per symbol (ladder)
 REVERSE_THRESHOLD = float(os.getenv("REVERSE_THRESHOLD", "2.0"))  # Percentuale perdita per trigger reverse analysis
 CRITICAL_LOSS_PCT_LEV = float(os.getenv("CRITICAL_LOSS_PCT_LEV", "12.0"))  # % perdita (con leva) per trigger gestione critica
 CYCLE_INTERVAL = 60  # Secondi tra ogni ciclo di controllo (era 900)
+# Two-tier cycle configuration
+LIGHT_CYCLE_INTERVAL = int(os.getenv("LIGHT_CYCLE_INTERVAL", "30"))  # Spread/volatility check
+HEAVY_CYCLE_ENABLED = os.getenv("HEAVY_CYCLE_ENABLED", "true").lower() == "true"
+# Triggers for heavy cycle
+SPREAD_TRIGGER_MAX_PCT = float(os.getenv("SPREAD_TRIGGER_MAX_PCT", "0.0010"))  # 0.10% max spread
+VOLATILITY_TRIGGER_MIN_ATR_PCT = float(os.getenv("VOLATILITY_TRIGGER_MIN_ATR_PCT", "0.005"))  # 0.5% min ATR
 DRY_RUN = os.getenv("DRY_RUN", "false").lower() == "true"  # Se true, logga solo azioni senza eseguirle
 CRITICAL_LOSS_PCT_LEV = float(os.getenv("CRITICAL_LOSS_PCT_LEV", "12.0"))  # Soglia perdita % con leva per CRITICAL
 
