@@ -1751,9 +1751,9 @@ def generate_ladder_prices(
                 prices.append(price)
         else:
             print(f"⚠️ ATR unavailable for {symbol}, using BPS fallback")
-            # Fallback to BPS
-            default_bps = [5, 10, 15, 20, 25][:num_orders]
-            bps_offsets = default_bps
+            # Fallback to default BPS if ATR fails
+            if not bps_offsets:
+                bps_offsets = [5, 10, 15, 20, 25][:num_orders]
     
     # BPS-based ladder (fallback or explicit)
     if not prices and bps_offsets:
@@ -1765,8 +1765,9 @@ def generate_ladder_prices(
                 price = current_price * (1 + offset_pct)
             prices.append(price)
     
-    # Default fallback: linear spacing
+    # Default fallback: linear spacing (safeguard against empty list)
     if not prices:
+        print(f"⚠️ No ladder configuration provided for {symbol}, using default spacing")
         default_offsets = [0.0005, 0.0010, 0.0015, 0.0020, 0.0025][:num_orders]
         for offset in default_offsets:
             if side == "long":
@@ -2418,13 +2419,26 @@ def open_position(order: OrderRequest):
                     remaining_qty = final_qty - filled_qty
                     if remaining_qty > 0:
                         # Reprice with tighter ladder (50% of original offset)
+                        reprice_atr_mults = None
+                        reprice_bps = None
+                        
+                        if order.ladder_atr_multipliers:
+                            # Use ATR multipliers scaled by 0.5
+                            reprice_atr_mults = [m * 0.5 for m in order.ladder_atr_multipliers[:3]]
+                        elif order.ladder_bps_offsets:
+                            # Use BPS offsets scaled by 0.5, ensuring minimum of 1 BPS
+                            reprice_bps = [max(1, int(b * 0.5)) for b in order.ladder_bps_offsets[:3]]
+                        else:
+                            # Default: tighter spacing
+                            reprice_bps = [3, 6, 9]
+                        
                         reprice_ladder = generate_ladder_prices(
                             symbol=sym_id,
                             side=requested_dir,
                             current_price=price,
                             num_orders=min(len(unfilled_orders), 3),  # Fewer orders, tighter
-                            atr_multipliers=[m * 0.5 for m in (order.ladder_atr_multipliers or [0.3, 0.6, 0.9])[:3]],
-                            bps_offsets=[b // 2 for b in (order.ladder_bps_offsets or [3, 6, 9])[:3]]
+                            atr_multipliers=reprice_atr_mults,
+                            bps_offsets=reprice_bps
                         )
                         
                         print(f"🔄 Repricing with {len(reprice_ladder)} orders: {[f'{p:.2f}' for p in reprice_ladder]}")
@@ -2533,6 +2547,9 @@ def open_position(order: OrderRequest):
                                           exchange_order_id=exchange_order_id)
         
         # Store position metadata for time-based exit
+        # Note: Using filled_qty instead of final_qty to reflect actual filled amount,
+        # especially important for LIMIT_LADDER mode where partial fills may occur.
+        # Downstream code in position monitoring handles this correctly.
         position_metadata = PositionMetadata(
             symbol=sym_id,
             side=requested_dir,
