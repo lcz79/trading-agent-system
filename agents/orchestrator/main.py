@@ -27,8 +27,29 @@ URLS = {
     "ai": "http://04_master_ai_agent:8000",
     "learning": "http://10_learning_agent:8000"
 }
-SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
+
+# --- SYMBOL UNIVERSE ---
+DEFAULT_SCAN_SYMBOLS = [
+    "BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "ADAUSDT",
+    "DOGEUSDT", "AVAXUSDT", "LINKUSDT", "BNBUSDT", "TRXUSDT",
+]
+
+# Comma-separated list of symbols to scan (e.g. "BTCUSDT,ETHUSDT,...")
+SCAN_SYMBOLS_ENV = os.getenv("SCAN_SYMBOLS", "").strip()
+
+if SCAN_SYMBOLS_ENV:
+    # Normalize: split, strip, uppercase, drop empty, deduplicate preserving order
+    _raw = [s.strip().upper() for s in SCAN_SYMBOLS_ENV.split(",")]
+    SYMBOLS = list(dict.fromkeys([s for s in _raw if s]))
+else:
+    SYMBOLS = DEFAULT_SCAN_SYMBOLS[:]
+
+# Optional: disable specific symbols without changing SCAN_SYMBOLS
 DISABLED_SYMBOLS = os.getenv("DISABLED_SYMBOLS", "").split(",")  # Comma-separated list of disabled symbols
+DISABLED_SYMBOLS = [s.strip().upper() for s in DISABLED_SYMBOLS if s.strip()]  # Clean up empty strings
+
+# Final universe
+SYMBOLS = [s for s in SYMBOLS if s not in DISABLED_SYMBOLS]  # Comma-separated list of disabled symbols
 DISABLED_SYMBOLS = [s.strip() for s in DISABLED_SYMBOLS if s.strip()]  # Clean up empty strings
 
 # --- CONFIGURAZIONE OTTIMIZZAZIONE ---
