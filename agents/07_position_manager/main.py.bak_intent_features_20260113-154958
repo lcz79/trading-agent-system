@@ -1899,8 +1899,7 @@ def open_position(order: OrderRequest):
             tp_pct=order.tp_pct,
             sl_pct=order.sl_pct,
             time_in_trade_limit_sec=order.time_in_trade_limit_sec,
-            cooldown_sec=order.cooldown_sec,
-            features=(order.features or {}),
+            cooldown_sec=order.cooldown_sec
         )
         trading_state.add_intent(new_intent)
         print(f"📝 Intent registered: {intent_id[:8]} for {sym_id} {requested_dir}")

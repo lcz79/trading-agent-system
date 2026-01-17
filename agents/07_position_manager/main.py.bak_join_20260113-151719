@@ -638,6 +638,9 @@ class OrderRequest(BaseModel):
     time_in_trade_limit_sec: Optional[int] = None  # Max holding time
     cooldown_sec: Optional[int] = None  # Cooldown after close
     trail_activation_roi: Optional[float] = None  # ROI threshold for trailing
+
+    # NEW: Telemetria per validazione strategia
+    features: Optional[dict] = None  # snapshot feature/indicatori dal chiamante (orchestrator)
 class CloseRequest(BaseModel):
     symbol: str
 class ReverseRequest(BaseModel):
@@ -686,6 +689,8 @@ def record_trade_for_learning(
     leverage: float,
     duration_minutes: int,
     market_conditions: Optional[dict] = None
+,
+    intent_id: Optional[str] = None  # NEW
 ):
     try:
         side_dir = normalize_position_side(side_raw) or "long"
@@ -1356,6 +1361,26 @@ def execute_close_position(symbol: str, exit_reason: str = "manual") -> bool:
             exit_reason=exit_reason
         )
         
+                # Use trading_state for cooldown management
+        try:
+            trading_state = get_trading_state()
+            # Get position metadata (intent_id, eventuali feature snapshot)
+            pos_metadata = trading_state.get_position(sym_id, side_dir)
+        except Exception:
+            trading_state = None
+            pos_metadata = None
+
+                base_features = {}
+        try:
+            if pos_metadata and getattr(pos_metadata, 'features', None):
+                if isinstance(pos_metadata.features, dict):
+                    base_features = dict(pos_metadata.features)
+        except Exception:
+            base_features = {}
+        mc = {**base_features, "closed_by": exit_reason}
+        # Se in futuro aggiungiamo pos_metadata.features, qui verranno incluse
+        # (per ora lasciamo solo closed_by se non esiste)
+
         record_trade_for_learning(
             symbol=sym_id,
             side_raw=side_dir,
@@ -1363,9 +1388,10 @@ def execute_close_position(symbol: str, exit_reason: str = "manual") -> bool:
             exit_price=mark_price,
             leverage=leverage,
             duration_minutes=0,
-            market_conditions={},
+            market_conditions=mc,
+            intent_id=(pos_metadata.intent_id if pos_metadata and getattr(pos_metadata, 'intent_id', None) else None),
         )
-        # Use trading_state for cooldown management
+# Use trading_state for cooldown management
         try:
             trading_state = get_trading_state()
             
@@ -1536,21 +1562,6 @@ def check_recent_closes_and_save_cooldown():
                     leverage = max(1.0, to_float(item.get("leverage"), 1.0))
                     created_time_ms = int(to_float(item.get("createdTime"), close_time_ms))
                     duration_minutes = int((close_time_ms - created_time_ms) / 1000 / 60)
-                    # Join con TradingState per recuperare intent_id + feature snapshot dell'entry
-                    ts = None
-                    pm = None
-                    feat = {}
-                    try:
-                        ts = get_trading_state()
-                        pm = ts.get_position(symbol_raw, side)
-                    except Exception:
-                        ts = None
-                        pm = None
-                    try:
-                        if pm and getattr(pm, 'features', None) and isinstance(pm.features, dict):
-                            feat = dict(pm.features)
-                    except Exception:
-                        feat = {}
                     record_trade_for_learning(
                         symbol=symbol_raw,
                         side_raw=side,
@@ -1558,15 +1569,8 @@ def check_recent_closes_and_save_cooldown():
                         exit_price=exit_price,
                         leverage=leverage,
                         duration_minutes=duration_minutes,
-                        market_conditions={**feat, "closed_by": "bybit_sl_tp"},
-                        intent_id=(pm.intent_id if pm and getattr(pm, 'intent_id', None) else None),
+                        market_conditions={"closed_by": "bybit_sl_tp"},
                     )
-                    # Pulizia: rimuovi la posizione dallo state (se presente)
-                    try:
-                        if ts and pm:
-                            ts.remove_position(symbol_raw, side)
-                    except Exception:
-                        pass
                 except Exception as e:
                     print(f"⚠️ Errore recording auto-closed trade: {e}")
         if changed:
@@ -1899,8 +1903,7 @@ def open_position(order: OrderRequest):
             tp_pct=order.tp_pct,
             sl_pct=order.sl_pct,
             time_in_trade_limit_sec=order.time_in_trade_limit_sec,
-            cooldown_sec=order.cooldown_sec,
-            features=(order.features or {}),
+            cooldown_sec=order.cooldown_sec
         )
         trading_state.add_intent(new_intent)
         print(f"📝 Intent registered: {intent_id[:8]} for {sym_id} {requested_dir}")

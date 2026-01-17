@@ -1899,7 +1899,7 @@ def open_position(order: OrderRequest):
             tp_pct=order.tp_pct,
             sl_pct=order.sl_pct,
             time_in_trade_limit_sec=order.time_in_trade_limit_sec,
-            cooldown_sec=order.cooldown_sec,
+            cooldown_sec=order.cooldown_sec
             features=(order.features or {}),
         )
         trading_state.add_intent(new_intent)

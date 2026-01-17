@@ -650,38 +650,6 @@ async def analysis_cycle():
                     # Guardrail: in one-way mode (HedgeMode False) do NOT open another position on the same symbol.
                     desired_side = "long" if action == "OPEN_LONG" else "short"
 
-
-                    # === SHORT_MOMENTUM_15M_GATE ===
-                    # Non elimina gli SHORT: li rende coerenti col timeframe 15m.
-                    # Se non troviamo la feature nel payload AI, non blocchiamo (fail-open).
-                    try:
-                        if action == "OPEN_SHORT":
-                            gate_min_conf = float(os.getenv("SHORT_GATE_MIN_CONFIDENCE", "75"))
-                            gate_allow_if_missing = os.getenv("SHORT_GATE_ALLOW_IF_MISSING_15M", "true").lower() == "true"
-
-                            # Prova a recuperare una metrica 15m (nomi possibili)
-                            v15 = None
-                            for k in ("return_15m", "ret_15m", "momentum_15m", "mom_15m", "chg_15m"):
-                                if k in d and d.get(k) is not None:
-                                    try:
-                                        v15 = float(d.get(k))
-                                        break
-                                    except Exception:
-                                        pass
-
-                            conf = float(d.get("confidence", 0) or 0)
-
-                            # Se abbiamo v15: richiedi v15 < 0 per SHORT "normale"
-                            if v15 is not None and v15 >= 0:
-                                if conf < gate_min_conf:
-                                    print(f"        🧭 GATE SHORT {sym}: 15m not bearish (v15={v15:+.4f}) and confidence {conf:.1f} < {gate_min_conf} → HOLD")
-                                    continue
-                            # Se NON abbiamo v15, opzionalmente blocca gli short a conf bassa
-                            if v15 is None and not gate_allow_if_missing and conf < gate_min_conf:
-                                print(f"        🧭 GATE SHORT {sym}: missing 15m momentum and confidence {conf:.1f} < {gate_min_conf} → HOLD")
-                                continue
-                    except Exception as _gate_e:
-                        print(f"        ⚠️ SHORT gate error (non-blocking): {_gate_e}")
                     # Guardrail: respect AI blocked_by if present (prevents pointless opens)
                     blocked_by = d.get("blocked_by") or []
                     if blocked_by:
@@ -770,9 +738,7 @@ async def analysis_cycle():
                         "side": action,
                         "leverage": leverage,
                         "size_pct": size_pct,
-                        "intent_id": intent_id,
-                        "features": d  # telemetria: snapshot decision/indicatori
-                          # For idempotency
+                        "intent_id": intent_id  # For idempotency
                     }
                     
                     # Add optional scalping params if present

@@ -32,7 +32,6 @@ class OrderIntent:
     sl_pct: Optional[float] = None
     time_in_trade_limit_sec:  Optional[int] = None
     cooldown_sec: Optional[int] = None
-    features: dict = {}  # snapshot feature/indicatori all'ingresso
 
     def to_dict(self) -> dict:
         d = asdict(self)
@@ -83,16 +82,6 @@ class PositionMetadata:
 
 @dataclass
 class Cooldown:
-    def __init__(self, symbol: str, side: str, expires_at: str, reason: str = "position_closed"):
-        self.symbol = symbol
-        self.side = side
-        self.expires_at = expires_at
-        self.reason = reason
-    def __init__(self, symbol: str, side: str, expires_at: str, reason: str = "position_closed"):
-        self.symbol = symbol
-        self.side = side
-        self.expires_at = expires_at
-        self.reason = reason
     symbol: str
     side: str
     expires_at: str
@@ -107,6 +96,7 @@ class Cooldown:
 
     def is_expired(self) -> bool:
         return datetime.now() > datetime.fromisoformat(self.expires_at)
+
 
 class TradingState: 
     _instance = None
@@ -126,14 +116,15 @@ class TradingState:
         self._file_lock = threading.Lock()
         self._state = self._load_state()
         self._initialized = True
+
     def _default_state(self) -> dict:
         """Default/required schema for the trading state file."""
         return {
             "version": "1.0.0",
             "last_updated": datetime.utcnow().isoformat(),
-            "order_intents": {},
+            "intents": {},
+            "positions": {},
             "cooldowns": [],
-            "position_metadata": {},
             "trailing_stops": {}
         }
 
@@ -147,10 +138,10 @@ class TradingState:
             if k not in state:
                 state[k] = v
 
-        if not isinstance(state.get("order_intents"), dict):
-            state["order_intents"] = {}
-        if not isinstance(state.get("position_metadata"), dict):
-            state["position_metadata"] = {}
+        if not isinstance(state.get("intents"), dict):
+            state["intents"] = {}
+        if not isinstance(state.get("positions"), dict):
+            state["positions"] = {}
         if not isinstance(state.get("trailing_stops"), dict):
             state["trailing_stops"] = {}
         if not isinstance(state.get("cooldowns"), list):
@@ -163,10 +154,10 @@ class TradingState:
         try: 
             if os.path.exists(TRADING_STATE_FILE):
                 with open(TRADING_STATE_FILE, 'r') as f:
-                    return json.load(f)
+                    return self._normalize_state(json.load(f))
         except Exception as e:
             print(f"⚠️ Error loading trading state: {e}")
-        return {"intents": {}, "positions": {}, "cooldowns": [], "trailing_stops": {}}
+        return self._default_state()
 
     def _save_state(self):
         with self._file_lock:
@@ -235,6 +226,29 @@ class TradingState:
             if pos.is_expired():
                 expired.append(pos)
         return expired
+
+    def prune_positions(self, active_keys: set) -> List[str]:
+        """Remove positions from state that are not currently active on the exchange.
+
+        active_keys must contain entries like 'ETHUSDT_long' or 'ETHUSDT_short'.
+        Returns list of removed keys.
+        """
+        removed: List[str] = []
+        positions = self._state.get("positions", {})
+        if not isinstance(positions, dict):
+            return removed
+        for k in list(positions.keys()):
+            if k not in active_keys:
+                removed.append(k)
+                del positions[k]
+                # also prune trailing stop state for stale positions
+                ts = self._state.get("trailing_stops", {})
+                if isinstance(ts, dict) and k in ts:
+                    del ts[k]
+        if removed:
+            self._state["positions"] = positions
+            self._save_state()
+        return removed
 
     # --- Cooldown Management ---
     def add_cooldown(self, cooldown: Cooldown):
