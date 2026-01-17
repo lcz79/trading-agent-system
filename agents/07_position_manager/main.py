@@ -2337,9 +2337,162 @@ def open_position(order: OrderRequest):
         # Mark intent as EXECUTING
         trading_state.update_intent_status(intent_id, OrderStatus.EXECUTING)
         
-        res = exchange.create_order(sym_ccxt, "market", requested_side, final_qty, params=params)
-        exchange_order_id = res.get("id")
-
+        # === EXECUTION STRATEGY ROUTING ===
+        execution_mode = order.execution_mode.upper()
+        
+        if execution_mode == "LIMIT_LADDER":
+            # LIMIT LADDER EXECUTION
+            print(f"📊 LIMIT_LADDER mode: {sym_ccxt} with {order.max_orders_per_symbol} orders")
+            
+            # Check spread before entry
+            try:
+                from agents.shared.spread_slippage import get_spread_and_check
+                is_acceptable, spread_pct, spread_info = get_spread_and_check(
+                    exchange, sym_ccxt, max_spread_pct=order.max_spread_pct
+                )
+                if not is_acceptable:
+                    print(f"⚠️ Spread too wide: {spread_pct*100:.4f}% > {order.max_spread_pct*100:.4f}%")
+                    trading_state.update_intent_status(intent_id, OrderStatus.CANCELLED,
+                                                      error_message=f"Spread too wide: {spread_pct*100:.4f}%")
+                    return {
+                        "status": "rejected",
+                        "msg": f"Spread too wide: {spread_pct*100:.4f}%",
+                        "intent_id": intent_id
+                    }
+                print(f"✅ Spread acceptable: {spread_pct*100:.4f}%")
+            except ImportError:
+                # Fallback if spread module not available
+                spread_pct = None
+                print("⚠️ Spread check module unavailable, proceeding without check")
+            
+            # Generate ladder prices
+            ladder_prices = generate_ladder_prices(
+                symbol=sym_id,
+                side=requested_dir,
+                current_price=price,
+                num_orders=order.max_orders_per_symbol,
+                atr_multipliers=order.ladder_atr_multipliers,
+                bps_offsets=order.ladder_bps_offsets
+            )
+            
+            print(f"📊 Ladder prices: {[f'{p:.2f}' for p in ladder_prices]}")
+            
+            # Place ladder orders
+            placed_orders = place_limit_order_ladder(
+                symbol=sym_ccxt,
+                side=requested_side,
+                total_qty=final_qty,
+                ladder_prices=ladder_prices,
+                post_only=order.post_only,
+                time_in_force=order.time_in_force
+            )
+            
+            # Extract order IDs
+            order_ids = [o.get("order_id") for o in placed_orders if "order_id" in o]
+            
+            # Store order IDs in intent
+            new_intent.exchange_order_ids = order_ids
+            new_intent.execution_mode = "LIMIT_LADDER"
+            trading_state.add_intent(new_intent)
+            
+            # Monitor fills
+            entry_deadline = order.entry_deadline_sec or 300  # Default 5 minutes
+            fill_result = monitor_ladder_fills(sym_ccxt, order_ids, max_wait_sec=entry_deadline)
+            
+            filled_qty = fill_result.get("filled_qty", 0.0)
+            unfilled_orders = fill_result.get("unfilled_orders", [])
+            fill_status = fill_result.get("status", "unknown")
+            
+            print(f"📊 Fill status: {fill_status}, filled={filled_qty}/{final_qty}, unfilled={len(unfilled_orders)}")
+            
+            # Handle partial fills / unfilled orders
+            if fill_status == "timeout" or unfilled_orders:
+                fallback_mode = order.fallback_mode.upper()
+                
+                if fallback_mode == "REPRICE":
+                    # Cancel and reprice closer to market
+                    print(f"🔄 REPRICE mode: Cancelling {len(unfilled_orders)} unfilled orders")
+                    cancel_unfilled_orders(sym_ccxt, unfilled_orders)
+                    
+                    # Calculate remaining qty
+                    remaining_qty = final_qty - filled_qty
+                    if remaining_qty > 0:
+                        # Reprice with tighter ladder (50% of original offset)
+                        reprice_ladder = generate_ladder_prices(
+                            symbol=sym_id,
+                            side=requested_dir,
+                            current_price=price,
+                            num_orders=min(len(unfilled_orders), 3),  # Fewer orders, tighter
+                            atr_multipliers=[m * 0.5 for m in (order.ladder_atr_multipliers or [0.3, 0.6, 0.9])[:3]],
+                            bps_offsets=[b // 2 for b in (order.ladder_bps_offsets or [3, 6, 9])[:3]]
+                        )
+                        
+                        print(f"🔄 Repricing with {len(reprice_ladder)} orders: {[f'{p:.2f}' for p in reprice_ladder]}")
+                        
+                        repriced_orders = place_limit_order_ladder(
+                            symbol=sym_ccxt,
+                            side=requested_side,
+                            total_qty=remaining_qty,
+                            ladder_prices=reprice_ladder,
+                            post_only=order.post_only,
+                            time_in_force=order.time_in_force
+                        )
+                        
+                        # Monitor repriced fills (shorter timeout)
+                        reprice_result = monitor_ladder_fills(
+                            sym_ccxt,
+                            [o.get("order_id") for o in repriced_orders if "order_id" in o],
+                            max_wait_sec=min(entry_deadline // 2, 120)
+                        )
+                        filled_qty += reprice_result.get("filled_qty", 0.0)
+                        
+                elif fallback_mode == "MARKET":
+                    # Cancel unfilled and execute remaining via market order
+                    print(f"📈 MARKET fallback: Executing {final_qty - filled_qty} remaining via market")
+                    cancel_unfilled_orders(sym_ccxt, unfilled_orders)
+                    
+                    remaining_qty = final_qty - filled_qty
+                    if remaining_qty > 0 and not DRY_RUN:
+                        try:
+                            market_params = {"category": "linear"}
+                            if HEDGE_MODE:
+                                market_params["positionIdx"] = pos_idx
+                            
+                            market_order = exchange.create_order(
+                                sym_ccxt, "market", requested_side, remaining_qty, params=market_params
+                            )
+                            filled_qty += to_float(market_order.get("filled"), remaining_qty)
+                            print(f"✅ Market fallback executed: {market_order.get('id')}")
+                        except Exception as e:
+                            print(f"❌ Market fallback failed: {e}")
+                
+                else:  # NONE - just cancel unfilled
+                    print(f"⏸️ NO_FALLBACK mode: Cancelling {len(unfilled_orders)} unfilled orders")
+                    cancel_unfilled_orders(sym_ccxt, unfilled_orders)
+            
+            # Check if we have enough fill to proceed
+            min_fill_pct = 0.5  # At least 50% filled
+            if filled_qty < final_qty * min_fill_pct:
+                print(f"❌ Insufficient fill: {filled_qty}/{final_qty} ({filled_qty/final_qty*100:.1f}%)")
+                trading_state.update_intent_status(intent_id, OrderStatus.FAILED,
+                                                  error_message=f"Insufficient fill: {filled_qty}/{final_qty}")
+                return {
+                    "status": "failed",
+                    "msg": f"Insufficient fill: {filled_qty}/{final_qty}",
+                    "intent_id": intent_id,
+                    "filled_qty": filled_qty,
+                    "requested_qty": final_qty
+                }
+            
+            exchange_order_id = ",".join([str(oid) for oid in order_ids])  # Comma-separated for ladder
+            
+        else:
+            # MARKET EXECUTION (default)
+            res = exchange.create_order(sym_ccxt, "market", requested_side, final_qty, params=params)
+            exchange_order_id = res.get("id")
+            filled_qty = final_qty
+            spread_pct = None
+        
         # After entry: set StopLoss server-side via trading_stop using MarkPrice (robust retry)
         req = {
             "category": "linear",
@@ -2387,20 +2540,33 @@ def open_position(order: OrderRequest):
             intent_id=intent_id,
             time_in_trade_limit_sec=order.time_in_trade_limit_sec,
             entry_price=price,
-            size=final_qty,
+            size=filled_qty,  # Use actual filled quantity
             leverage=order.leverage,
-            cooldown_sec=order.cooldown_sec
+            cooldown_sec=order.cooldown_sec,
+            execution_mode=execution_mode,
+            spread_at_entry=spread_pct,
+            maker_taker="maker" if execution_mode == "LIMIT_LADDER" and order.post_only else "taker"
         )
         trading_state.add_position(position_metadata)
         
-        print(f"✅ Position opened: {sym_id} {requested_dir} [intent:{intent_id[:8]}]")
+        # Log telemetry if enabled
+        try:
+            from agents.shared.telemetry import log_trade_telemetry
+            # Entry telemetry (will log exit later)
+            print(f"📊 Entry logged: mode={execution_mode}, spread={spread_pct*100 if spread_pct else 0:.4f}%")
+        except ImportError:
+            pass
+        
+        print(f"✅ Position opened: {sym_id} {requested_dir} [intent:{intent_id[:8]}] mode={execution_mode}")
         
         return {
             "status": "executed", 
             "id": exchange_order_id,
             "intent_id": intent_id,
             "symbol": sym_id,
-            "side": requested_dir
+            "side": requested_dir,
+            "execution_mode": execution_mode,
+            "filled_qty": filled_qty if execution_mode == "LIMIT_LADDER" else final_qty
         }
     except Exception as e:
         print(f"❌ Order Error: {e}")

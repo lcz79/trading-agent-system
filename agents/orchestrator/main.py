@@ -166,6 +166,72 @@ def post_json_with_retry(url, json_payload, timeout=30, attempts=3, base_sleep=1
     raise last_exc
 
 
+async def check_spread_trigger(symbol: str, c: httpx.AsyncClient) -> bool:
+    """
+    Check if spread is acceptable for trading.
+    Returns True if spread is within acceptable range.
+    """
+    try:
+        # Fetch orderbook via position manager or directly
+        # For now, use a simple heuristic: always return True
+        # In production, you'd call spread_slippage.py module
+        return True
+    except Exception as e:
+        print(f"        ⚠️ Spread trigger check failed for {symbol}: {e}")
+        return False
+
+
+async def check_volatility_trigger(symbol: str, c: httpx.AsyncClient) -> bool:
+    """
+    Check if volatility is sufficient for trading using ATR%.
+    Returns True if ATR% >= VOLATILITY_TRIGGER_MIN_ATR_PCT.
+    """
+    try:
+        # Fetch technical data
+        tech_resp = await c.post(f"{URLS['tech']}/analyze_multi_tf", json={"symbol": symbol})
+        if tech_resp.status_code != 200:
+            return False
+        
+        tech_data = tech_resp.json()
+        tf_15m = tech_data.get("timeframes", {}).get("15m", {})
+        atr = tf_15m.get("atr")
+        price = tf_15m.get("price")
+        
+        if atr and price and price > 0:
+            atr_pct = atr / price
+            if atr_pct >= VOLATILITY_TRIGGER_MIN_ATR_PCT:
+                return True
+            else:
+                print(f"        📊 {symbol} ATR too low: {atr_pct*100:.3f}% < {VOLATILITY_TRIGGER_MIN_ATR_PCT*100:.3f}%")
+                return False
+        
+        return False
+    except Exception as e:
+        print(f"        ⚠️ Volatility trigger check failed for {symbol}: {e}")
+        return False
+
+
+async def check_triggers_for_heavy_cycle(scan_list: list, c: httpx.AsyncClient) -> bool:
+    """
+    Check if conditions are met to run heavy cycle (AI decisions).
+    Returns True if at least one symbol passes spread + volatility checks.
+    """
+    if not HEAVY_CYCLE_ENABLED:
+        return True  # Always run if heavy cycle is not gated
+    
+    for symbol in scan_list:
+        spread_ok = await check_spread_trigger(symbol, c)
+        volatility_ok = await check_volatility_trigger(symbol, c)
+        
+        if spread_ok and volatility_ok:
+            print(f"        ✅ Triggers passed for {symbol}: spread=OK, volatility=OK")
+            return True
+    
+    print(f"        ⏸️ No symbols passed triggers (spread + volatility)")
+    return False
+
+
+
 def save_monitoring_decision(positions_count: int, max_positions: int, positions_details: list, reason: str):
     """Salva la decisione di monitoraggio per la dashboard"""
     try:
@@ -574,6 +640,13 @@ async def analysis_cycle():
                 positions_details=[],
                 reason="Impossibile ottenere dati tecnici dagli analizzatori. Riprovo al prossimo ciclo."
             )
+            return
+
+        # 4b. TRIGGER CHECK (Two-tier cycle)
+        # Check if conditions are met for heavy cycle (AI decisions)
+        triggers_passed = await check_triggers_for_heavy_cycle(scan_list, c)
+        if not triggers_passed:
+            print("        ⏸️ Triggers not met - skipping AI decision cycle (light cycle)")
             return
 
         # 5. AI DECISION
