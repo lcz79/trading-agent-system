@@ -81,6 +81,7 @@ def log_api_call(tokens_in: int, tokens_out: int):
 
 class TradeRecord(BaseModel):
     timestamp: str
+    intent_id: Optional[str] = None
     symbol: str
     side: str
     entry_price: float

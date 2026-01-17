@@ -1536,6 +1536,21 @@ def check_recent_closes_and_save_cooldown():
                     leverage = max(1.0, to_float(item.get("leverage"), 1.0))
                     created_time_ms = int(to_float(item.get("createdTime"), close_time_ms))
                     duration_minutes = int((close_time_ms - created_time_ms) / 1000 / 60)
+                    # Join con TradingState per recuperare intent_id + feature snapshot dell'entry
+                    ts = None
+                    pm = None
+                    feat = {}
+                    try:
+                        ts = get_trading_state()
+                        pm = ts.get_position(symbol_raw, side)
+                    except Exception:
+                        ts = None
+                        pm = None
+                    try:
+                        if pm and getattr(pm, 'features', None) and isinstance(pm.features, dict):
+                            feat = dict(pm.features)
+                    except Exception:
+                        feat = {}
                     record_trade_for_learning(
                         symbol=symbol_raw,
                         side_raw=side,
@@ -1543,8 +1558,15 @@ def check_recent_closes_and_save_cooldown():
                         exit_price=exit_price,
                         leverage=leverage,
                         duration_minutes=duration_minutes,
-                        market_conditions={"closed_by": "bybit_sl_tp"},
+                        market_conditions={**feat, "closed_by": "bybit_sl_tp"},
+                        intent_id=(pm.intent_id if pm and getattr(pm, 'intent_id', None) else None),
                     )
+                    # Pulizia: rimuovi la posizione dallo state (se presente)
+                    try:
+                        if ts and pm:
+                            ts.remove_position(symbol_raw, side)
+                    except Exception:
+                        pass
                 except Exception as e:
                     print(f"⚠️ Errore recording auto-closed trade: {e}")
         if changed:
@@ -1877,7 +1899,8 @@ def open_position(order: OrderRequest):
             tp_pct=order.tp_pct,
             sl_pct=order.sl_pct,
             time_in_trade_limit_sec=order.time_in_trade_limit_sec,
-            cooldown_sec=order.cooldown_sec
+            cooldown_sec=order.cooldown_sec,
+            features=(order.features or {}),
         )
         trading_state.add_intent(new_intent)
         print(f"📝 Intent registered: {intent_id[:8]} for {sym_id} {requested_dir}")
@@ -2087,6 +2110,7 @@ def open_position(order: OrderRequest):
             side=requested_dir,
             opened_at=datetime.now().isoformat(),
             intent_id=intent_id,
+            features=(order.features or {}),
             time_in_trade_limit_sec=order.time_in_trade_limit_sec,
             entry_price=price,
             size=final_qty,

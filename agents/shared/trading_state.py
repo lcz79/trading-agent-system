@@ -32,6 +32,7 @@ class OrderIntent:
     sl_pct: Optional[float] = None
     time_in_trade_limit_sec:  Optional[int] = None
     cooldown_sec: Optional[int] = None
+    features: dict = {}  # snapshot feature/indicatori all'ingresso
 
     def to_dict(self) -> dict:
         d = asdict(self)

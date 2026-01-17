@@ -48,3 +48,6 @@ bot_diag_output.txt
 closed_positions.json
 pm_history.json
 pm_openapi.json
+
+# Local backup files
+*.bak_*

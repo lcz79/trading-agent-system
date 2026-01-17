@@ -27,8 +27,29 @@ URLS = {
     "ai": "http://04_master_ai_agent:8000",
     "learning": "http://10_learning_agent:8000"
 }
-SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
+
+# --- SYMBOL UNIVERSE ---
+DEFAULT_SCAN_SYMBOLS = [
+    "BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "ADAUSDT",
+    "DOGEUSDT", "AVAXUSDT", "LINKUSDT", "BNBUSDT", "TRXUSDT",
+]
+
+# Comma-separated list of symbols to scan (e.g. "BTCUSDT,ETHUSDT,...")
+SCAN_SYMBOLS_ENV = os.getenv("SCAN_SYMBOLS", "").strip()
+
+if SCAN_SYMBOLS_ENV:
+    # Normalize: split, strip, uppercase, drop empty, deduplicate preserving order
+    _raw = [s.strip().upper() for s in SCAN_SYMBOLS_ENV.split(",")]
+    SYMBOLS = list(dict.fromkeys([s for s in _raw if s]))
+else:
+    SYMBOLS = DEFAULT_SCAN_SYMBOLS[:]
+
+# Optional: disable specific symbols without changing SCAN_SYMBOLS
 DISABLED_SYMBOLS = os.getenv("DISABLED_SYMBOLS", "").split(",")  # Comma-separated list of disabled symbols
+DISABLED_SYMBOLS = [s.strip().upper() for s in DISABLED_SYMBOLS if s.strip()]  # Clean up empty strings
+
+# Final universe
+SYMBOLS = [s for s in SYMBOLS if s not in DISABLED_SYMBOLS]  # Comma-separated list of disabled symbols
 DISABLED_SYMBOLS = [s.strip() for s in DISABLED_SYMBOLS if s.strip()]  # Clean up empty strings
 
 # --- CONFIGURAZIONE OTTIMIZZAZIONE ---
@@ -650,6 +671,38 @@ async def analysis_cycle():
                     # Guardrail: in one-way mode (HedgeMode False) do NOT open another position on the same symbol.
                     desired_side = "long" if action == "OPEN_LONG" else "short"
 
+
+                    # === SHORT_MOMENTUM_15M_GATE ===
+                    # Non elimina gli SHORT: li rende coerenti col timeframe 15m.
+                    # Se non troviamo la feature nel payload AI, non blocchiamo (fail-open).
+                    try:
+                        if action == "OPEN_SHORT":
+                            gate_min_conf = float(os.getenv("SHORT_GATE_MIN_CONFIDENCE", "75"))
+                            gate_allow_if_missing = os.getenv("SHORT_GATE_ALLOW_IF_MISSING_15M", "true").lower() == "true"
+
+                            # Prova a recuperare una metrica 15m (nomi possibili)
+                            v15 = None
+                            for k in ("return_15m", "ret_15m", "momentum_15m", "mom_15m", "chg_15m"):
+                                if k in d and d.get(k) is not None:
+                                    try:
+                                        v15 = float(d.get(k))
+                                        break
+                                    except Exception:
+                                        pass
+
+                            conf = float(d.get("confidence", 0) or 0)
+
+                            # Se abbiamo v15: richiedi v15 < 0 per SHORT "normale"
+                            if v15 is not None and v15 >= 0:
+                                if conf < gate_min_conf:
+                                    print(f"        🧭 GATE SHORT {sym}: 15m not bearish (v15={v15:+.4f}) and confidence {conf:.1f} < {gate_min_conf} → HOLD")
+                                    continue
+                            # Se NON abbiamo v15, opzionalmente blocca gli short a conf bassa
+                            if v15 is None and not gate_allow_if_missing and conf < gate_min_conf:
+                                print(f"        🧭 GATE SHORT {sym}: missing 15m momentum and confidence {conf:.1f} < {gate_min_conf} → HOLD")
+                                continue
+                    except Exception as _gate_e:
+                        print(f"        ⚠️ SHORT gate error (non-blocking): {_gate_e}")
                     # Guardrail: respect AI blocked_by if present (prevents pointless opens)
                     blocked_by = d.get("blocked_by") or []
                     if blocked_by:
@@ -738,7 +791,9 @@ async def analysis_cycle():
                         "side": action,
                         "leverage": leverage,
                         "size_pct": size_pct,
-                        "intent_id": intent_id  # For idempotency
+                        "intent_id": intent_id,
+                        "features": d  # telemetria: snapshot decision/indicatori
+                          # For idempotency
                     }
                     
                     # Add optional scalping params if present

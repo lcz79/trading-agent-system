@@ -32,6 +32,7 @@ class OrderIntent:
     sl_pct: Optional[float] = None
     time_in_trade_limit_sec:  Optional[int] = None
     cooldown_sec: Optional[int] = None
+    features: dict = field(default_factory=dict)  # snapshot feature/indicatori all'ingresso
 
     def to_dict(self) -> dict:
         d = asdict(self)
@@ -46,7 +47,8 @@ class OrderIntent:
         # Remove unknown fields
         valid_fields = {'intent_id', 'symbol', 'side', 'leverage', 'size_pct', 'action', 'status',
                        'created_at', 'executed_at', 'error_message', 'exchange_order_id',
-                       'tp_pct', 'sl_pct', 'time_in_trade_limit_sec', 'cooldown_sec'}
+                       'tp_pct', 'sl_pct', 'time_in_trade_limit_sec', 'cooldown_sec',
+                       'features'}
         data = {k: v for k, v in data.items() if k in valid_fields}
         return cls(**data)
 
@@ -64,6 +66,7 @@ class PositionMetadata:
     cooldown_sec: Optional[int] = None
     intent_id: Optional[str] = None
 
+    features: dict = field(default_factory=dict)
     def to_dict(self) -> dict:
         return asdict(self)
 
