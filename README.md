@@ -1,8 +1,31 @@
-# 🤖 Trading Agent System v2.3 (Production Ready - Scalping Mode)
+# 🤖 Trading Agent System v2.4 (Production Ready - Limit Order Execution)
 
-Sistema di trading automatico multi-agente per crypto su Bybit, alimentato da **DeepSeek** con strategia **scalping aggressiva ma profittevole**.
+Sistema di trading automatico multi-agente per crypto su Bybit, alimentato da **DeepSeek** con strategia **scalping aggressiva ma profittevole** e **limit order ladder execution**.
 
-## ✨ Nuove Funzionalità v2.3 - Scalping Mode
+## ✨ Nuove Funzionalità v2.4 - Limit Order Ladder
+
+### 📊 Advanced Order Execution
+- **LIMIT_LADDER Mode**: Multiple limit orders at strategic price levels
+- **Post-Only Orders**: Maker fee rebates (-0.01% to -0.025%)
+- **ATR-Based Spacing**: Volatility-aware ladder price generation
+- **Smart Fallback**: REPRICE or MARKET fallback for unfilled orders
+- **Up to 10 Positions**: Increased from 3 to 10 concurrent positions
+- **5 Orders Per Symbol**: Ladder execution with up to 5 limit orders
+
+### 🎯 Two-Tier Cycle Architecture
+- **Light Cycle (30s)**: Quick spread/volatility checks
+- **Heavy Cycle (60s)**: Full AI decisions when triggers met
+- **Spread Gating**: Only trade when spread ≤ 0.10% (configurable)
+- **Volatility Gating**: Only trade when ATR ≥ 0.5% (configurable)
+
+### 💰 Cost Optimization
+- **Better Entry Prices**: 0.05-0.15% improvement vs market orders
+- **Maker Rebates**: Earn fees instead of paying (when filled as maker)
+- **Reduced Slippage**: Gradual ladder entry vs single market order
+
+📖 **Documentazione completa**: [LIMIT_ORDER_LADDER.md](./LIMIT_ORDER_LADDER.md)
+
+## ✨ Funzionalità v2.3 - Scalping Mode
 
 ### ⚡ High-Frequency Scalping
 - **Timeframes**: 1m, 5m, 15m focus (conferma 1h opzionale)

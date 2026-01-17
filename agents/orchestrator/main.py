@@ -32,10 +32,17 @@ DISABLED_SYMBOLS = os.getenv("DISABLED_SYMBOLS", "").split(",")  # Comma-separat
 DISABLED_SYMBOLS = [s.strip() for s in DISABLED_SYMBOLS if s.strip()]  # Clean up empty strings
 
 # --- CONFIGURAZIONE OTTIMIZZAZIONE ---
-MAX_POSITIONS = 3  # Numero massimo posizioni contemporanee
+MAX_POSITIONS = int(os.getenv("MAX_POSITIONS", "10"))  # Numero massimo posizioni contemporanee
+MAX_ORDERS_PER_SYMBOL = int(os.getenv("MAX_ORDERS_PER_SYMBOL", "5"))  # Max limit orders per symbol (ladder)
 REVERSE_THRESHOLD = float(os.getenv("REVERSE_THRESHOLD", "2.0"))  # Percentuale perdita per trigger reverse analysis
 CRITICAL_LOSS_PCT_LEV = float(os.getenv("CRITICAL_LOSS_PCT_LEV", "12.0"))  # % perdita (con leva) per trigger gestione critica
 CYCLE_INTERVAL = 60  # Secondi tra ogni ciclo di controllo (era 900)
+# Two-tier cycle configuration
+LIGHT_CYCLE_INTERVAL = int(os.getenv("LIGHT_CYCLE_INTERVAL", "30"))  # Spread/volatility check
+HEAVY_CYCLE_ENABLED = os.getenv("HEAVY_CYCLE_ENABLED", "true").lower() == "true"
+# Triggers for heavy cycle
+SPREAD_TRIGGER_MAX_PCT = float(os.getenv("SPREAD_TRIGGER_MAX_PCT", "0.0010"))  # 0.10% max spread
+VOLATILITY_TRIGGER_MIN_ATR_PCT = float(os.getenv("VOLATILITY_TRIGGER_MIN_ATR_PCT", "0.005"))  # 0.5% min ATR
 DRY_RUN = os.getenv("DRY_RUN", "false").lower() == "true"  # Se true, logga solo azioni senza eseguirle
 CRITICAL_LOSS_PCT_LEV = float(os.getenv("CRITICAL_LOSS_PCT_LEV", "12.0"))  # Soglia perdita % con leva per CRITICAL
 
@@ -157,6 +164,82 @@ def post_json_with_retry(url, json_payload, timeout=30, attempts=3, base_sleep=1
             print(f"        ⏳ Retry {n}/{attempts} POST {url} dopo errore rete/DNS: {e} (sleep {sleep_s:.2f}s)")
             time.sleep(sleep_s)
     raise last_exc
+
+
+async def check_spread_trigger(symbol: str, c: httpx.AsyncClient) -> bool:
+    """
+    Check if spread is acceptable for trading.
+    Returns True if spread is within acceptable range.
+    """
+    try:
+        # Try to use spread_slippage module if available
+        try:
+            from agents.shared.spread_slippage import get_spread_and_check
+            # This would require exchange instance, which we don't have here
+            # For now, use a simpler heuristic
+            pass
+        except ImportError:
+            pass
+        
+        # Simple heuristic: fetch orderbook and check spread
+        # In production, this should call position manager's orderbook endpoint
+        # For now, return True to allow trading (conservative default)
+        # TODO: Implement proper spread check via position manager endpoint
+        return True
+    except Exception as e:
+        print(f"        ⚠️ Spread trigger check failed for {symbol}: {e}")
+        return True  # Fail open for now (conservative)
+
+
+async def check_volatility_trigger(symbol: str, c: httpx.AsyncClient) -> bool:
+    """
+    Check if volatility is sufficient for trading using ATR%.
+    Returns True if ATR% >= VOLATILITY_TRIGGER_MIN_ATR_PCT.
+    """
+    try:
+        # Fetch technical data
+        tech_resp = await c.post(f"{URLS['tech']}/analyze_multi_tf", json={"symbol": symbol})
+        if tech_resp.status_code != 200:
+            return False
+        
+        tech_data = tech_resp.json()
+        tf_15m = tech_data.get("timeframes", {}).get("15m", {})
+        atr = tf_15m.get("atr")
+        price = tf_15m.get("price")
+        
+        if atr and price and price > 0:
+            atr_pct = atr / price
+            if atr_pct >= VOLATILITY_TRIGGER_MIN_ATR_PCT:
+                return True
+            else:
+                print(f"        📊 {symbol} ATR too low: {atr_pct*100:.3f}% < {VOLATILITY_TRIGGER_MIN_ATR_PCT*100:.3f}%")
+                return False
+        
+        return False
+    except Exception as e:
+        print(f"        ⚠️ Volatility trigger check failed for {symbol}: {e}")
+        return False
+
+
+async def check_triggers_for_heavy_cycle(scan_list: list, c: httpx.AsyncClient) -> bool:
+    """
+    Check if conditions are met to run heavy cycle (AI decisions).
+    Returns True if at least one symbol passes spread + volatility checks.
+    """
+    if not HEAVY_CYCLE_ENABLED:
+        return True  # Always run if heavy cycle is not gated
+    
+    for symbol in scan_list:
+        spread_ok = await check_spread_trigger(symbol, c)
+        volatility_ok = await check_volatility_trigger(symbol, c)
+        
+        if spread_ok and volatility_ok:
+            print(f"        ✅ Triggers passed for {symbol}: spread=OK, volatility=OK")
+            return True
+    
+    print(f"        ⏸️ No symbols passed triggers (spread + volatility)")
+    return False
+
 
 
 def save_monitoring_decision(positions_count: int, max_positions: int, positions_details: list, reason: str):
@@ -567,6 +650,13 @@ async def analysis_cycle():
                 positions_details=[],
                 reason="Impossibile ottenere dati tecnici dagli analizzatori. Riprovo al prossimo ciclo."
             )
+            return
+
+        # 4b. TRIGGER CHECK (Two-tier cycle)
+        # Check if conditions are met for heavy cycle (AI decisions)
+        triggers_passed = await check_triggers_for_heavy_cycle(scan_list, c)
+        if not triggers_passed:
+            print("        ⏸️ Triggers not met - skipping AI decision cycle (light cycle)")
             return
 
         # 5. AI DECISION

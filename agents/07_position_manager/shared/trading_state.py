@@ -32,6 +32,9 @@ class OrderIntent:
     sl_pct: Optional[float] = None
     time_in_trade_limit_sec:  Optional[int] = None
     cooldown_sec: Optional[int] = None
+    # Execution strategy fields
+    execution_mode: str = "MARKET"
+    exchange_order_ids: Optional[List[str]] = None  # For ladder orders
 
     def to_dict(self) -> dict:
         d = asdict(self)
@@ -46,7 +49,8 @@ class OrderIntent:
         # Remove unknown fields
         valid_fields = {'intent_id', 'symbol', 'side', 'leverage', 'size_pct', 'action', 'status',
                        'created_at', 'executed_at', 'error_message', 'exchange_order_id',
-                       'tp_pct', 'sl_pct', 'time_in_trade_limit_sec', 'cooldown_sec'}
+                       'tp_pct', 'sl_pct', 'time_in_trade_limit_sec', 'cooldown_sec',
+                       'execution_mode', 'exchange_order_ids'}
         data = {k: v for k, v in data.items() if k in valid_fields}
         return cls(**data)
 
@@ -63,6 +67,12 @@ class PositionMetadata:
     time_in_trade_limit_sec: Optional[int] = None
     cooldown_sec: Optional[int] = None
     intent_id: Optional[str] = None
+    # Execution details
+    execution_mode: str = "MARKET"
+    fill_price_avg: Optional[float] = None
+    spread_at_entry: Optional[float] = None
+    slippage_pct: Optional[float] = None
+    maker_taker: Optional[str] = None  # "maker" or "taker"
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -70,7 +80,8 @@ class PositionMetadata:
     @classmethod
     def from_dict(cls, data:  dict) -> 'PositionMetadata':
         valid_fields = {'symbol', 'side', 'entry_price', 'size', 'leverage', 'opened_at',
-                       'tp_pct', 'sl_pct', 'time_in_trade_limit_sec', 'cooldown_sec', 'intent_id'}
+                       'tp_pct', 'sl_pct', 'time_in_trade_limit_sec', 'cooldown_sec', 'intent_id',
+                       'execution_mode', 'fill_price_avg', 'spread_at_entry', 'slippage_pct', 'maker_taker'}
         data = {k: v for k, v in data.items() if k in valid_fields}
         return cls(**data)
 

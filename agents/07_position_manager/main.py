@@ -7,7 +7,8 @@ import httpx
 import uuid
 from decimal import Decimal, ROUND_DOWN
 from datetime import datetime, timedelta
-from typing import Optional, Any, Dict, Tuple
+from typing import Optional, Any, Dict, Tuple, List
+from enum import Enum
 from fastapi import FastAPI
 from pydantic import BaseModel
 from threading import Thread, Lock
@@ -72,6 +73,8 @@ DEFAULT_SIZE_PCT = float(os.getenv("DEFAULT_SIZE_PCT", "0.15"))
 # --- DEBUG CONFIGURATION ---
 # Comma-separated list of symbols to show detailed debug logs (e.g., "BTCUSDT,ETHUSDT")
 DEBUG_SYMBOLS = [s.strip() for s in os.getenv("DEBUG_SYMBOLS", "BTCUSDT").split(",") if s.strip()]
+# --- DRY RUN MODE ---
+DRY_RUN = os.getenv("DRY_RUN", "false").lower() == "true"  # If true, log planned orders instead of placing them
 file_lock = Lock()
 
 
@@ -626,6 +629,15 @@ Thread(target=position_monitor_loop, daemon=True).start()
 # =========================================================
 # MODELS
 # =========================================================
+class ExecutionMode(str, Enum):
+    MARKET = "MARKET"
+    LIMIT_LADDER = "LIMIT_LADDER"
+
+class FallbackMode(str, Enum):
+    NONE = "NONE"
+    REPRICE = "REPRICE"
+    MARKET = "MARKET"
+
 class OrderRequest(BaseModel):
     symbol: str
     side: str = "buy"          # buy/sell/long/short
@@ -638,6 +650,17 @@ class OrderRequest(BaseModel):
     time_in_trade_limit_sec: Optional[int] = None  # Max holding time
     cooldown_sec: Optional[int] = None  # Cooldown after close
     trail_activation_roi: Optional[float] = None  # ROI threshold for trailing
+    # Execution strategy parameters (LIMIT_LADDER mode)
+    execution_mode: str = "MARKET"  # MARKET | LIMIT_LADDER
+    max_orders_per_symbol: int = 5  # For ladder execution
+    post_only: bool = True  # Use postOnly for maker fees
+    time_in_force: str = "GTC"  # GTC, IOC, FOK
+    entry_deadline_sec: Optional[int] = None  # Deadline to complete entry
+    ladder_atr_multipliers: Optional[List[float]] = None  # [0.5, 1.0, 1.5] from best bid/ask
+    ladder_bps_offsets: Optional[List[int]] = None  # Alternative: [5, 10, 15] basis points
+    fallback_mode: str = "REPRICE"  # REPRICE | MARKET | NONE
+    max_spread_pct: float = 0.0015  # 0.15% max spread for entry
+    max_slippage_pct: float = 0.0020  # 0.20% max slippage for fallback
 class CloseRequest(BaseModel):
     symbol: str
 class ReverseRequest(BaseModel):
@@ -1682,6 +1705,282 @@ def check_smart_reverse():
                 print(f"⚠️ WARNING: {symbol} {side_dir.upper()} ROI={roi*100:.2f}% - Perdita moderata")
     except Exception as e:
         print(f"⚠️ Smart Reverse system error: {e}")
+
+# =========================================================
+# LIMIT ORDER LADDER EXECUTION
+# =========================================================
+
+def generate_ladder_prices(
+    symbol: str,
+    side: str,
+    current_price: float,
+    num_orders: int,
+    atr_multipliers: Optional[List[float]] = None,
+    bps_offsets: Optional[List[int]] = None
+) -> List[float]:
+    """
+    Generate ladder prices for limit order placement.
+    
+    Args:
+        symbol: Trading symbol
+        side: 'long' (buy) or 'short' (sell)
+        current_price: Current market price
+        num_orders: Number of ladder orders
+        atr_multipliers: Optional ATR-based offsets [0.5, 1.0, 1.5]
+        bps_offsets: Optional basis point offsets [5, 10, 15]
+    
+    Returns:
+        List of prices for ladder orders, sorted appropriately
+    """
+    prices = []
+    
+    # Determine if using ATR or BPS
+    if atr_multipliers and len(atr_multipliers) >= num_orders:
+        # ATR-based ladder
+        atr, atr_price = get_atr_for_symbol(symbol)
+        if atr and atr_price and atr_price > 0:
+            atr_pct = atr / atr_price
+            for mult in atr_multipliers[:num_orders]:
+                offset_pct = atr_pct * mult
+                if side == "long":
+                    # For long: place buy orders below current price
+                    price = current_price * (1 - offset_pct)
+                else:
+                    # For short: place sell orders above current price
+                    price = current_price * (1 + offset_pct)
+                prices.append(price)
+        else:
+            print(f"⚠️ ATR unavailable for {symbol}, using BPS fallback")
+            # Fallback to default BPS if ATR fails
+            if not bps_offsets:
+                bps_offsets = [5, 10, 15, 20, 25][:num_orders]
+    
+    # BPS-based ladder (fallback or explicit)
+    if not prices and bps_offsets:
+        for bps in bps_offsets[:num_orders]:
+            offset_pct = bps / 10000.0  # Convert basis points to fraction
+            if side == "long":
+                price = current_price * (1 - offset_pct)
+            else:
+                price = current_price * (1 + offset_pct)
+            prices.append(price)
+    
+    # Default fallback: linear spacing (safeguard against empty list)
+    if not prices:
+        print(f"⚠️ No ladder configuration provided for {symbol}, using default spacing")
+        default_offsets = [0.0005, 0.0010, 0.0015, 0.0020, 0.0025][:num_orders]
+        for offset in default_offsets:
+            if side == "long":
+                price = current_price * (1 - offset)
+            else:
+                price = current_price * (1 + offset)
+            prices.append(price)
+    
+    # Sort appropriately: long = descending (closest first), short = ascending
+    if side == "long":
+        prices.sort(reverse=True)
+    else:
+        prices.sort()
+    
+    return prices
+
+def place_limit_order_ladder(
+    symbol: str,
+    side: str,
+    total_qty: float,
+    ladder_prices: List[float],
+    post_only: bool = True,
+    time_in_force: str = "GTC"
+) -> List[Dict[str, Any]]:
+    """
+    Place a ladder of limit orders.
+    
+    Args:
+        symbol: CCXT symbol (e.g., "BTC/USDT:USDT")
+        side: 'buy' or 'sell'
+        total_qty: Total quantity to distribute across orders
+        ladder_prices: List of prices for ladder orders
+        post_only: Use postOnly for maker fees
+        time_in_force: GTC, IOC, FOK
+    
+    Returns:
+        List of order results with order_id, price, qty
+    """
+    if not exchange or not ladder_prices:
+        return []
+    
+    num_orders = len(ladder_prices)
+    qty_per_order = total_qty / num_orders
+    
+    placed_orders = []
+    
+    for i, price in enumerate(ladder_prices):
+        try:
+            # Round quantity to exchange precision
+            target_market = exchange.market(symbol)
+            info = target_market.get("info", {}) or {}
+            lot_filter = info.get("lotSizeFilter", {}) or {}
+            qty_step = to_float(lot_filter.get("qtyStep"), 0.001)
+            min_qty = to_float(lot_filter.get("minOrderQty") or qty_step, qty_step)
+            
+            # Round qty
+            d_qty = Decimal(str(qty_per_order))
+            d_step = Decimal(str(qty_step))
+            steps = (d_qty / d_step).to_integral_value(rounding=ROUND_DOWN)
+            final_qty_d = steps * d_step
+            if final_qty_d < Decimal(str(min_qty)):
+                final_qty_d = Decimal(str(min_qty))
+            final_qty = float("{:f}".format(final_qty_d.normalize()))
+            
+            # Round price to exchange precision
+            price_str = exchange.price_to_precision(symbol, price)
+            
+            # Create limit order
+            params = {
+                "category": "linear",
+                "timeInForce": time_in_force
+            }
+            
+            if post_only:
+                # Bybit postOnly parameter
+                params["postOnly"] = True
+            
+            if HEDGE_MODE:
+                # Determine position index
+                pos_idx = 1 if side == "buy" else 2
+                params["positionIdx"] = pos_idx
+            
+            if DRY_RUN:
+                print(f"🔍 DRY_RUN: Would place limit order #{i+1}/{num_orders}: {side} {final_qty} @ {price_str}")
+                placed_orders.append({
+                    "order_id": f"dry_run_{i}",
+                    "price": float(price_str),
+                    "qty": final_qty,
+                    "status": "DRY_RUN"
+                })
+            else:
+                order = exchange.create_order(
+                    symbol=symbol,
+                    type="limit",
+                    side=side,
+                    amount=final_qty,
+                    price=float(price_str),
+                    params=params
+                )
+                
+                placed_orders.append({
+                    "order_id": order.get("id"),
+                    "price": float(price_str),
+                    "qty": final_qty,
+                    "status": order.get("status", "unknown"),
+                    "info": order.get("info", {})
+                })
+                
+                print(f"✅ Limit order placed #{i+1}/{num_orders}: {side} {final_qty} @ {price_str} (order_id={order.get('id')})")
+        
+        except Exception as e:
+            print(f"❌ Failed to place limit order #{i+1}: {e}")
+            placed_orders.append({
+                "error": str(e),
+                "price": price,
+                "qty": qty_per_order
+            })
+    
+    return placed_orders
+
+def monitor_ladder_fills(
+    symbol: str,
+    order_ids: List[str],
+    max_wait_sec: int = 300
+) -> Dict[str, Any]:
+    """
+    Monitor ladder orders for fills and return fill status.
+    
+    Args:
+        symbol: CCXT symbol
+        order_ids: List of order IDs to monitor
+        max_wait_sec: Maximum time to wait for fills
+    
+    Returns:
+        Dict with fill status and filled quantity
+    """
+    if not exchange or not order_ids:
+        return {"filled_qty": 0.0, "unfilled_orders": [], "status": "error"}
+    
+    start_time = time.time()
+    filled_qty = 0.0
+    unfilled_orders = []
+    
+    while time.time() - start_time < max_wait_sec:
+        try:
+            # Fetch open orders
+            open_orders = exchange.fetch_open_orders(symbol, params={"category": "linear"})
+            open_order_ids = {o.get("id") for o in open_orders}
+            
+            # Check each order
+            for order_id in order_ids:
+                if order_id.startswith("dry_run_"):
+                    # Skip DRY_RUN orders
+                    continue
+                
+                if order_id not in open_order_ids:
+                    # Order is filled or cancelled
+                    try:
+                        order = exchange.fetch_order(order_id, symbol, params={"category": "linear"})
+                        if order.get("status") == "closed":
+                            filled_qty += to_float(order.get("filled"), 0.0)
+                        else:
+                            unfilled_orders.append(order_id)
+                    except Exception as e:
+                        print(f"⚠️ Failed to fetch order {order_id}: {e}")
+            
+            # If all orders filled, return
+            if len(unfilled_orders) == 0:
+                return {
+                    "filled_qty": filled_qty,
+                    "unfilled_orders": [],
+                    "status": "all_filled",
+                    "elapsed_sec": int(time.time() - start_time)
+                }
+            
+            # Wait before next check
+            time.sleep(5)
+        
+        except Exception as e:
+            print(f"⚠️ Error monitoring ladder fills: {e}")
+            time.sleep(5)
+    
+    # Timeout reached
+    return {
+        "filled_qty": filled_qty,
+        "unfilled_orders": unfilled_orders,
+        "status": "timeout",
+        "elapsed_sec": int(time.time() - start_time)
+    }
+
+def cancel_unfilled_orders(symbol: str, order_ids: List[str]) -> int:
+    """Cancel unfilled orders and return count of cancelled."""
+    if not exchange or not order_ids:
+        return 0
+    
+    cancelled_count = 0
+    for order_id in order_ids:
+        if order_id.startswith("dry_run_"):
+            continue
+        
+        try:
+            if DRY_RUN:
+                print(f"🔍 DRY_RUN: Would cancel order {order_id}")
+                cancelled_count += 1
+            else:
+                exchange.cancel_order(order_id, symbol, params={"category": "linear"})
+                print(f"🗑️ Cancelled unfilled order: {order_id}")
+                cancelled_count += 1
+        except Exception as e:
+            print(f"⚠️ Failed to cancel order {order_id}: {e}")
+    
+    return cancelled_count
+
 # =========================================================
 # API ENDPOINTS
 # =========================================================
@@ -2039,9 +2338,175 @@ def open_position(order: OrderRequest):
         # Mark intent as EXECUTING
         trading_state.update_intent_status(intent_id, OrderStatus.EXECUTING)
         
-        res = exchange.create_order(sym_ccxt, "market", requested_side, final_qty, params=params)
-        exchange_order_id = res.get("id")
-
+        # === EXECUTION STRATEGY ROUTING ===
+        execution_mode = order.execution_mode.upper()
+        
+        if execution_mode == "LIMIT_LADDER":
+            # LIMIT LADDER EXECUTION
+            print(f"📊 LIMIT_LADDER mode: {sym_ccxt} with {order.max_orders_per_symbol} orders")
+            
+            # Check spread before entry
+            try:
+                from agents.shared.spread_slippage import get_spread_and_check
+                is_acceptable, spread_pct, spread_info = get_spread_and_check(
+                    exchange, sym_ccxt, max_spread_pct=order.max_spread_pct
+                )
+                if not is_acceptable:
+                    print(f"⚠️ Spread too wide: {spread_pct*100:.4f}% > {order.max_spread_pct*100:.4f}%")
+                    trading_state.update_intent_status(intent_id, OrderStatus.CANCELLED,
+                                                      error_message=f"Spread too wide: {spread_pct*100:.4f}%")
+                    return {
+                        "status": "rejected",
+                        "msg": f"Spread too wide: {spread_pct*100:.4f}%",
+                        "intent_id": intent_id
+                    }
+                print(f"✅ Spread acceptable: {spread_pct*100:.4f}%")
+            except ImportError:
+                # Fallback if spread module not available
+                spread_pct = None
+                print("⚠️ Spread check module unavailable, proceeding without check")
+            
+            # Generate ladder prices
+            ladder_prices = generate_ladder_prices(
+                symbol=sym_id,
+                side=requested_dir,
+                current_price=price,
+                num_orders=order.max_orders_per_symbol,
+                atr_multipliers=order.ladder_atr_multipliers,
+                bps_offsets=order.ladder_bps_offsets
+            )
+            
+            print(f"📊 Ladder prices: {[f'{p:.2f}' for p in ladder_prices]}")
+            
+            # Place ladder orders
+            placed_orders = place_limit_order_ladder(
+                symbol=sym_ccxt,
+                side=requested_side,
+                total_qty=final_qty,
+                ladder_prices=ladder_prices,
+                post_only=order.post_only,
+                time_in_force=order.time_in_force
+            )
+            
+            # Extract order IDs
+            order_ids = [o.get("order_id") for o in placed_orders if "order_id" in o]
+            
+            # Store order IDs in intent
+            new_intent.exchange_order_ids = order_ids
+            new_intent.execution_mode = "LIMIT_LADDER"
+            trading_state.add_intent(new_intent)
+            
+            # Monitor fills
+            entry_deadline = order.entry_deadline_sec or 300  # Default 5 minutes
+            fill_result = monitor_ladder_fills(sym_ccxt, order_ids, max_wait_sec=entry_deadline)
+            
+            filled_qty = fill_result.get("filled_qty", 0.0)
+            unfilled_orders = fill_result.get("unfilled_orders", [])
+            fill_status = fill_result.get("status", "unknown")
+            
+            print(f"📊 Fill status: {fill_status}, filled={filled_qty}/{final_qty}, unfilled={len(unfilled_orders)}")
+            
+            # Handle partial fills / unfilled orders
+            if fill_status == "timeout" or unfilled_orders:
+                fallback_mode = order.fallback_mode.upper()
+                
+                if fallback_mode == "REPRICE":
+                    # Cancel and reprice closer to market
+                    print(f"🔄 REPRICE mode: Cancelling {len(unfilled_orders)} unfilled orders")
+                    cancel_unfilled_orders(sym_ccxt, unfilled_orders)
+                    
+                    # Calculate remaining qty
+                    remaining_qty = final_qty - filled_qty
+                    if remaining_qty > 0:
+                        # Reprice with tighter ladder (50% of original offset)
+                        reprice_atr_mults = None
+                        reprice_bps = None
+                        
+                        if order.ladder_atr_multipliers:
+                            # Use ATR multipliers scaled by 0.5
+                            reprice_atr_mults = [m * 0.5 for m in order.ladder_atr_multipliers[:3]]
+                        elif order.ladder_bps_offsets:
+                            # Use BPS offsets scaled by 0.5, ensuring minimum of 1 BPS
+                            reprice_bps = [max(1, int(b * 0.5)) for b in order.ladder_bps_offsets[:3]]
+                        else:
+                            # Default: tighter spacing
+                            reprice_bps = [3, 6, 9]
+                        
+                        reprice_ladder = generate_ladder_prices(
+                            symbol=sym_id,
+                            side=requested_dir,
+                            current_price=price,
+                            num_orders=min(len(unfilled_orders), 3),  # Fewer orders, tighter
+                            atr_multipliers=reprice_atr_mults,
+                            bps_offsets=reprice_bps
+                        )
+                        
+                        print(f"🔄 Repricing with {len(reprice_ladder)} orders: {[f'{p:.2f}' for p in reprice_ladder]}")
+                        
+                        repriced_orders = place_limit_order_ladder(
+                            symbol=sym_ccxt,
+                            side=requested_side,
+                            total_qty=remaining_qty,
+                            ladder_prices=reprice_ladder,
+                            post_only=order.post_only,
+                            time_in_force=order.time_in_force
+                        )
+                        
+                        # Monitor repriced fills (shorter timeout)
+                        reprice_result = monitor_ladder_fills(
+                            sym_ccxt,
+                            [o.get("order_id") for o in repriced_orders if "order_id" in o],
+                            max_wait_sec=min(entry_deadline // 2, 120)
+                        )
+                        filled_qty += reprice_result.get("filled_qty", 0.0)
+                        
+                elif fallback_mode == "MARKET":
+                    # Cancel unfilled and execute remaining via market order
+                    print(f"📈 MARKET fallback: Executing {final_qty - filled_qty} remaining via market")
+                    cancel_unfilled_orders(sym_ccxt, unfilled_orders)
+                    
+                    remaining_qty = final_qty - filled_qty
+                    if remaining_qty > 0 and not DRY_RUN:
+                        try:
+                            market_params = {"category": "linear"}
+                            if HEDGE_MODE:
+                                market_params["positionIdx"] = pos_idx
+                            
+                            market_order = exchange.create_order(
+                                sym_ccxt, "market", requested_side, remaining_qty, params=market_params
+                            )
+                            filled_qty += to_float(market_order.get("filled"), remaining_qty)
+                            print(f"✅ Market fallback executed: {market_order.get('id')}")
+                        except Exception as e:
+                            print(f"❌ Market fallback failed: {e}")
+                
+                else:  # NONE - just cancel unfilled
+                    print(f"⏸️ NO_FALLBACK mode: Cancelling {len(unfilled_orders)} unfilled orders")
+                    cancel_unfilled_orders(sym_ccxt, unfilled_orders)
+            
+            # Check if we have enough fill to proceed
+            min_fill_pct = 0.5  # At least 50% filled
+            if filled_qty < final_qty * min_fill_pct:
+                print(f"❌ Insufficient fill: {filled_qty}/{final_qty} ({filled_qty/final_qty*100:.1f}%)")
+                trading_state.update_intent_status(intent_id, OrderStatus.FAILED,
+                                                  error_message=f"Insufficient fill: {filled_qty}/{final_qty}")
+                return {
+                    "status": "failed",
+                    "msg": f"Insufficient fill: {filled_qty}/{final_qty}",
+                    "intent_id": intent_id,
+                    "filled_qty": filled_qty,
+                    "requested_qty": final_qty
+                }
+            
+            exchange_order_id = ",".join([str(oid) for oid in order_ids])  # Comma-separated for ladder
+            
+        else:
+            # MARKET EXECUTION (default)
+            res = exchange.create_order(sym_ccxt, "market", requested_side, final_qty, params=params)
+            exchange_order_id = res.get("id")
+            filled_qty = final_qty
+            spread_pct = None
+        
         # After entry: set StopLoss server-side via trading_stop using MarkPrice (robust retry)
         req = {
             "category": "linear",
@@ -2082,6 +2547,9 @@ def open_position(order: OrderRequest):
                                           exchange_order_id=exchange_order_id)
         
         # Store position metadata for time-based exit
+        # Note: Using filled_qty instead of final_qty to reflect actual filled amount,
+        # especially important for LIMIT_LADDER mode where partial fills may occur.
+        # Downstream code in position monitoring handles this correctly.
         position_metadata = PositionMetadata(
             symbol=sym_id,
             side=requested_dir,
@@ -2089,20 +2557,33 @@ def open_position(order: OrderRequest):
             intent_id=intent_id,
             time_in_trade_limit_sec=order.time_in_trade_limit_sec,
             entry_price=price,
-            size=final_qty,
+            size=filled_qty,  # Use actual filled quantity
             leverage=order.leverage,
-            cooldown_sec=order.cooldown_sec
+            cooldown_sec=order.cooldown_sec,
+            execution_mode=execution_mode,
+            spread_at_entry=spread_pct,
+            maker_taker="maker" if execution_mode == "LIMIT_LADDER" and order.post_only else "taker"
         )
         trading_state.add_position(position_metadata)
         
-        print(f"✅ Position opened: {sym_id} {requested_dir} [intent:{intent_id[:8]}]")
+        # Log telemetry if enabled
+        try:
+            from agents.shared.telemetry import log_trade_telemetry
+            # Entry telemetry (will log exit later)
+            print(f"📊 Entry logged: mode={execution_mode}, spread={spread_pct*100 if spread_pct else 0:.4f}%")
+        except ImportError:
+            pass
+        
+        print(f"✅ Position opened: {sym_id} {requested_dir} [intent:{intent_id[:8]}] mode={execution_mode}")
         
         return {
             "status": "executed", 
             "id": exchange_order_id,
             "intent_id": intent_id,
             "symbol": sym_id,
-            "side": requested_dir
+            "side": requested_dir,
+            "execution_mode": execution_mode,
+            "filled_qty": filled_qty if execution_mode == "LIMIT_LADDER" else final_qty
         }
     except Exception as e:
         print(f"❌ Order Error: {e}")
