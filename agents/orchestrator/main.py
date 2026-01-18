@@ -727,6 +727,17 @@ async def analysis_cycle():
             dec_data = resp.json()
             analysis_text = dec_data.get('analysis', 'No text')
             decisions_list = dec_data.get('decisions', [])
+            # Sanitize decisions_list (some models may emit nulls/strings)
+            _raw = decisions_list
+            decisions_list = [x for x in (decisions_list or []) if isinstance(x, dict)]
+            dropped = (len(_raw) - len(decisions_list)) if isinstance(_raw, list) else 0
+            if dropped:
+                bad_types = {}
+                for x in (_raw or []):
+                    if not isinstance(x, dict):
+                        t = type(x).__name__
+                        bad_types[t] = bad_types.get(t, 0) + 1
+                print(f"        🧹 Dropped {dropped} non-dict decisions: {bad_types}")
             print(f"        📦 AI decisions: {len(decisions_list)}")
 
             print(f"        📝 AI Says: {analysis_text}")
