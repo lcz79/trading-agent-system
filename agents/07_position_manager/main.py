@@ -316,6 +316,258 @@ if API_KEY and API_SECRET:
 else:
     print("⚠️ BYBIT_API_KEY/BYBIT_API_SECRET mancanti: exchange non inizializzato")
 # =========================================================
+# PENDING ENTRY ORDER MANAGEMENT
+# =========================================================
+def check_pending_entry_orders():
+    """
+    Check pending LIMIT entry orders and handle their lifecycle:
+    - Detect fills and set SL post-fill
+    - Cancel expired orders (TTL)
+    - Handle cancelled/rejected states
+    - Ignore non-entry orders (StopLoss/TP/conditional)
+    """
+    if not exchange:
+        return
+    
+    try:
+        trading_state = get_trading_state()
+        
+        # Find all pending LIMIT intents
+        pending_intents = []
+        for intent_id, intent_data in trading_state._state.get("intents", {}).items():
+            intent = OrderIntent.from_dict(intent_data)
+            if intent.status == OrderStatus.PENDING and intent.entry_type == "LIMIT":
+                pending_intents.append(intent)
+        
+        if not pending_intents:
+            return
+        
+        print(f"📋 Checking {len(pending_intents)} pending LIMIT entry orders")
+        
+        for intent in pending_intents:
+            try:
+                sym_id = intent.symbol
+                intent_id = intent.intent_id
+                
+                # Query Bybit v5 for the specific order
+                # Try by orderLinkId first (most reliable), fallback to orderId
+                order_data = None
+                
+                # Method 1: Query by orderLinkId (intent_id)
+                try:
+                    if intent.exchange_order_link_id or intent_id:
+                        link_id = intent.exchange_order_link_id or intent_id
+                        resp = exchange.private_get_v5_order_realtime({
+                            "category": "linear",
+                            "orderLinkId": link_id,
+                        })
+                        
+                        if resp and str(resp.get("retCode")) == "0":
+                            result = resp.get("result", {}) or {}
+                            order_list = result.get("list", [])
+                            if order_list:
+                                order_data = order_list[0]
+                                print(f"   🔍 Found order by orderLinkId: {link_id[:8]}")
+                except Exception as e:
+                    print(f"   ⚠️ Query by orderLinkId failed for {intent_id[:8]}: {e}")
+                
+                # Method 2: Query by orderId if available
+                if not order_data and intent.exchange_order_id:
+                    try:
+                        resp = exchange.private_get_v5_order_realtime({
+                            "category": "linear",
+                            "orderId": intent.exchange_order_id,
+                        })
+                        
+                        if resp and str(resp.get("retCode")) == "0":
+                            result = resp.get("result", {}) or {}
+                            order_list = result.get("list", [])
+                            if order_list:
+                                order_data = order_list[0]
+                                print(f"   🔍 Found order by orderId: {intent.exchange_order_id}")
+                    except Exception as e:
+                        print(f"   ⚠️ Query by orderId failed for {intent_id[:8]}: {e}")
+                
+                if not order_data:
+                    print(f"   ⚠️ Order not found for intent {intent_id[:8]}, may have been filled/cancelled")
+                    # Check if expired based on TTL
+                    if intent.entry_expires_at:
+                        try:
+                            expires_at = datetime.fromisoformat(intent.entry_expires_at)
+                            if datetime.now() > expires_at:
+                                print(f"   ⏰ LIMIT entry expired: {intent_id[:8]}")
+                                trading_state.update_intent_status(
+                                    intent_id, 
+                                    OrderStatus.CANCELLED,
+                                    error_message="LIMIT entry expired (TTL)"
+                                )
+                        except Exception:
+                            pass
+                    continue
+                
+                # Filter out non-entry orders (StopLoss/TP/conditional)
+                stop_order_type = order_data.get("stopOrderType", "")
+                create_type = order_data.get("createType", "")
+                reduce_only = order_data.get("reduceOnly", False)
+                
+                # Skip if this is a stop-loss or take-profit order
+                if stop_order_type and stop_order_type != "":
+                    print(f"   ⏭️ Skipping non-entry order (stopOrderType={stop_order_type})")
+                    continue
+                
+                if create_type and "StopLoss" in create_type:
+                    print(f"   ⏭️ Skipping SL/TP order (createType={create_type})")
+                    continue
+                
+                if reduce_only:
+                    print(f"   ⏭️ Skipping reduceOnly order")
+                    continue
+                
+                # Check order status
+                order_status = order_data.get("orderStatus", "")
+                
+                print(f"   📊 ENTRY ORDER {intent_id[:8]}: status={order_status}")
+                
+                # Handle cancelled/rejected/deactivated
+                if order_status in ("Cancelled", "Rejected", "Deactivated"):
+                    print(f"   ❌ Order {order_status}: {intent_id[:8]}")
+                    trading_state.update_intent_status(
+                        intent_id,
+                        OrderStatus.CANCELLED,
+                        error_message=f"Order {order_status} by exchange"
+                    )
+                    continue
+                
+                # Check TTL expiry
+                if intent.entry_expires_at:
+                    try:
+                        expires_at = datetime.fromisoformat(intent.entry_expires_at)
+                        if datetime.now() > expires_at:
+                            print(f"   ⏰ LIMIT entry expired, cancelling: {intent_id[:8]}")
+                            
+                            # Cancel the order
+                            try:
+                                # Prefer cancel by orderLinkId for reliability
+                                cancel_params = {
+                                    "category": "linear",
+                                    "symbol": sym_id,
+                                }
+                                
+                                if intent.exchange_order_link_id or intent_id:
+                                    cancel_params["orderLinkId"] = intent.exchange_order_link_id or intent_id
+                                elif intent.exchange_order_id:
+                                    cancel_params["orderId"] = intent.exchange_order_id
+                                
+                                cancel_resp = exchange.private_post_v5_order_cancel(cancel_params)
+                                
+                                if cancel_resp and str(cancel_resp.get("retCode")) == "0":
+                                    print(f"   ✅ Order cancelled successfully: {intent_id[:8]}")
+                                else:
+                                    print(f"   ⚠️ Order cancel response: {cancel_resp}")
+                            except Exception as e:
+                                print(f"   ⚠️ Order cancel failed: {e}")
+                            
+                            trading_state.update_intent_status(
+                                intent_id,
+                                OrderStatus.CANCELLED,
+                                error_message="LIMIT entry expired (TTL)"
+                            )
+                            continue
+                    except Exception as e:
+                        print(f"   ⚠️ TTL check failed: {e}")
+                
+                # Handle filled order
+                if order_status == "Filled":
+                    print(f"   ✅ ENTRY ORDER FILLED: {intent_id[:8]}")
+                    
+                    # Get fill details
+                    avg_price = to_float(order_data.get("avgPrice"), 0.0)
+                    cum_exec_qty = to_float(order_data.get("cumExecQty"), 0.0)
+                    side = order_data.get("side", "")
+                    
+                    # Determine position side
+                    side_dir = "long" if side.lower() == "buy" else "short"
+                    
+                    # Now set SL via trading_stop using MarkPrice trigger
+                    sl_pct = intent.sl_pct or compute_entry_sl_pct(sym_id, intent)
+                    sl_price = avg_price * (1 - sl_pct) if side_dir == "long" else avg_price * (1 + sl_pct)
+                    
+                    sym_ccxt = ccxt_symbol_from_id(exchange, sym_id) or sym_id
+                    sl_str = exchange.price_to_precision(sym_ccxt, sl_price)
+                    
+                    pos_idx = side_to_position_idx(side_dir)
+                    
+                    req = {
+                        "category": "linear",
+                        "symbol": sym_id,
+                        "tpslMode": "Full",
+                        "stopLoss": sl_str,
+                        "slTriggerBy": "MarkPrice",
+                    }
+                    if HEDGE_MODE:
+                        req["positionIdx"] = pos_idx
+                    
+                    _sl_ok = False
+                    _last_err = None
+                    for _i, _sleep in enumerate([0.4, 0.8, 1.2, 2.0, 3.0], start=1):
+                        try:
+                            resp = exchange.private_post_v5_position_trading_stop(req)
+                            if isinstance(resp, dict) and str(resp.get("retCode")) == "0":
+                                print(f"   ✅ Post-fill SL set: {sym_id} SL={sl_str} trigger=MarkPrice")
+                                _sl_ok = True
+                                break
+                            if isinstance(resp, dict):
+                                _last_err = f"retCode={resp.get('retCode')} retMsg={resp.get('retMsg')}"
+                            else:
+                                _last_err = f"unexpected_response={type(resp).__name__}"
+                            print(f"   ⚠️ Post-fill SL rejected (try={_i}): {_last_err}")
+                        except Exception as e:
+                            _last_err = repr(e)
+                            print(f"   ⚠️ Post-fill SL error (try={_i}): {e}")
+                        time.sleep(_sleep)
+                    
+                    if not _sl_ok:
+                        print(f"   ❌ CRITICAL: Post-fill SL NOT set for {sym_id}. LastErr={_last_err}")
+                        # Emergency close
+                        execute_close_position(sym_id, exit_reason="emergency")
+                    
+                    # Mark intent as EXECUTED
+                    trading_state.update_intent_status(
+                        intent_id,
+                        OrderStatus.EXECUTED,
+                        exchange_order_id=intent.exchange_order_id
+                    )
+                    
+                    # Store position metadata
+                    position_metadata = PositionMetadata(
+                        symbol=sym_id,
+                        side=side_dir,
+                        opened_at=datetime.now().isoformat(),
+                        intent_id=intent_id,
+                        features=intent.features or {},
+                        time_in_trade_limit_sec=intent.time_in_trade_limit_sec,
+                        entry_price=avg_price,
+                        size=cum_exec_qty,
+                        leverage=intent.leverage,
+                        cooldown_sec=intent.cooldown_sec
+                    )
+                    trading_state.add_position(position_metadata)
+                    
+                    print(f"   ✅ Position metadata stored for {sym_id} {side_dir}")
+                    continue
+                
+                # Still pending (New, PartiallyFilled)
+                if order_status in ("New", "PartiallyFilled"):
+                    print(f"   ⏳ Order still pending: {order_status}")
+                    continue
+                
+            except Exception as e:
+                print(f"   ⚠️ Error checking pending intent {intent.intent_id[:8]}: {e}")
+                
+    except Exception as e:
+        print(f"⚠️ Error in check_pending_entry_orders: {e}")
+
+# =========================================================
 # BACKGROUND: STATE CLEANUP LOOP
 # =========================================================
 def state_cleanup_loop():
@@ -604,8 +856,8 @@ def check_time_based_exits():
 def position_monitor_loop():
     """
     Background loop that monitors positions every 30 seconds.
-    This ensures trailing stops, reverse logic, and time-based exits run independently
-    of orchestrator calls, preventing issues with timeouts or failures.
+    This ensures trailing stops, reverse logic, time-based exits, and pending entry orders
+    run independently of orchestrator calls, preventing issues with timeouts or failures.
     """
     # Wait 10 seconds on startup to allow exchange to initialize
     time.sleep(10)
@@ -614,10 +866,11 @@ def position_monitor_loop():
     while True:
         if exchange:
             try:
+                check_pending_entry_orders()  # Check LIMIT entry orders first
                 check_recent_closes_and_save_cooldown()
                 check_and_update_trailing_stops()
                 check_smart_reverse()
-                check_time_based_exits()  # NEW: Check for time-based exits
+                check_time_based_exits()  # Check for time-based exits
             except Exception as e:
                 print(f"⚠️ Position monitor loop error: {e}")
         
@@ -632,12 +885,17 @@ class OrderRequest(BaseModel):
     leverage: float = 1.0
     size_pct: float = 0.0      # frazione del free USDT (es. 0.15)
     sl_pct: float = 0.0        # frazione (es. 0.04)
+    # Entry type configuration
+    entry_type: Optional[str] = "MARKET"  # MARKET or LIMIT
+    entry_price: Optional[float] = None   # Required for LIMIT orders
+    entry_ttl_sec: Optional[int] = None   # Time-to-live for LIMIT orders (default 3600)
     # Scalping parameters (optional)
     intent_id: Optional[str] = None  # For idempotency
     tp_pct: Optional[float] = None   # Take profit percentage
     time_in_trade_limit_sec: Optional[int] = None  # Max holding time
     cooldown_sec: Optional[int] = None  # Cooldown after close
     trail_activation_roi: Optional[float] = None  # ROI threshold for trailing
+    features: Optional[dict] = None  # Market features snapshot
 class CloseRequest(BaseModel):
     symbol: str
 class ReverseRequest(BaseModel):
@@ -1900,10 +2158,17 @@ def open_position(order: OrderRequest):
             sl_pct=order.sl_pct,
             time_in_trade_limit_sec=order.time_in_trade_limit_sec,
             cooldown_sec=order.cooldown_sec,
+            entry_type=order.entry_type or "MARKET",
+            entry_price=order.entry_price,
             features=(order.features or {}),
         )
+        # Calculate expiry for LIMIT orders
+        if new_intent.entry_type == "LIMIT":
+            ttl_sec = order.entry_ttl_sec or 3600  # Default 1 hour
+            new_intent.entry_expires_at = (datetime.now() + timedelta(seconds=ttl_sec)).isoformat()
+        
         trading_state.add_intent(new_intent)
-        print(f"📝 Intent registered: {intent_id[:8]} for {sym_id} {requested_dir}")
+        print(f"📝 Intent registered: {intent_id[:8]} for {sym_id} {requested_dir} type={new_intent.entry_type}")
         
         # === CONTINUE WITH ORDER EXECUTION ===
         sym_ccxt = ccxt_symbol_from_id(exchange, sym_id) or raw_sym
@@ -2053,17 +2318,73 @@ def open_position(order: OrderRequest):
         scalping_info = ""
         if order.time_in_trade_limit_sec:
             scalping_info = f" MaxTime={order.time_in_trade_limit_sec}s"
-        print(f"🚀 ORDER {sym_ccxt}: side={requested_side} qty={final_qty} SL={sl_str}" + 
-              "" + f" idx={pos_idx}{scalping_info}")
-        # Create market order WITHOUT embedding TP/SL (avoid immediate trigger on LastPrice)
-        params = {"category": "linear"}
-        if HEDGE_MODE:
-            params["positionIdx"] = pos_idx
+        
+        entry_type = order.entry_type or "MARKET"
+        print(f"🚀 ORDER {sym_ccxt}: type={entry_type} side={requested_side} qty={final_qty} SL={sl_str}" + 
+              f" idx={pos_idx}{scalping_info}")
+        
         # Mark intent as EXECUTING
         trading_state.update_intent_status(intent_id, OrderStatus.EXECUTING)
         
+        # === ORDER CREATION: MARKET vs LIMIT ===
+        params = {"category": "linear"}
+        if HEDGE_MODE:
+            params["positionIdx"] = pos_idx
+        
+        if entry_type == "LIMIT":
+            # LIMIT order with orderLinkId for reliable tracking
+            if not order.entry_price or order.entry_price <= 0:
+                trading_state.update_intent_status(intent_id, OrderStatus.FAILED, 
+                                                   error_message="LIMIT order requires valid entry_price")
+                return {"status": "error", "msg": "LIMIT order requires valid entry_price", "intent_id": intent_id}
+            
+            # Use intent_id as orderLinkId for deterministic tracking
+            params["orderLinkId"] = intent_id
+            
+            limit_price = order.entry_price
+            limit_price_str = exchange.price_to_precision(sym_ccxt, limit_price)
+            
+            print(f"📋 LIMIT ENTRY: {sym_ccxt} side={requested_side} qty={final_qty} price={limit_price_str} orderLinkId={intent_id[:8]}")
+            
+            res = exchange.create_order(sym_ccxt, "limit", requested_side, final_qty, limit_price, params=params)
+            exchange_order_id = res.get("id")
+            
+            # Extract actual Bybit orderId from response info
+            info = res.get("info", {}) or {}
+            bybit_order_id = info.get("orderId") or exchange_order_id
+            
+            # Store both orderId and orderLinkId
+            trading_state.update_intent_status(
+                intent_id, 
+                OrderStatus.PENDING,  # LIMIT order remains PENDING until filled
+                exchange_order_id=bybit_order_id,
+                exchange_order_link_id=intent_id
+            )
+            
+            print(f"✅ LIMIT order submitted: {sym_id} {requested_dir} orderId={bybit_order_id} orderLinkId={intent_id[:8]}")
+            print(f"   ⏰ Will expire at: {new_intent.entry_expires_at}")
+            
+            return {
+                "status": "pending",
+                "msg": "LIMIT order submitted, awaiting fill",
+                "id": bybit_order_id,
+                "exchange_order_id": bybit_order_id,
+                "exchange_order_link_id": intent_id,
+                "intent_id": intent_id,
+                "symbol": sym_id,
+                "side": requested_dir,
+                "entry_type": "LIMIT",
+                "entry_price": limit_price,
+                "expires_at": new_intent.entry_expires_at
+            }
+        
+        # MARKET order (default, backward compatible)
         res = exchange.create_order(sym_ccxt, "market", requested_side, final_qty, params=params)
         exchange_order_id = res.get("id")
+        
+        # Extract actual Bybit orderId from response info
+        info = res.get("info", {}) or {}
+        bybit_order_id = info.get("orderId") or exchange_order_id
 
         # After entry: set StopLoss server-side via trading_stop using MarkPrice (robust retry)
         req = {
@@ -2102,7 +2423,7 @@ def open_position(order: OrderRequest):
         
         # Mark intent as EXECUTED
         trading_state.update_intent_status(intent_id, OrderStatus.EXECUTED, 
-                                          exchange_order_id=exchange_order_id)
+                                          exchange_order_id=bybit_order_id)
         
         # Store position metadata for time-based exit
         position_metadata = PositionMetadata(
@@ -2123,7 +2444,8 @@ def open_position(order: OrderRequest):
         
         return {
             "status": "executed", 
-            "id": exchange_order_id,
+            "id": bybit_order_id,
+            "exchange_order_id": bybit_order_id,
             "intent_id": intent_id,
             "symbol": sym_id,
             "side": requested_dir
