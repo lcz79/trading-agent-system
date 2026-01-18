@@ -514,8 +514,8 @@ class Decision(BaseModel):
     risk_factors: Optional[List[str]] = None
     # New structured fields for coherence
     setup_confirmations: Optional[List[str]] = None
-    blocked_by: Optional[List[str]] = None  # HARD constraints only (validated via field_validator)
-    soft_blockers: Optional[List[str]] = None  # SOFT warnings/flags (validated via field_validator)
+    blocked_by: Optional[List[str]] = None  # HARD constraints (normalized via field_validator, unknown values dropped)
+    soft_blockers: Optional[List[str]] = None  # SOFT warnings/flags (normalized via field_validator, unknown values dropped)
     direction_considered: Optional[Literal["LONG", "SHORT", "NONE"]] = None
     # Scalping parameters
     tp_pct: Optional[float] = None  # Take profit percentage (e.g., 0.02 for 2%)

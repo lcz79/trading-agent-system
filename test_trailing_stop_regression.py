@@ -93,13 +93,18 @@ def test_trailing_stop_activation_logic():
     # Check for TRAILING_ACTIVATION_RAW_PCT constant
     assert 'TRAILING_ACTIVATION_RAW_PCT' in code, "TRAILING_ACTIVATION_RAW_PCT should be defined"
     
-    # Extract the value using a simpler pattern
-    # Pattern: TRAILING_ACTIVATION_RAW_PCT = float(os.getenv("TRAILING_ACTIVATION_RAW_PCT", "0.001"))
-    pattern = r'TRAILING_ACTIVATION_RAW_PCT["\'],\s*["\']([0-9.]+)["\']'
-    match = re.search(pattern, code)
-    if match:
-        default_value = float(match.group(1))
-        print(f"   - TRAILING_ACTIVATION_RAW_PCT default: {default_value} ({default_value*100:.3f}%)")
+    # Extract the default value using a simple substring search
+    # Looking for pattern: TRAILING_ACTIVATION_RAW_PCT", "0.001"
+    if 'TRAILING_ACTIVATION_RAW_PCT' in code:
+        # Find the env var definition and extract the default value
+        start = code.find('TRAILING_ACTIVATION_RAW_PCT')
+        snippet = code[start:start+200]
+        # Look for the default value pattern
+        import re
+        default_match = re.search(r'["\']([0-9.]+)["\'](?=\s*\))', snippet)
+        if default_match:
+            default_value = float(default_match.group(1))
+            print(f"   - TRAILING_ACTIVATION_RAW_PCT default: {default_value} ({default_value*100:.3f}%)")
     
     # Check for ROI threshold check
     assert 'roi_raw' in code or 'roi' in code.lower(), "Should calculate ROI for trailing activation"
@@ -198,9 +203,11 @@ def test_profit_lock_stages():
     assert 'PROFIT_LOCK_ARM_ROI' in code, "PROFIT_LOCK_ARM_ROI should be defined"
     assert 'PROFIT_LOCK_CONFIRM_SECONDS' in code, "PROFIT_LOCK_CONFIRM_SECONDS should be defined"
     
-    # Extract values if possible
-    arm_match = re.search(r'PROFIT_LOCK_ARM_ROI.*["\']([0-9.]+)["\']', code)
-    confirm_match = re.search(r'PROFIT_LOCK_CONFIRM_SECONDS.*["\']([0-9]+)["\']', code)
+    # Extract values using specific pattern matching
+    # Looking for float values like: "0.06" or '0.06'
+    arm_match = re.search(r'PROFIT_LOCK_ARM_ROI.*?["\'](\d+\.\d+)["\']', code)
+    # Looking for integer values like: "90" or '90'
+    confirm_match = re.search(r'PROFIT_LOCK_CONFIRM_SECONDS.*?["\'](\d+)["\']', code)
     
     if arm_match and confirm_match:
         arm_roi = float(arm_match.group(1))
