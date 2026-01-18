@@ -594,9 +594,99 @@ async def analysis_cycle():
                 positions_count=0,
                 max_positions=MAX_POSITIONS,
                 positions_details=[],
-                reason="Impossibile ottenere dati tecnici dagli analizzatori. Riprovo al prossimo ciclo."
+                reason="Impossibile ottenere dati tecnico dagli analizzatori. Riprovo al prossimo ciclo."
             )
             return
+        
+        # 4b. ADVANCED PREPROCESSING - Compute enhanced fields
+        print(f"        🔬 Preprocessing: Computing regime, confluence, and correlation risk...")
+        from regime import detect_regime_with_hysteresis, calculate_volatility_bucket
+        from confluence import calculate_confluence_score
+        from correlation import calculate_portfolio_correlation_risk
+        
+        for symbol, asset_dict in assets_data.items():
+            try:
+                tech = asset_dict.get("tech", {})
+                timeframes = tech.get("timeframes", {})
+                tf_15m = timeframes.get("15m", {})
+                
+                # Extract data from 15m timeframe
+                adx = tf_15m.get("adx", 20.0)
+                atr = tf_15m.get("atr", 0.0)
+                price = tf_15m.get("price", 0.0)
+                trend = tf_15m.get("trend")
+                ema_20 = tf_15m.get("ema_20")
+                ema_50 = tf_15m.get("ema_50")
+                
+                # Compute regime with hysteresis
+                regime, regime_meta = detect_regime_with_hysteresis(
+                    symbol=symbol,
+                    adx=adx,
+                    atr=atr,
+                    price=price,
+                    trend=trend,
+                    ema_20=ema_20,
+                    ema_50=ema_50
+                )
+                
+                # Compute volatility bucket
+                volatility_bucket = calculate_volatility_bucket(atr, price)
+                
+                # Compute confluence scores for both directions
+                long_confluence, long_breakdown = calculate_confluence_score("LONG", timeframes)
+                short_confluence, short_breakdown = calculate_confluence_score("SHORT", timeframes)
+                
+                # Compute correlation risk (placeholder for forward compatibility)
+                corr_risk_long, corr_breakdown_long = calculate_portfolio_correlation_risk(
+                    position_details, symbol, "long"
+                )
+                corr_risk_short, corr_breakdown_short = calculate_portfolio_correlation_risk(
+                    position_details, symbol, "short"
+                )
+                
+                # Add enhanced fields to asset data
+                asset_dict["enhanced"] = {
+                    "regime": regime,
+                    "regime_metadata": regime_meta,
+                    "volatility_bucket": volatility_bucket,
+                    "confluence": {
+                        "long": {
+                            "score": long_confluence,
+                            "breakdown": long_breakdown
+                        },
+                        "short": {
+                            "score": short_confluence,
+                            "breakdown": short_breakdown
+                        }
+                    },
+                    "correlation_risk": {
+                        "long": corr_risk_long,
+                        "short": corr_risk_short,
+                        "breakdown_long": corr_breakdown_long,
+                        "breakdown_short": corr_breakdown_short
+                    }
+                }
+                
+                # Log computed fields in debug mode
+                print(f"          {symbol}: regime={regime}, vol={volatility_bucket}, "
+                      f"confluence(L/S)={long_confluence}/{short_confluence}")
+                
+            except Exception as e:
+                print(f"        ⚠️ Preprocessing error for {symbol}: {e}")
+                # Add default enhanced fields on error (fail-safe)
+                asset_dict["enhanced"] = {
+                    "regime": "UNKNOWN",
+                    "volatility_bucket": "MEDIUM",
+                    "confluence": {
+                        "long": {"score": 50, "breakdown": {}},
+                        "short": {"score": 50, "breakdown": {}}
+                    },
+                    "correlation_risk": {
+                        "long": 0.0,
+                        "short": 0.0
+                    },
+                    "error": str(e)
+                }
 
         # 5. AI DECISION
         print(f"        🤖 DeepSeek: Analizzando {list(assets_data.keys())}...")
@@ -879,6 +969,63 @@ async def analysis_cycle():
                             time_in_trade_limit_sec = min_time
                         if cooldown_sec is None or int(cooldown_sec) < min_cd:
                             cooldown_sec = min_cd
+                    
+                    # === VERIFICATION SAFETY GATES ===
+                    # Apply deterministic safety checks before executing OPEN
+                    from verification import verify_decision
+                    
+                    # Build decision dict for verification
+                    decision_to_verify = {
+                        "symbol": sym,
+                        "action": action,
+                        "leverage": leverage,
+                        "size_pct": size_pct,
+                        "entry_type": d.get('entry_type', 'MARKET'),
+                        "entry_price": d.get('entry_price'),
+                        "entry_ttl_sec": d.get('entry_expires_sec', 240),
+                        "tp_pct": tp_pct,
+                        "sl_pct": sl_pct
+                    }
+                    
+                    # Get enhanced data for this symbol
+                    enhanced_data = assets_data.get(sym, {}).get("enhanced", {})
+                    direction = "LONG" if action == "OPEN_LONG" else "SHORT"
+                    confluence_data = enhanced_data.get("confluence", {}).get(direction.lower(), {})
+                    
+                    verification_enhanced = {
+                        "confluence_score": confluence_data.get("score", 50),
+                        "volatility_bucket": enhanced_data.get("volatility_bucket", "MEDIUM"),
+                        "regime": enhanced_data.get("regime", "UNKNOWN")
+                    }
+                    
+                    # Get tech data for verification
+                    tech_data_for_verification = assets_data.get(sym, {}).get("tech", {})
+                    
+                    # Run verification
+                    verification_result = verify_decision(
+                        decision_to_verify,
+                        tech_data_for_verification,
+                        verification_enhanced
+                    )
+                    
+                    # Handle verification outcome
+                    if verification_result.action == "BLOCK":
+                        print(f"        🚫 BLOCKED {action} on {sym}: {'; '.join(verification_result.reasons)}")
+                        continue  # Skip this decision
+                    elif verification_result.action == "DEGRADE":
+                        print(f"        ⚠️ DEGRADE {action} on {sym}:")
+                        for reason in verification_result.reasons:
+                            print(f"           - {reason}")
+                        # Apply modified parameters
+                        modified = verification_result.modified_params
+                        leverage = modified.get("leverage", leverage)
+                        size_pct = modified.get("size_pct", size_pct)
+                        entry_type = modified.get("entry_type", entry_type)
+                        entry_price = modified.get("entry_price", entry_price)
+                        entry_expires_sec = modified.get("entry_ttl_sec", entry_expires_sec)
+                        print(f"           Modified params: leverage={leverage:.1f}x, size_pct={size_pct:.3f}")
+                    else:  # ALLOW
+                        print(f"        ✅ Safety gates passed for {action} on {sym}")
                     
                     # Generate intent_id for idempotency
                     intent_id = str(uuid.uuid4())

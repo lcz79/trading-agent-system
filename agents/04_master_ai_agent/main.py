@@ -838,6 +838,54 @@ Nel context trovi per ogni symbol:
 
 Ogni timeframe ha: price, trend, rsi, macd, macd_momentum, ema_20, ema_50, ema_200, adx, atr, return_15m/1h/4h/1d, volume_spike
 
+**ENHANCED DETERMINISTIC FEATURES** (computed by orchestrator):
+Nuovi campi deterministici disponibili in market_data[SYMBOL].enhanced:
+
+1. **regime** (str): Classificazione regime di mercato con hysteresis anti-flapping
+   - "TREND": Movimento direzionale forte (ADX > 25)
+   - "RANGE": Consolidamento laterale (ADX < 20)
+   - "TRANSITION": Stato intermedio (ADX 20-25)
+   - Usa regime per scegliere playbook: TREND→trend-following, RANGE→mean-reversion
+
+2. **volatility_bucket** (str): Classificazione volatilità ATR%
+   - "LOW": ATR < 0.5% del prezzo (mercato calmo)
+   - "MEDIUM": ATR 0.5-1.5% (volatilità normale)
+   - "HIGH": ATR 1.5-3.0% (volatilità elevata)
+   - "EXTREME": ATR > 3.0% (volatilità estrema)
+   - Usa per adattare leverage/size: HIGH/EXTREME → riduci rischio
+
+3. **confluence.long.score** / **confluence.short.score** (int 0-100): Punteggio allineamento multi-timeframe
+   - 70-100: Alta confluence, timeframes allineati → trade ad alta probabilità
+   - 40-70: Media confluence, segnali misti → trade con prudenza (ridotta size)
+   - 0-40: Bassa confluence, timeframes conflittuali → evitare trade (verrà bloccato dal gate)
+   - Include penalty per opposizione major TF (1h/4h)
+   - Usa come input primario per confidence: confluence alta → confidence alta
+
+4. **correlation_risk.long** / **correlation_risk.short** (float 0.0-1.0): Rischio correlazione portfolio
+   - Attualmente placeholder (sempre 0.0) per forward compatibility
+   - Futuro: gestirà overexposure a asset correlati
+
+**COME USARE ENHANCED FEATURES**:
+- **regime** guida scelta playbook (TREND vs RANGE)
+- **volatility_bucket** guida leverage/size (HIGH/EXTREME → ridurre)
+- **confluence** è il tuo indicatore di qualità principale:
+  - Confluence ≥ 70: setup forte, confidence alta (75-90%)
+  - Confluence 40-70: setup debole, confidence media (60-75%), size ridotta
+  - Confluence < 40: setup invalido, verrà BLOCCATO automaticamente dal safety gate
+- Questi field sono già calcolati e testati - USALI come input primario per le tue decisioni
+- Non devi calcolarli tu - sono forniti come guardrail deterministici
+
+**SAFETY GATES AUTOMATICI** (applicati dall'orchestrator DOPO la tua decisione):
+Il sistema applicherà automaticamente questi controlli di sicurezza:
+- BLOCK se confluence < 40
+- BLOCK se LIMIT entry invalido (price mancante o TTL fuori range [60,600]s)
+- BLOCK se risk params fuori bounds (leverage > 20, size > 0.30, etc.)
+- BLOCK se 1h in forte opposizione alla direzione intesa
+- DEGRADE (riduzione size ×0.6) se confluence 40-60 o volatility HIGH/EXTREME
+
+NON preoccuparti di implementare questi controlli nelle tue decisioni - sono applicati automaticamente.
+Focus sulla qualità del setup usando i campi enhanced come input.
+
 ## PARAMETRI SCALPING (SEMPRE OBBLIGATORI PER OPEN)
 **tp_pct**: Target profit come frazione (0.01 = 1%, 0.02 = 2%, 0.03 = 3%)
   - Alta confidenza (>85%): 0.025-0.03 (2.5-3%)
