@@ -2179,26 +2179,31 @@ def cancel_intent_endpoint(request: dict):
         # Cancel the exchange order if LIMIT entry and we have order IDs
         cancel_success = False
         if exchange and intent.entry_type == "LIMIT":
-            symbol_id = bybit_symbol_id(intent.symbol)
+            # Verify exchange is properly initialized
             try:
-                if intent.exchange_order_link_id:
-                    # Cancel by orderLinkId (preferred)
-                    exchange.private_post_v5_order_cancel({
-                        "category": "linear",
-                        "symbol": symbol_id,
-                        "orderLinkId": intent.exchange_order_link_id
-                    })
-                    print(f"✅ Cancelled LIMIT order by orderLinkId: {intent.exchange_order_link_id}")
-                    cancel_success = True
-                elif intent.exchange_order_id:
-                    # Fallback to orderId
-                    exchange.private_post_v5_order_cancel({
-                        "category": "linear",
-                        "symbol": symbol_id,
-                        "orderId": intent.exchange_order_id
-                    })
-                    print(f"✅ Cancelled LIMIT order by orderId: {intent.exchange_order_id}")
-                    cancel_success = True
+                # Quick check that exchange is responsive
+                if not hasattr(exchange, 'private_post_v5_order_cancel'):
+                    print(f"⚠️ Exchange not properly initialized, cannot cancel order")
+                else:
+                    symbol_id = bybit_symbol_id(intent.symbol)
+                    if intent.exchange_order_link_id:
+                        # Cancel by orderLinkId (preferred)
+                        exchange.private_post_v5_order_cancel({
+                            "category": "linear",
+                            "symbol": symbol_id,
+                            "orderLinkId": intent.exchange_order_link_id
+                        })
+                        print(f"✅ Cancelled LIMIT order by orderLinkId: {intent.exchange_order_link_id}")
+                        cancel_success = True
+                    elif intent.exchange_order_id:
+                        # Fallback to orderId
+                        exchange.private_post_v5_order_cancel({
+                            "category": "linear",
+                            "symbol": symbol_id,
+                            "orderId": intent.exchange_order_id
+                        })
+                        print(f"✅ Cancelled LIMIT order by orderId: {intent.exchange_order_id}")
+                        cancel_success = True
             except Exception as cancel_err:
                 print(f"⚠️ Exchange cancel error: {cancel_err}")
                 # Continue to mark intent as cancelled even if exchange call fails

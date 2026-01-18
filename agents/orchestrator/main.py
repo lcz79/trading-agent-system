@@ -710,7 +710,12 @@ async def analysis_cycle():
                                     old_intent_id = existing_limit.get('intent_id')
                                     
                                     # Check if price or expires changed significantly
-                                    price_changed = abs(float(old_price) - float(entry_price)) / float(old_price) > PRICE_CHANGE_THRESHOLD_FOR_REPLACE
+                                    # Guard against division by zero
+                                    if old_price and old_price > 0:
+                                        price_changed = abs(float(old_price) - float(entry_price)) / float(old_price) > PRICE_CHANGE_THRESHOLD_FOR_REPLACE
+                                    else:
+                                        # If old_price is invalid, always replace
+                                        price_changed = True
                                     
                                     if price_changed:
                                         print(f"        🔄 Cancel+Replace LIMIT order for {sym}: old_price={old_price} → new_price={entry_price}")

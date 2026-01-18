@@ -1451,7 +1451,8 @@ Evolved params (guidance):
                     entry_expires_sec = d.get("entry_expires_sec", 240)
                     
                     # Validate entry_price
-                    if not entry_price or not isinstance(entry_price, (int, float)) or entry_price <= 0:
+                    # Check for valid positive price (minimum 0.01 to avoid extremely small values)
+                    if not entry_price or not isinstance(entry_price, (int, float)) or entry_price < 0.01:
                         logger.warning(f"⚠️ LIMIT entry without valid entry_price for {d.get('symbol')}: {entry_price}. Falling back to MARKET.")
                         d["entry_type"] = "MARKET"
                         d["entry_price"] = None

@@ -23,8 +23,9 @@ REPO_ROOT = Path(__file__).parent.resolve()
 sys.path.insert(0, str(REPO_ROOT / "agents" / "04_master_ai_agent"))
 sys.path.insert(0, str(REPO_ROOT / "agents" / "07_position_manager"))
 
-# Constants
-PRICE_CHANGE_THRESHOLD = 0.001  # 0.1% threshold for cancel+replace
+# Constants - aligned with orchestrator configuration
+# Using same default as PRICE_CHANGE_THRESHOLD_FOR_REPLACE in orchestrator
+PRICE_CHANGE_THRESHOLD = float(os.getenv("PRICE_CHANGE_THRESHOLD_FOR_REPLACE", "0.001"))  # 0.1% threshold for cancel+replace
 
 def test_ai_decision_model_limit_fields():
     """Test that Decision model accepts LIMIT entry fields"""
