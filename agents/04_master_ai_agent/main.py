@@ -397,6 +397,10 @@ class Decision(BaseModel):
     time_in_trade_limit_sec: Optional[int] = None  # Max holding time in seconds
     cooldown_sec: Optional[int] = None  # Cooldown period after close (per symbol+direction)
     trail_activation_roi: Optional[float] = None  # ROI threshold to activate trailing (optional)
+    # LIMIT entry parameters
+    entry_type: Optional[Literal["MARKET", "LIMIT"]] = "MARKET"  # Entry order type
+    entry_price: Optional[float] = None  # Entry price for LIMIT orders (required when entry_type=LIMIT)
+    entry_expires_sec: Optional[int] = 240  # TTL for LIMIT orders in seconds (default 240, range 10-3600)
 
 class AnalysisPayload(BaseModel):
     global_data: Dict[str, Any]
@@ -659,6 +663,41 @@ Esempio CORRETTO per OPEN_SHORT con scalping e soft blocker:
 
 **trail_activation_roi** (opzionale): ROI leveraged per attivare trailing (es. 0.01 = 1%)
 
+## PARAMETRI LIMIT ENTRY (OPZIONALI - per entry più precisa)
+**entry_type**: Tipo di ordine entry ("MARKET" o "LIMIT")
+  - "MARKET" (default): Entry immediato al prezzo di mercato
+  - "LIMIT": Entry a prezzo specifico, più preciso ma richiede che il prezzo venga raggiunto
+  
+**entry_price** (richiesto quando entry_type="LIMIT"): Prezzo esatto per LIMIT order
+  - Per LONG: entry_price leggermente sotto il prezzo attuale (es. -0.1% a -0.5%) per migliore fill
+  - Per SHORT: entry_price leggermente sopra il prezzo attuale (es. +0.1% a +0.5%)
+  - Se entry_price manca o è invalido con entry_type="LIMIT", il sistema fa fallback a MARKET con warning
+  
+**entry_expires_sec** (opzionale, default 240): TTL per LIMIT order in secondi (range 10-3600)
+  - Setup molto forte: 60-120 sec (1-2 min) - se non riempie velocemente, probabilmente non è più valido
+  - Setup normale: 180-300 sec (3-5 min)
+  - Setup paziente: 300-600 sec (5-10 min)
+  - Max consigliato: 600 sec (10 min) per scalping 15m
+
+SEMANTICA LIMIT ENTRY:
+- Il sistema piazza un ordine LIMIT GTC a entry_price con orderLinkId tracking
+- Se l'ordine non si riempie entro entry_expires_sec, viene cancellato automaticamente
+- Se nel frattempo arriva una nuova decisione AI con entry_price diverso, il sistema cancella l'ordine vecchio e ne piazza uno nuovo (cancel+replace)
+- Una volta riempito, il sistema piazza automaticamente lo stop-loss e inizia il monitoring come per MARKET entry
+
+QUANDO USARE LIMIT ENTRY:
+✅ Usa LIMIT quando:
+  - Prezzo è vicino a supporto/resistenza e vuoi entry preciso
+  - Setup molto pulito ma prezzo non è ancora ideale
+  - Vuoi ottimizzare entry per ridurre slippage
+  - Hai alta confidenza che il prezzo raggiungerà il livello target
+  
+❌ Usa MARKET quando:
+  - Setup time-sensitive che richiede entry immediato
+  - Alta volatilità dove LIMIT potrebbe non riempire
+  - Confidenza bassa e vuoi entry rapido per gestire meglio il rischio
+  - Breakout/momentum trade che non aspetta
+
 ## GESTIONE RISCHIO DINAMICA
 
 ## REGOLE RSI (ANTI-CONTRADDIZIONE)
@@ -718,9 +757,28 @@ Considera anche:
       "sl_pct": 0.015,
       "time_in_trade_limit_sec": 3600,
       "cooldown_sec": 900,
-      "trail_activation_roi": 0.01
+      "trail_activation_roi": 0.01,
+      "entry_type": "MARKET",
+      "entry_price": null,
+      "entry_expires_sec": 240
     }
   ]
+}
+
+ESEMPIO con LIMIT entry (opzionale):
+{
+  "symbol": "BTCUSDT",
+  "action": "OPEN_LONG",
+  "leverage": 5.0,
+  "size_pct": 0.12,
+  "confidence": 80,
+  "rationale": "Setup LONG con prezzo vicino a supporto chiave $95000. Uso LIMIT entry a $95100 per entry preciso al supporto con minor slippage. Se prezzo rimbalza prima (60 sec), entry comunque valido.",
+  "entry_type": "LIMIT",
+  "entry_price": 95100.0,
+  "entry_expires_sec": 60,
+  "tp_pct": 0.02,
+  "sl_pct": 0.015,
+  "time_in_trade_limit_sec": 3600
 }
 
 RICORDA: 
@@ -1386,6 +1444,37 @@ Evolved params (guidance):
             try:
                 # Applica guardrail per garantire coerenza
                 d = enforce_decision_consistency(d)
+                
+                # LIMIT entry validation and fallback
+                if d.get("entry_type") == "LIMIT":
+                    entry_price = d.get("entry_price")
+                    entry_expires_sec = d.get("entry_expires_sec", 240)
+                    
+                    # Validate entry_price
+                    # Check for valid positive price (minimum 0.01 to avoid extremely small values)
+                    if not entry_price or not isinstance(entry_price, (int, float)) or entry_price < 0.01:
+                        logger.warning(f"⚠️ LIMIT entry without valid entry_price for {d.get('symbol')}: {entry_price}. Falling back to MARKET.")
+                        d["entry_type"] = "MARKET"
+                        d["entry_price"] = None
+                        d["entry_expires_sec"] = None
+                        # Update rationale to reflect fallback
+                        original_rationale = d.get("rationale", "")
+                        d["rationale"] = f"[FALLBACK TO MARKET: invalid entry_price] {original_rationale}"
+                    else:
+                        # Validate and clamp entry_expires_sec
+                        try:
+                            entry_expires_sec = int(entry_expires_sec)
+                            if entry_expires_sec < 10:
+                                logger.warning(f"⚠️ entry_expires_sec {entry_expires_sec} < 10, clamping to 10")
+                                entry_expires_sec = 10
+                            elif entry_expires_sec > 3600:
+                                logger.warning(f"⚠️ entry_expires_sec {entry_expires_sec} > 3600, clamping to 3600")
+                                entry_expires_sec = 3600
+                            d["entry_expires_sec"] = entry_expires_sec
+                        except (ValueError, TypeError):
+                            logger.warning(f"⚠️ Invalid entry_expires_sec for {d.get('symbol')}, using default 240")
+                            d["entry_expires_sec"] = 240
+                
                 valid_dec = Decision(**d)
 
                 # CAP ENTRY CONFIDENCE by setup_confirmations (soft sanity-check)

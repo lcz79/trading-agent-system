@@ -60,6 +60,15 @@ CYCLE_INTERVAL = 60  # Secondi tra ogni ciclo di controllo (era 900)
 DRY_RUN = os.getenv("DRY_RUN", "false").lower() == "true"  # Se true, logga solo azioni senza eseguirle
 CRITICAL_LOSS_PCT_LEV = float(os.getenv("CRITICAL_LOSS_PCT_LEV", "12.0"))  # Soglia perdita % con leva per CRITICAL
 
+# --- HEDGE MODE & SCALE-IN CONFIGURATION ---
+HEDGE_MODE = os.getenv("BYBIT_HEDGE_MODE", "false").lower() == "true"  # Allow long+short same symbol
+ALLOW_SCALE_IN = os.getenv("ALLOW_SCALE_IN", "false").lower() == "true"  # Allow multiple entries same direction
+MAX_PENDING_ENTRIES_PER_SYMBOL_SIDE = int(os.getenv("MAX_PENDING_ENTRIES_PER_SYMBOL_SIDE", "1"))
+
+# --- CANCEL+REPLACE CONFIGURATION ---
+# Price change threshold for cancel+replace logic (0.1% = 0.001)
+PRICE_CHANGE_THRESHOLD_FOR_REPLACE = float(os.getenv("PRICE_CHANGE_THRESHOLD_FOR_REPLACE", "0.001"))
+
 # --- CRITICAL CLOSE CONFIRMATION STATE ---
 # Tracks pending CLOSE requests per symbol. Format: {symbol: cycle_count}
 # Requires 2 consecutive cycles with CLOSE action to execute
@@ -670,6 +679,67 @@ async def analysis_cycle():
 
                     # Guardrail: in one-way mode (HedgeMode False) do NOT open another position on the same symbol.
                     desired_side = "long" if action == "OPEN_LONG" else "short"
+                    
+                    # Cancel+replace logic for pending LIMIT orders
+                    # Check if there's a pending LIMIT entry for this symbol+direction
+                    entry_type = d.get('entry_type', 'MARKET')
+                    entry_price = d.get('entry_price')
+                    entry_expires_sec = d.get('entry_expires_sec', 240)
+                    
+                    if entry_type == 'LIMIT' and entry_price:
+                        try:
+                            # Query pending intents from position manager
+                            pending_resp = await c.get(f"{URLS['pos']}/get_pending_intents")
+                            if pending_resp.status_code == 200:
+                                pending_data = pending_resp.json()
+                                pending_intents = pending_data.get('intents', [])
+                                
+                                # Look for existing PENDING LIMIT intent for same symbol+side
+                                existing_limit = None
+                                for intent in pending_intents:
+                                    if (intent.get('symbol', '').upper() == sym.upper() and
+                                        intent.get('side', '').lower() == desired_side and
+                                        intent.get('entry_type') == 'LIMIT' and
+                                        intent.get('status') == 'PENDING'):
+                                        existing_limit = intent
+                                        break
+                                
+                                # If found and price changed, cancel old and place new
+                                if existing_limit:
+                                    old_price = existing_limit.get('entry_price')
+                                    old_intent_id = existing_limit.get('intent_id')
+                                    
+                                    # Check if price or expires changed significantly
+                                    # Guard against division by zero
+                                    if old_price and old_price > 0:
+                                        price_changed = abs(float(old_price) - float(entry_price)) / float(old_price) > PRICE_CHANGE_THRESHOLD_FOR_REPLACE
+                                    else:
+                                        # If old_price is invalid, always replace
+                                        price_changed = True
+                                    
+                                    if price_changed:
+                                        print(f"        🔄 Cancel+Replace LIMIT order for {sym}: old_price={old_price} → new_price={entry_price}")
+                                        
+                                        # Cancel existing order
+                                        try:
+                                            cancel_resp = await c.post(
+                                                f"{URLS['pos']}/cancel_intent",
+                                                json={"intent_id": old_intent_id},
+                                                timeout=10.0
+                                            )
+                                            if cancel_resp.status_code == 200:
+                                                print(f"        ✅ Cancelled old LIMIT order: {old_intent_id[:8]}")
+                                            else:
+                                                print(f"        ⚠️ Failed to cancel old order: {cancel_resp.text}")
+                                        except Exception as cancel_err:
+                                            print(f"        ⚠️ Cancel error: {cancel_err}")
+                                    else:
+                                        # Price hasn't changed much, skip duplicate submission
+                                        print(f"        ⏭️ SKIP: pending LIMIT order already exists for {sym} at similar price")
+                                        continue
+                        except Exception as pending_err:
+                            print(f"        ⚠️ Error checking pending intents: {pending_err}")
+                            # Continue anyway - fail open
 
 
                     # === SHORT_MOMENTUM_15M_GATE ===
@@ -735,13 +805,46 @@ async def analysis_cycle():
                             if abs(qty) > 0:
                                 existing = p0
                                 break
-                        if existing is not None and not HEDGE_MODE:
+                        
+                        if existing is not None:
                             ex_side = (existing.get('side') or '').lower()
-                            print(
-                                f"        🧯 SKIP {action} on {sym}: existing open position detected in one-way mode "
-                                f"(existing_side={ex_side or 'unknown'}). Preventing flip/churn."
-                            )
-                            continue
+                            
+                            if not HEDGE_MODE and not ALLOW_SCALE_IN:
+                                # Default: block any new position on same symbol (one-way mode, no scale-in)
+                                print(
+                                    f"        🧯 SKIP {action} on {sym}: existing open position detected in one-way mode "
+                                    f"(existing_side={ex_side or 'unknown'}). Preventing flip/churn."
+                                )
+                                continue
+                            elif ALLOW_SCALE_IN and ex_side == desired_side:
+                                # Scale-in allowed: check if we're at max pending entries for this symbol+side
+                                try:
+                                    pending_resp = await c.get(f"{URLS['pos']}/get_pending_intents")
+                                    if pending_resp.status_code == 200:
+                                        pending_data = pending_resp.json()
+                                        pending_intents = pending_data.get('intents', [])
+                                        
+                                        # Count pending entries for this symbol+side
+                                        count = sum(1 for intent in pending_intents 
+                                                   if intent.get('symbol', '').upper() == sym.upper() 
+                                                   and intent.get('side', '').lower() == desired_side
+                                                   and intent.get('status') == 'PENDING')
+                                        
+                                        if count >= MAX_PENDING_ENTRIES_PER_SYMBOL_SIDE:
+                                            print(f"        🧯 SKIP {action} on {sym}: max pending entries ({count}/{MAX_PENDING_ENTRIES_PER_SYMBOL_SIDE}) reached for scale-in")
+                                            continue
+                                        else:
+                                            print(f"        ✅ Scale-in allowed: {count}/{MAX_PENDING_ENTRIES_PER_SYMBOL_SIDE} pending entries for {sym} {desired_side}")
+                                except Exception as scale_err:
+                                    print(f"        ⚠️ Could not check scale-in limit: {scale_err}, proceeding conservatively")
+                                    continue
+                            elif not HEDGE_MODE and ex_side != desired_side:
+                                # One-way mode: block opposite direction
+                                print(
+                                    f"        🧯 SKIP {action} on {sym}: existing {ex_side} position in one-way mode "
+                                    f"(cannot flip to {desired_side})"
+                                )
+                                continue
                     except Exception as e:
                         print(f"        ⚠️ Could not evaluate existing position for {sym}: {e}")
 
@@ -785,6 +888,17 @@ async def analysis_cycle():
                     if tp_pct:
                         print(f"           Scalping: TP={tp_pct*100:.1f}%, SL={sl_pct*100:.1f}%, MaxTime={time_in_trade_limit_sec}s")
                     
+                    # Extract LIMIT entry parameters if present
+                    entry_type = d.get('entry_type', 'MARKET')
+                    entry_price = d.get('entry_price')
+                    entry_expires_sec = d.get('entry_expires_sec', 240)
+                    
+                    if entry_type == 'LIMIT':
+                        if entry_price and entry_price > 0:
+                            print(f"           LIMIT entry: price={entry_price}, expires={entry_expires_sec}s")
+                        else:
+                            print(f"           ⚠️ LIMIT entry requested but no valid price, will use MARKET")
+                    
                     # Build payload with scalping params
                     payload = {
                         "symbol": sym,
@@ -807,6 +921,14 @@ async def analysis_cycle():
                         payload["cooldown_sec"] = cooldown_sec
                     if trail_activation_roi is not None:
                         payload["trail_activation_roi"] = trail_activation_roi
+                    
+                    # Add LIMIT entry params if present
+                    if entry_type and entry_type != "MARKET":
+                        payload["entry_type"] = entry_type
+                    if entry_price is not None:
+                        payload["entry_price"] = entry_price
+                    if entry_expires_sec is not None:
+                        payload["entry_ttl_sec"] = entry_expires_sec  # Note: position manager uses entry_ttl_sec
                     
                     res = await c.post(f"{URLS['pos']}/open_position", json=payload)
                     print(f"        ✅ Result: {res.json()}")

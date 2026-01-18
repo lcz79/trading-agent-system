@@ -2128,6 +2128,106 @@ def get_closed():
         return []
     except Exception:
         return []
+
+@app.get("/get_pending_intents")
+def get_pending_intents_endpoint():
+    """Returns list of pending order intents (especially LIMIT orders awaiting fill)"""
+    try:
+        trading_state = get_trading_state()
+        pending_intents = []
+        
+        for intent_id, intent_data in trading_state._state.get("intents", {}).items():
+            intent = OrderIntent.from_dict(intent_data)
+            if intent.status == OrderStatus.PENDING:
+                pending_intents.append({
+                    "intent_id": intent.intent_id,
+                    "symbol": intent.symbol,
+                    "side": intent.side,
+                    "entry_type": intent.entry_type,
+                    "entry_price": intent.entry_price,
+                    "entry_expires_at": intent.entry_expires_at,
+                    "status": intent.status.value,
+                    "created_at": intent.created_at,
+                    "exchange_order_id": intent.exchange_order_id,
+                    "exchange_order_link_id": intent.exchange_order_link_id
+                })
+        
+        return {"intents": pending_intents, "count": len(pending_intents)}
+    except Exception as e:
+        return {"error": str(e), "intents": []}
+
+@app.post("/cancel_intent")
+def cancel_intent_endpoint(request: dict):
+    """Cancel a pending intent by intent_id"""
+    try:
+        intent_id = request.get("intent_id")
+        if not intent_id:
+            return {"status": "error", "msg": "intent_id required"}
+        
+        trading_state = get_trading_state()
+        intent_data = trading_state._state.get("intents", {}).get(intent_id)
+        
+        if not intent_data:
+            return {"status": "error", "msg": f"Intent {intent_id} not found"}
+        
+        intent = OrderIntent.from_dict(intent_data)
+        
+        # Only cancel if PENDING
+        if intent.status != OrderStatus.PENDING:
+            return {"status": "error", "msg": f"Intent {intent_id} is not PENDING (status={intent.status})"}
+        
+        # Cancel the exchange order if LIMIT entry and we have order IDs
+        cancel_success = False
+        if exchange and intent.entry_type == "LIMIT":
+            # Verify exchange is properly initialized
+            try:
+                # Quick check that exchange is responsive
+                if not hasattr(exchange, 'private_post_v5_order_cancel'):
+                    print(f"⚠️ Exchange not properly initialized, cannot cancel order")
+                else:
+                    symbol_id = bybit_symbol_id(intent.symbol)
+                    if intent.exchange_order_link_id:
+                        # Cancel by orderLinkId (preferred)
+                        exchange.private_post_v5_order_cancel({
+                            "category": "linear",
+                            "symbol": symbol_id,
+                            "orderLinkId": intent.exchange_order_link_id
+                        })
+                        print(f"✅ Cancelled LIMIT order by orderLinkId: {intent.exchange_order_link_id}")
+                        cancel_success = True
+                    elif intent.exchange_order_id:
+                        # Fallback to orderId
+                        exchange.private_post_v5_order_cancel({
+                            "category": "linear",
+                            "symbol": symbol_id,
+                            "orderId": intent.exchange_order_id
+                        })
+                        print(f"✅ Cancelled LIMIT order by orderId: {intent.exchange_order_id}")
+                        cancel_success = True
+            except Exception as cancel_err:
+                print(f"⚠️ Exchange cancel error: {cancel_err}")
+                # Continue to mark intent as cancelled even if exchange call fails
+        elif intent.entry_type == "MARKET":
+            # MARKET orders typically execute immediately, so PENDING MARKET is rare
+            # If we get here, it's likely already executed or failed
+            print(f"⚠️ Warning: Attempting to cancel PENDING MARKET order {intent_id}")
+        
+        # Mark intent as CANCELLED
+        trading_state.update_intent_status(
+            intent_id,
+            OrderStatus.CANCELLED,
+            error_message="Cancelled by orchestrator (cancel+replace)"
+        )
+        
+        return {
+            "status": "success",
+            "msg": f"Intent {intent_id} cancelled",
+            "intent_id": intent_id,
+            "exchange_cancelled": cancel_success
+        }
+    except Exception as e:
+        print(f"❌ Error cancelling intent: {e}")
+        return {"status": "error", "msg": str(e)}
 @app.post("/open_position")
 def open_position(order: OrderRequest):
     if not exchange:
