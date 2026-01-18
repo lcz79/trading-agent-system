@@ -12,6 +12,11 @@ This script demonstrates the expected flow:
 
 import json
 
+# Configuration constants for LIMIT entry logic
+LIMIT_ENTRY_PRICE_ADJUSTMENT = 0.001  # 0.1% price adjustment for better fill
+MAX_DISTANCE_TO_SR_FOR_LIMIT = 0.005  # 0.5% max distance to support/resistance
+MIN_RANGE_SCORE_FOR_LIMIT = 50        # Minimum range score to prefer LIMIT
+
 def create_sample_market_data():
     """Create sample aggregated market data for ETH in RANGE setup"""
     return {
@@ -149,12 +154,12 @@ def demonstrate_limit_entry_logic():
     print(f"   Distance to Fib support: {distance_to_support*100:.2f}%")
     
     use_limit = False
-    if regime == "RANGE" and distance_to_support < 0.005 and range_score_long >= 50:
+    if regime == "RANGE" and distance_to_support < MAX_DISTANCE_TO_SR_FOR_LIMIT and range_score_long >= MIN_RANGE_SCORE_FOR_LIMIT:
         use_limit = True
         print(f"   ✅ LIMIT entry appropriate:")
         print(f"      - RANGE regime")
-        print(f"      - Price within 0.5% of support")
-        print(f"      - Range score >= 50 ({range_score_long})")
+        print(f"      - Price within {MAX_DISTANCE_TO_SR_FOR_LIMIT*100:.1f}% of support")
+        print(f"      - Range score >= {MIN_RANGE_SCORE_FOR_LIMIT} ({range_score_long})")
     else:
         print(f"   ❌ Use MARKET entry instead")
     
@@ -164,10 +169,10 @@ def demonstrate_limit_entry_logic():
     # Step 2: Compute entry_price using formula from prompt
     print()
     print("📝 Step 2: Compute entry_price (LONG at support)")
-    print(f"   Formula: entry_price = fib_support * (1 - 0.001)")
-    entry_price = fib_support * (1 - 0.001)
-    print(f"   entry_price = {fib_support} * 0.999 = ${entry_price:.2f}")
-    print(f"   This is -0.03% below support for better fill probability")
+    print(f"   Formula: entry_price = fib_support * (1 - {LIMIT_ENTRY_PRICE_ADJUSTMENT})")
+    entry_price = fib_support * (1 - LIMIT_ENTRY_PRICE_ADJUSTMENT)
+    print(f"   entry_price = {fib_support} * {1-LIMIT_ENTRY_PRICE_ADJUSTMENT} = ${entry_price:.2f}")
+    print(f"   This is -{LIMIT_ENTRY_PRICE_ADJUSTMENT*100:.2f}% below support for better fill probability")
     
     # Step 3: Determine TTL based on setup strength
     print()

@@ -9,6 +9,11 @@ and correctly computes entry_price based on Fibonacci/ATR data.
 import json
 import sys
 
+# Test constants
+SAMPLE_CURRENT_PRICE_ETH = 3520.0  # Sample ETH price for test validation
+MAX_PRICE_DEVIATION_PCT = 0.01     # 1% max deviation for entry_price validation
+DEFAULT_ENTRY_TTL_SEC = 240        # Default TTL for LIMIT orders
+
 def test_limit_entry_decision_parsing():
     """Test that DeepSeek decisions can include LIMIT entries with valid entry_price"""
     print("=" * 80)
@@ -60,10 +65,10 @@ def test_limit_entry_decision_parsing():
     
     # Validate entry_price is near current price (within 1%)
     # For this test, assume current price around 3520 based on rationale
-    current_price_approx = 3520
+    current_price_approx = SAMPLE_CURRENT_PRICE_ETH
     entry_price = decision["entry_price"]
     price_diff_pct = abs(entry_price - current_price_approx) / current_price_approx
-    assert price_diff_pct < 0.01, f"entry_price {entry_price} too far from current ~{current_price_approx} ({price_diff_pct*100:.2f}%)"
+    assert price_diff_pct < MAX_PRICE_DEVIATION_PCT, f"entry_price {entry_price} too far from current ~{current_price_approx} ({price_diff_pct*100:.2f}%)"
     
     # Validate multi-timeframe mentions in rationale
     rationale = decision["rationale"]
@@ -202,7 +207,7 @@ def test_orchestrator_mapping():
     # Add LIMIT entry params
     entry_type = ai_decision.get('entry_type', 'MARKET')
     entry_price = ai_decision.get('entry_price')
-    entry_expires_sec = ai_decision.get('entry_expires_sec', 240)
+    entry_expires_sec = ai_decision.get('entry_expires_sec', DEFAULT_ENTRY_TTL_SEC)
     
     if entry_type and entry_type != "MARKET":
         payload["entry_type"] = entry_type
