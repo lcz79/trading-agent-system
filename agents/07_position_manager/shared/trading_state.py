@@ -78,7 +78,8 @@ class PositionMetadata:
     @classmethod
     def from_dict(cls, data:  dict) -> 'PositionMetadata':
         valid_fields = {'symbol', 'side', 'entry_price', 'size', 'leverage', 'opened_at',
-                       'tp_pct', 'sl_pct', 'time_in_trade_limit_sec', 'cooldown_sec', 'intent_id'}
+                       'tp_pct', 'sl_pct', 'time_in_trade_limit_sec', 'cooldown_sec', 'intent_id',
+                       'features'}
         data = {k: v for k, v in data.items() if k in valid_fields}
         return cls(**data)
 

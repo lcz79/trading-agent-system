@@ -95,6 +95,13 @@ def min_sl_move_for_symbol(symbol: str) -> float:
     if base == "SOL":
         return MIN_SL_MOVE_SOL
     return MIN_SL_MOVE_DEFAULT
+
+def _truncate_id(id_str: str, length: int = 8) -> str:
+    """Safely truncate ID string for logging (handles None and short strings)."""
+    if not id_str:
+        return "None"
+    return id_str[:min(length, len(id_str))]
+
 # =========================================================
 # HELPERS
 # =========================================================
@@ -369,7 +376,7 @@ def check_pending_entry_orders():
                                 order_data = order_list[0]
                                 print(f"   🔍 Found order by orderLinkId: {link_id[:8]}")
                 except Exception as e:
-                    print(f"   ⚠️ Query by orderLinkId failed for {intent_id[:8]}: {e}")
+                    print(f"   ⚠️ Query by orderLinkId failed for {_truncate_id(intent_id)}: {e}")
                 
                 # Method 2: Query by orderId if available
                 if not order_data and intent.exchange_order_id:
@@ -386,16 +393,16 @@ def check_pending_entry_orders():
                                 order_data = order_list[0]
                                 print(f"   🔍 Found order by orderId: {intent.exchange_order_id}")
                     except Exception as e:
-                        print(f"   ⚠️ Query by orderId failed for {intent_id[:8]}: {e}")
+                        print(f"   ⚠️ Query by orderId failed for {_truncate_id(intent_id)}: {e}")
                 
                 if not order_data:
-                    print(f"   ⚠️ Order not found for intent {intent_id[:8]}, may have been filled/cancelled")
+                    print(f"   ⚠️ Order not found for intent {_truncate_id(intent_id)}, may have been filled/cancelled")
                     # Check if expired based on TTL
                     if intent.entry_expires_at:
                         try:
                             expires_at = datetime.fromisoformat(intent.entry_expires_at)
                             if datetime.now() > expires_at:
-                                print(f"   ⏰ LIMIT entry expired: {intent_id[:8]}")
+                                print(f"   ⏰ LIMIT entry expired: {_truncate_id(intent_id)}")
                                 trading_state.update_intent_status(
                                     intent_id, 
                                     OrderStatus.CANCELLED,
@@ -426,11 +433,11 @@ def check_pending_entry_orders():
                 # Check order status
                 order_status = order_data.get("orderStatus", "")
                 
-                print(f"   📊 ENTRY ORDER {intent_id[:8]}: status={order_status}")
+                print(f"   📊 ENTRY ORDER {_truncate_id(intent_id)}: status={order_status}")
                 
                 # Handle cancelled/rejected/deactivated
                 if order_status in ("Cancelled", "Rejected", "Deactivated"):
-                    print(f"   ❌ Order {order_status}: {intent_id[:8]}")
+                    print(f"   ❌ Order {order_status}: {_truncate_id(intent_id)}")
                     trading_state.update_intent_status(
                         intent_id,
                         OrderStatus.CANCELLED,
@@ -443,7 +450,7 @@ def check_pending_entry_orders():
                     try:
                         expires_at = datetime.fromisoformat(intent.entry_expires_at)
                         if datetime.now() > expires_at:
-                            print(f"   ⏰ LIMIT entry expired, cancelling: {intent_id[:8]}")
+                            print(f"   ⏰ LIMIT entry expired, cancelling: {_truncate_id(intent_id)}")
                             
                             # Cancel the order
                             try:
@@ -461,7 +468,7 @@ def check_pending_entry_orders():
                                 cancel_resp = exchange.private_post_v5_order_cancel(cancel_params)
                                 
                                 if cancel_resp and str(cancel_resp.get("retCode")) == "0":
-                                    print(f"   ✅ Order cancelled successfully: {intent_id[:8]}")
+                                    print(f"   ✅ Order cancelled successfully: {_truncate_id(intent_id)}")
                                 else:
                                     print(f"   ⚠️ Order cancel response: {cancel_resp}")
                             except Exception as e:
@@ -478,7 +485,7 @@ def check_pending_entry_orders():
                 
                 # Handle filled order
                 if order_status == "Filled":
-                    print(f"   ✅ ENTRY ORDER FILLED: {intent_id[:8]}")
+                    print(f"   ✅ ENTRY ORDER FILLED: {_truncate_id(intent_id)}")
                     
                     # Get fill details
                     avg_price = to_float(order_data.get("avgPrice"), 0.0)
@@ -562,7 +569,7 @@ def check_pending_entry_orders():
                     continue
                 
             except Exception as e:
-                print(f"   ⚠️ Error checking pending intent {intent.intent_id[:8]}: {e}")
+                print(f"   ⚠️ Error checking pending intent {intent._truncate_id(intent_id)}: {e}")
                 
     except Exception as e:
         print(f"⚠️ Error in check_pending_entry_orders: {e}")
@@ -2133,7 +2140,7 @@ def open_position(order: OrderRequest):
         
         existing_intent = trading_state.get_intent(intent_id)
         if existing_intent:
-            print(f"💾 IDEMPOTENT: intent_id={intent_id[:8]} already processed")
+            print(f"💾 IDEMPOTENT: intent_id={_truncate_id(intent_id)} already processed")
             return {
                 "status": existing_intent.status,
                 "msg": "Order already processed (idempotent)",
@@ -2168,7 +2175,7 @@ def open_position(order: OrderRequest):
             new_intent.entry_expires_at = (datetime.now() + timedelta(seconds=ttl_sec)).isoformat()
         
         trading_state.add_intent(new_intent)
-        print(f"📝 Intent registered: {intent_id[:8]} for {sym_id} {requested_dir} type={new_intent.entry_type}")
+        print(f"📝 Intent registered: {_truncate_id(intent_id)} for {sym_id} {requested_dir} type={new_intent.entry_type}")
         
         # === CONTINUE WITH ORDER EXECUTION ===
         sym_ccxt = ccxt_symbol_from_id(exchange, sym_id) or raw_sym
@@ -2323,9 +2330,6 @@ def open_position(order: OrderRequest):
         print(f"🚀 ORDER {sym_ccxt}: type={entry_type} side={requested_side} qty={final_qty} SL={sl_str}" + 
               f" idx={pos_idx}{scalping_info}")
         
-        # Mark intent as EXECUTING
-        trading_state.update_intent_status(intent_id, OrderStatus.EXECUTING)
-        
         # === ORDER CREATION: MARKET vs LIMIT ===
         params = {"category": "linear"}
         if HEDGE_MODE:
@@ -2344,7 +2348,7 @@ def open_position(order: OrderRequest):
             limit_price = order.entry_price
             limit_price_str = exchange.price_to_precision(sym_ccxt, limit_price)
             
-            print(f"📋 LIMIT ENTRY: {sym_ccxt} side={requested_side} qty={final_qty} price={limit_price_str} orderLinkId={intent_id[:8]}")
+            print(f"📋 LIMIT ENTRY: {sym_ccxt} side={requested_side} qty={final_qty} price={limit_price_str} orderLinkId={_truncate_id(intent_id)}")
             
             res = exchange.create_order(sym_ccxt, "limit", requested_side, final_qty, limit_price, params=params)
             exchange_order_id = res.get("id")
@@ -2361,7 +2365,7 @@ def open_position(order: OrderRequest):
                 exchange_order_link_id=intent_id
             )
             
-            print(f"✅ LIMIT order submitted: {sym_id} {requested_dir} orderId={bybit_order_id} orderLinkId={intent_id[:8]}")
+            print(f"✅ LIMIT order submitted: {sym_id} {requested_dir} orderId={bybit_order_id} orderLinkId={_truncate_id(intent_id)}")
             print(f"   ⏰ Will expire at: {new_intent.entry_expires_at}")
             
             return {
@@ -2379,6 +2383,9 @@ def open_position(order: OrderRequest):
             }
         
         # MARKET order (default, backward compatible)
+        # Mark intent as EXECUTING for MARKET orders
+        trading_state.update_intent_status(intent_id, OrderStatus.EXECUTING)
+        
         res = exchange.create_order(sym_ccxt, "market", requested_side, final_qty, params=params)
         exchange_order_id = res.get("id")
         
@@ -2440,7 +2447,7 @@ def open_position(order: OrderRequest):
         )
         trading_state.add_position(position_metadata)
         
-        print(f"✅ Position opened: {sym_id} {requested_dir} [intent:{intent_id[:8]}]")
+        print(f"✅ Position opened: {sym_id} {requested_dir} [intent:{_truncate_id(intent_id)}]")
         
         return {
             "status": "executed", 
