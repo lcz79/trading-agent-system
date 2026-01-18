@@ -457,21 +457,25 @@ def normalize_blocker_value(value: str, blocker_type: str = "hard") -> Optional[
     # Step 4: Replace '-' with '_'
     value = value.replace('-', '_')
     
-    # Step 5: Check if already valid
+    # Step 5: Check if empty after processing
+    if not value:
+        return None
+    
+    # Step 6: Check if already valid
     if blocker_type == "hard":
-        if value in VALID_HARD_BLOCKERS or value == "":
+        if value in VALID_HARD_BLOCKERS:
             return value
         # Check aliases
         if value in HARD_BLOCKER_ALIASES:
             return HARD_BLOCKER_ALIASES[value]
     else:  # soft
-        if value in VALID_SOFT_BLOCKERS or value == "":
+        if value in VALID_SOFT_BLOCKERS:
             return value
         # Check aliases
         if value in SOFT_BLOCKER_ALIASES:
             return SOFT_BLOCKER_ALIASES[value]
     
-    # Step 6: Unknown value - log warning and return None
+    # Step 7: Unknown value - log warning and return None
     logger.warning(f"⚠️ Unknown {blocker_type} blocker value: '{value}' - dropping")
     return None
 
@@ -493,9 +497,10 @@ def normalize_blocker_list(values: List[str], blocker_type: str = "hard") -> Lis
     normalized = []
     for value in values:
         norm_value = normalize_blocker_value(value, blocker_type)
-        if norm_value is not None and norm_value != "":
+        if norm_value is not None:
             normalized.append(norm_value)
     
+    return normalized
     return normalized
 
 class Decision(BaseModel):
