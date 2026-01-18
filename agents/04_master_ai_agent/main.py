@@ -501,7 +501,7 @@ def normalize_blocker_list(values: List[str], blocker_type: str = "hard") -> Lis
             normalized.append(norm_value)
     
     return normalized
-    return normalized
+
 
 class Decision(BaseModel):
     symbol: str

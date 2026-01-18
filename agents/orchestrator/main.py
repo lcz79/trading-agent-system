@@ -48,7 +48,7 @@ else:
 DISABLED_SYMBOLS = os.getenv("DISABLED_SYMBOLS", "").split(",")  # Comma-separated list of disabled symbols
 DISABLED_SYMBOLS = [s.strip().upper() for s in DISABLED_SYMBOLS if s.strip()]  # Clean up empty strings
 
-# Final universe
+# Final universe: filter out disabled symbols from the scan list
 SYMBOLS = [s for s in SYMBOLS if s not in DISABLED_SYMBOLS]
 
 # --- CONFIGURAZIONE OTTIMIZZAZIONE ---

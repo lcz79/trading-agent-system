@@ -93,8 +93,10 @@ def test_trailing_stop_activation_logic():
     # Check for TRAILING_ACTIVATION_RAW_PCT constant
     assert 'TRAILING_ACTIVATION_RAW_PCT' in code, "TRAILING_ACTIVATION_RAW_PCT should be defined"
     
-    # Extract the value
-    match = re.search(r'TRAILING_ACTIVATION_RAW_PCT\s*=\s*float\(os\.getenv\(["\']TRAILING_ACTIVATION_RAW_PCT["\'],\s*["\']([0-9.]+)["\']', code)
+    # Extract the value using a simpler pattern
+    # Pattern: TRAILING_ACTIVATION_RAW_PCT = float(os.getenv("TRAILING_ACTIVATION_RAW_PCT", "0.001"))
+    pattern = r'TRAILING_ACTIVATION_RAW_PCT["\'],\s*["\']([0-9.]+)["\']'
+    match = re.search(pattern, code)
     if match:
         default_value = float(match.group(1))
         print(f"   - TRAILING_ACTIVATION_RAW_PCT default: {default_value} ({default_value*100:.3f}%)")
