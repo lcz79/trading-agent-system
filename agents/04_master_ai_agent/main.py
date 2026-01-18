@@ -278,6 +278,43 @@ def enforce_decision_consistency(decision_dict: dict) -> dict:
         if any(phrase in rationale for phrase in ['short setup', 'aprire short', 'opening short', 'setup short']):
             logger.warning(f"⚠️ Rationale per OPEN_LONG menziona 'short setup', potrebbe essere incoerente")
     
+    # 8. Valida e sanitizza LIMIT entry fields
+    entry_type = decision_dict.get('entry_type', 'MARKET')
+    entry_price = decision_dict.get('entry_price')
+    entry_expires_sec = decision_dict.get('entry_expires_sec', 240)
+    
+    # Normalize entry_type to uppercase
+    if entry_type:
+        decision_dict['entry_type'] = str(entry_type).upper()
+        entry_type = decision_dict['entry_type']
+    
+    # Validate entry_type is valid
+    if entry_type not in ['MARKET', 'LIMIT']:
+        logger.warning(f"⚠️ Invalid entry_type={entry_type}, fallback to MARKET")
+        decision_dict['entry_type'] = 'MARKET'
+        entry_type = 'MARKET'
+    
+    # Validate LIMIT entry requirements
+    if action in ['OPEN_LONG', 'OPEN_SHORT']:
+        if entry_type == 'LIMIT':
+            # entry_price is required for LIMIT orders
+            if not entry_price or not isinstance(entry_price, (int, float)) or entry_price <= 0:
+                logger.warning(f"⚠️ LIMIT entry requires valid entry_price (got {entry_price}), fallback to MARKET")
+                decision_dict['entry_type'] = 'MARKET'
+                decision_dict['entry_price'] = None
+                # Add to rationale why we fell back
+                if 'rationale' in decision_dict:
+                    decision_dict['rationale'] += " [FALLBACK: LIMIT→MARKET due to missing/invalid entry_price]"
+            else:
+                # Validate entry_expires_sec range
+                if not isinstance(entry_expires_sec, int) or entry_expires_sec < 10 or entry_expires_sec > 3600:
+                    logger.warning(f"⚠️ Invalid entry_expires_sec={entry_expires_sec}, clamping to [10, 3600]")
+                    decision_dict['entry_expires_sec'] = max(10, min(3600, int(entry_expires_sec) if entry_expires_sec else 240))
+        else:
+            # For MARKET orders, clear LIMIT-specific fields
+            decision_dict['entry_price'] = None
+            decision_dict['entry_expires_sec'] = None
+    
     return decision_dict
 
 
@@ -391,6 +428,10 @@ class Decision(BaseModel):
     blocked_by: Optional[List[HARD_BLOCKER_REASONS]] = None  # HARD constraints only
     soft_blockers: Optional[List[SOFT_BLOCKER_REASONS]] = None  # SOFT warnings/flags
     direction_considered: Optional[Literal["LONG", "SHORT", "NONE"]] = None
+    # Entry type configuration
+    entry_type: Optional[Literal["MARKET", "LIMIT"]] = "MARKET"  # Entry order type
+    entry_price: Optional[float] = None  # Required when entry_type=LIMIT
+    entry_expires_sec: Optional[int] = 240  # TTL for LIMIT orders (default 240s = 4 min)
     # Scalping parameters
     tp_pct: Optional[float] = None  # Take profit percentage (e.g., 0.02 for 2%)
     sl_pct: Optional[float] = None  # Stop loss percentage (e.g., 0.015 for 1.5%)
@@ -659,6 +700,43 @@ Esempio CORRETTO per OPEN_SHORT con scalping e soft blocker:
 
 **trail_activation_roi** (opzionale): ROI leveraged per attivare trailing (es. 0.01 = 1%)
 
+## ENTRY TYPE CONFIGURATION (MARKET vs LIMIT)
+
+**entry_type**: Tipo di ordine per l'entrata (default "MARKET")
+  - "MARKET": Esecuzione immediata al prezzo di mercato (default, backward compatible)
+  - "LIMIT": Ordine limite al prezzo specificato, con TTL automatico
+
+**entry_price**: Prezzo di entrata per ordini LIMIT (obbligatorio se entry_type="LIMIT")
+  - Deve essere > 0 e valido per il simbolo
+  - LONG: entry_price tipicamente sotto il prezzo corrente (buy the dip)
+  - SHORT: entry_price tipicamente sopra il prezzo corrente (sell the rally)
+  - Se entry_type="LIMIT" ma entry_price è missing/invalid → FALLBACK automatico a MARKET con warning
+
+**entry_expires_sec**: TTL (time-to-live) per ordini LIMIT in secondi (default 240 = 4 min)
+  - Range valido: 10-3600 secondi (10s - 1 ora)
+  - Dopo questo tempo, se l'ordine non è eseguito viene cancellato automaticamente
+  - Scalping: 120-300s (2-5 min) per setup veloci
+  - Swing: 600-3600s (10-60 min) per setup più lenti
+
+**SEMANTICA LIMIT ENTRY**:
+- Quando scegli entry_type="LIMIT", il sistema piazza un ordine GTC (Good-Till-Cancelled) limit al prezzo entry_price
+- L'ordine viene tracciato con orderLinkId univoco per gestione deterministica
+- Se non eseguito entro entry_expires_sec, viene cancellato automaticamente
+- Appena l'ordine viene eseguito, lo stop-loss viene piazzato automaticamente
+- Se l'AI cambia idea sul prezzo mentre l'ordine è pending, il sistema cancellerà e rimpiazzerà l'ordine
+
+**QUANDO USARE LIMIT ENTRY**:
+- Setup con target di prezzo specifico (supporto/resistenza, Fibonacci, Gann)
+- Mercato volatil dove vuoi controllo preciso del prezzo di entrata
+- Scalping su livelli chiave (compra sul supporto, vendi sulla resistenza)
+- Vuoi ridurre slippage su ordini più grandi
+
+**QUANDO USARE MARKET ENTRY** (default):
+- Setup urgente dove vuoi entrata immediata
+- Breakout confermato dove il prezzo sta accelerando
+- Alta confidenza (>85%) che il movimento è iniziato
+- Liquidità alta e spread basso (<0.05%)
+
 ## GESTIONE RISCHIO DINAMICA
 
 ## REGOLE RSI (ANTI-CONTRADDIZIONE)
@@ -714,6 +792,9 @@ Considera anche:
       "blocked_by": ["HARD constraints: INSUFFICIENT_MARGIN, MAX_POSITIONS, COOLDOWN, DRAWDOWN_GUARD, CRASH_GUARD, LOW_PRE_SCORE, LOW_RANGE_SCORE, MOMENTUM_UP_15M, MOMENTUM_DOWN_15M, LOW_VOLATILITY"],
       "soft_blockers": ["SOFT warnings: LOW_CONFIDENCE, CONFLICTING_SIGNALS - NON bloccano apertura"],
       "direction_considered": "LONG|SHORT|NONE",
+      "entry_type": "MARKET|LIMIT",
+      "entry_price": 3500.0,
+      "entry_expires_sec": 240,
       "tp_pct": 0.02,
       "sl_pct": 0.015,
       "time_in_trade_limit_sec": 3600,
@@ -730,6 +811,7 @@ RICORDA:
 - I vincoli HARD (margin, positions, cooldown, crash guard) vanno SEMPRE rispettati
 - Meglio un trade cauto che nessun trade se vedi opportunità reale
 - **SEMPRE** fornisci tp_pct, sl_pct, time_in_trade_limit_sec quando apri posizione
+- **LIMIT ENTRY**: Se scegli entry_type="LIMIT", DEVI fornire entry_price valido (altrimenti fallback a MARKET)
 
 ## PRE_SCORE (base_confidence) — CONTROLLO DI SANITÀ (NON BLOCCO ASSOLUTO)
 Nel contesto troverai, per ogni simbolo:

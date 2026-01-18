@@ -759,6 +759,11 @@ async def analysis_cycle():
                     cooldown_sec = d.get('cooldown_sec')  # Optional
                     trail_activation_roi = d.get('trail_activation_roi')  # Optional
                     
+                    # Extract LIMIT entry parameters from AI decision
+                    entry_type = d.get('entry_type', 'MARKET')  # Default to MARKET for backward compatibility
+                    entry_price = d.get('entry_price')  # Required for LIMIT orders
+                    entry_expires_sec = d.get('entry_expires_sec', 240)  # Default 240s = 4 min
+                    
                     # --- Anti-churn floors (ETH/SOL) ---
                     # Many losses come from frequent time-exit cycles on SOL/ETH.
                     # Enforce minimum holding time + cooldown so we don't fee-grind.
@@ -782,6 +787,8 @@ async def analysis_cycle():
                     intent_id = str(uuid.uuid4())
                     
                     print(f"        🔥 EXECUTING {action} on {sym} [intent:{intent_id[:8]}]...")
+                    if entry_type == "LIMIT" and entry_price:
+                        print(f"           LIMIT Entry: price={entry_price}, expires={entry_expires_sec}s")
                     if tp_pct:
                         print(f"           Scalping: TP={tp_pct*100:.1f}%, SL={sl_pct*100:.1f}%, MaxTime={time_in_trade_limit_sec}s")
                     
@@ -807,6 +814,15 @@ async def analysis_cycle():
                         payload["cooldown_sec"] = cooldown_sec
                     if trail_activation_roi is not None:
                         payload["trail_activation_roi"] = trail_activation_roi
+                    
+                    # Add LIMIT entry params if present
+                    if entry_type is not None:
+                        payload["entry_type"] = entry_type
+                    if entry_price is not None:
+                        payload["entry_price"] = entry_price
+                    if entry_expires_sec is not None:
+                        # Convert to entry_ttl_sec for position manager API
+                        payload["entry_ttl_sec"] = entry_expires_sec
                     
                     res = await c.post(f"{URLS['pos']}/open_position", json=payload)
                     print(f"        ✅ Result: {res.json()}")
