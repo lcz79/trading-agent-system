@@ -28,6 +28,10 @@ class OrderIntent:
     executed_at: Optional[str] = None
     error_message: Optional[str] = None
     exchange_order_id: Optional[str] = None
+    exchange_order_link_id: Optional[str] = None  # Client order ID for reliable tracking
+    entry_type: str = "MARKET"  # MARKET or LIMIT
+    entry_price: Optional[float] = None  # For LIMIT orders
+    entry_expires_at: Optional[str] = None  # ISO timestamp for TTL expiry
     tp_pct: Optional[float] = None
     sl_pct: Optional[float] = None
     time_in_trade_limit_sec:  Optional[int] = None
@@ -47,6 +51,7 @@ class OrderIntent:
         # Remove unknown fields
         valid_fields = {'intent_id', 'symbol', 'side', 'leverage', 'size_pct', 'action', 'status',
                        'created_at', 'executed_at', 'error_message', 'exchange_order_id',
+                       'exchange_order_link_id', 'entry_type', 'entry_price', 'entry_expires_at',
                        'tp_pct', 'sl_pct', 'time_in_trade_limit_sec', 'cooldown_sec',
                        'features'}
         data = {k: v for k, v in data.items() if k in valid_fields}
@@ -73,7 +78,8 @@ class PositionMetadata:
     @classmethod
     def from_dict(cls, data:  dict) -> 'PositionMetadata':
         valid_fields = {'symbol', 'side', 'entry_price', 'size', 'leverage', 'opened_at',
-                       'tp_pct', 'sl_pct', 'time_in_trade_limit_sec', 'cooldown_sec', 'intent_id'}
+                       'tp_pct', 'sl_pct', 'time_in_trade_limit_sec', 'cooldown_sec', 'intent_id',
+                       'features'}
         data = {k: v for k, v in data.items() if k in valid_fields}
         return cls(**data)
 
@@ -182,7 +188,8 @@ class TradingState:
 
     def update_intent_status(self, intent_id: str, status: OrderStatus, 
                             error_message: Optional[str] = None,
-                            exchange_order_id: Optional[str] = None):
+                            exchange_order_id: Optional[str] = None,
+                            exchange_order_link_id: Optional[str] = None):
         if intent_id in self._state["intents"]:
             self._state["intents"][intent_id]["status"] = status.value
             if status == OrderStatus.EXECUTED:
@@ -191,6 +198,8 @@ class TradingState:
                 self._state["intents"][intent_id]["error_message"] = error_message
             if exchange_order_id:
                 self._state["intents"][intent_id]["exchange_order_id"] = exchange_order_id
+            if exchange_order_link_id:
+                self._state["intents"][intent_id]["exchange_order_link_id"] = exchange_order_link_id
             self._save_state()
 
     def cleanup_old_intents(self, days: float = 1.0):
