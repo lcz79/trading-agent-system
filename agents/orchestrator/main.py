@@ -65,6 +65,10 @@ HEDGE_MODE = os.getenv("BYBIT_HEDGE_MODE", "false").lower() == "true"  # Allow l
 ALLOW_SCALE_IN = os.getenv("ALLOW_SCALE_IN", "false").lower() == "true"  # Allow multiple entries same direction
 MAX_PENDING_ENTRIES_PER_SYMBOL_SIDE = int(os.getenv("MAX_PENDING_ENTRIES_PER_SYMBOL_SIDE", "1"))
 
+# --- CANCEL+REPLACE CONFIGURATION ---
+# Price change threshold for cancel+replace logic (0.1% = 0.001)
+PRICE_CHANGE_THRESHOLD_FOR_REPLACE = float(os.getenv("PRICE_CHANGE_THRESHOLD_FOR_REPLACE", "0.001"))
+
 # --- CRITICAL CLOSE CONFIRMATION STATE ---
 # Tracks pending CLOSE requests per symbol. Format: {symbol: cycle_count}
 # Requires 2 consecutive cycles with CLOSE action to execute
@@ -706,7 +710,7 @@ async def analysis_cycle():
                                     old_intent_id = existing_limit.get('intent_id')
                                     
                                     # Check if price or expires changed significantly
-                                    price_changed = abs(float(old_price) - float(entry_price)) / float(old_price) > 0.001  # 0.1% threshold
+                                    price_changed = abs(float(old_price) - float(entry_price)) / float(old_price) > PRICE_CHANGE_THRESHOLD_FOR_REPLACE
                                     
                                     if price_changed:
                                         print(f"        🔄 Cancel+Replace LIMIT order for {sym}: old_price={old_price} → new_price={entry_price}")

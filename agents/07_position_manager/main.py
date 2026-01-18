@@ -2176,7 +2176,8 @@ def cancel_intent_endpoint(request: dict):
         if intent.status != OrderStatus.PENDING:
             return {"status": "error", "msg": f"Intent {intent_id} is not PENDING (status={intent.status})"}
         
-        # Cancel the exchange order if we have orderLinkId or orderId
+        # Cancel the exchange order if LIMIT entry and we have order IDs
+        cancel_success = False
         if exchange and intent.entry_type == "LIMIT":
             symbol_id = bybit_symbol_id(intent.symbol)
             try:
@@ -2188,6 +2189,7 @@ def cancel_intent_endpoint(request: dict):
                         "orderLinkId": intent.exchange_order_link_id
                     })
                     print(f"✅ Cancelled LIMIT order by orderLinkId: {intent.exchange_order_link_id}")
+                    cancel_success = True
                 elif intent.exchange_order_id:
                     # Fallback to orderId
                     exchange.private_post_v5_order_cancel({
@@ -2196,9 +2198,14 @@ def cancel_intent_endpoint(request: dict):
                         "orderId": intent.exchange_order_id
                     })
                     print(f"✅ Cancelled LIMIT order by orderId: {intent.exchange_order_id}")
+                    cancel_success = True
             except Exception as cancel_err:
                 print(f"⚠️ Exchange cancel error: {cancel_err}")
                 # Continue to mark intent as cancelled even if exchange call fails
+        elif intent.entry_type == "MARKET":
+            # MARKET orders typically execute immediately, so PENDING MARKET is rare
+            # If we get here, it's likely already executed or failed
+            print(f"⚠️ Warning: Attempting to cancel PENDING MARKET order {intent_id}")
         
         # Mark intent as CANCELLED
         trading_state.update_intent_status(
@@ -2210,7 +2217,8 @@ def cancel_intent_endpoint(request: dict):
         return {
             "status": "success",
             "msg": f"Intent {intent_id} cancelled",
-            "intent_id": intent_id
+            "intent_id": intent_id,
+            "exchange_cancelled": cancel_success
         }
     except Exception as e:
         print(f"❌ Error cancelling intent: {e}")

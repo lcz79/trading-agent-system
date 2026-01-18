@@ -14,10 +14,17 @@ import sys
 import json
 import os
 from datetime import datetime, timedelta
+from pathlib import Path
+
+# Get repository root dynamically
+REPO_ROOT = Path(__file__).parent.resolve()
 
 # Add paths for imports
-sys.path.insert(0, '/home/runner/work/trading-agent-system/trading-agent-system/agents/04_master_ai_agent')
-sys.path.insert(0, '/home/runner/work/trading-agent-system/trading-agent-system/agents/07_position_manager')
+sys.path.insert(0, str(REPO_ROOT / "agents" / "04_master_ai_agent"))
+sys.path.insert(0, str(REPO_ROOT / "agents" / "07_position_manager"))
+
+# Constants
+PRICE_CHANGE_THRESHOLD = 0.001  # 0.1% threshold for cancel+replace
 
 def test_ai_decision_model_limit_fields():
     """Test that Decision model accepts LIMIT entry fields"""
@@ -312,20 +319,20 @@ def test_cancel_replace_logic():
     new_decision_price = 50500.0
     old_price = existing_limit["entry_price"]
     
-    # Calculate if price changed significantly (0.1% threshold)
-    price_changed = abs(float(old_price) - float(new_decision_price)) / float(old_price) > 0.001
+    # Calculate if price changed significantly (using constant threshold)
+    price_changed = abs(float(old_price) - float(new_decision_price)) / float(old_price) > PRICE_CHANGE_THRESHOLD
     
     print(f"  Existing order: price={old_price}")
     print(f"  New decision: price={new_decision_price}")
     print(f"  Price change: {((new_decision_price - old_price) / old_price * 100):.2f}%")
-    print(f"  Threshold: 0.1%")
+    print(f"  Threshold: {PRICE_CHANGE_THRESHOLD * 100:.1f}%")
     print(f"  Should cancel+replace: {price_changed}")
     
     assert price_changed, "Should detect price change"
     
     # Scenario 2: price hasn't changed much (should skip)
     new_decision_price_2 = 50025.0  # Only 0.05% change
-    price_changed_2 = abs(float(old_price) - float(new_decision_price_2)) / float(old_price) > 0.001
+    price_changed_2 = abs(float(old_price) - float(new_decision_price_2)) / float(old_price) > PRICE_CHANGE_THRESHOLD
     
     print(f"\n  Scenario 2:")
     print(f"  New decision: price={new_decision_price_2}")
