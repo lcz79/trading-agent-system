@@ -5,8 +5,12 @@ Validates that HARD blockers force HOLD while SOFT blockers allow OPEN with prop
 """
 
 import sys
+import os
 import json
 from pathlib import Path
+
+# Set dummy API key to avoid import errors
+os.environ['DEEPSEEK_API_KEY'] = 'dummy_key_for_testing'
 
 # Add agents directory to path
 sys.path.insert(0, str(Path(__file__).parent / 'agents' / '04_master_ai_agent'))
