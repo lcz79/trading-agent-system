@@ -748,10 +748,9 @@ async def analysis_cycle():
                 return
 
             # 6. EXECUTION
-            for d in [x for x in (decisions_list or []) if isinstance(x, dict)]:
+            for d in decisions_list:
                 try:
-                    
-print(f"        🧾 DECISION: {d.get('symbol')} {d.get('action')} entry={d.get('entry_type')} conf={d.get('confidence')} size={d.get('size_pct')} lev={d.get('leverage')} ttl={d.get('entry_expires_sec')}")
+                    print(f"        🧾 DECISION: {d.get('symbol')} {d.get('action')} entry={d.get('entry_type')} conf={d.get('confidence')} size={d.get('size_pct')} lev={d.get('leverage')} ttl={d.get('entry_expires_sec')}")
                 except Exception:
                     pass
                 sym = d['symbol']
