@@ -60,6 +60,11 @@ CYCLE_INTERVAL = 60  # Secondi tra ogni ciclo di controllo (era 900)
 DRY_RUN = os.getenv("DRY_RUN", "false").lower() == "true"  # Se true, logga solo azioni senza eseguirle
 CRITICAL_LOSS_PCT_LEV = float(os.getenv("CRITICAL_LOSS_PCT_LEV", "12.0"))  # Soglia perdita % con leva per CRITICAL
 
+# --- HEDGE MODE & SCALE-IN CONFIGURATION ---
+HEDGE_MODE = os.getenv("BYBIT_HEDGE_MODE", "false").lower() == "true"  # Allow long+short same symbol
+ALLOW_SCALE_IN = os.getenv("ALLOW_SCALE_IN", "false").lower() == "true"  # Allow multiple entries same direction
+MAX_PENDING_ENTRIES_PER_SYMBOL_SIDE = int(os.getenv("MAX_PENDING_ENTRIES_PER_SYMBOL_SIDE", "1"))
+
 # --- CRITICAL CLOSE CONFIRMATION STATE ---
 # Tracks pending CLOSE requests per symbol. Format: {symbol: cycle_count}
 # Requires 2 consecutive cycles with CLOSE action to execute
@@ -791,13 +796,46 @@ async def analysis_cycle():
                             if abs(qty) > 0:
                                 existing = p0
                                 break
-                        if existing is not None and not HEDGE_MODE:
+                        
+                        if existing is not None:
                             ex_side = (existing.get('side') or '').lower()
-                            print(
-                                f"        🧯 SKIP {action} on {sym}: existing open position detected in one-way mode "
-                                f"(existing_side={ex_side or 'unknown'}). Preventing flip/churn."
-                            )
-                            continue
+                            
+                            if not HEDGE_MODE and not ALLOW_SCALE_IN:
+                                # Default: block any new position on same symbol (one-way mode, no scale-in)
+                                print(
+                                    f"        🧯 SKIP {action} on {sym}: existing open position detected in one-way mode "
+                                    f"(existing_side={ex_side or 'unknown'}). Preventing flip/churn."
+                                )
+                                continue
+                            elif ALLOW_SCALE_IN and ex_side == desired_side:
+                                # Scale-in allowed: check if we're at max pending entries for this symbol+side
+                                try:
+                                    pending_resp = await c.get(f"{URLS['pos']}/get_pending_intents")
+                                    if pending_resp.status_code == 200:
+                                        pending_data = pending_resp.json()
+                                        pending_intents = pending_data.get('intents', [])
+                                        
+                                        # Count pending entries for this symbol+side
+                                        count = sum(1 for intent in pending_intents 
+                                                   if intent.get('symbol', '').upper() == sym.upper() 
+                                                   and intent.get('side', '').lower() == desired_side
+                                                   and intent.get('status') == 'PENDING')
+                                        
+                                        if count >= MAX_PENDING_ENTRIES_PER_SYMBOL_SIDE:
+                                            print(f"        🧯 SKIP {action} on {sym}: max pending entries ({count}/{MAX_PENDING_ENTRIES_PER_SYMBOL_SIDE}) reached for scale-in")
+                                            continue
+                                        else:
+                                            print(f"        ✅ Scale-in allowed: {count}/{MAX_PENDING_ENTRIES_PER_SYMBOL_SIDE} pending entries for {sym} {desired_side}")
+                                except Exception as scale_err:
+                                    print(f"        ⚠️ Could not check scale-in limit: {scale_err}, proceeding conservatively")
+                                    continue
+                            elif not HEDGE_MODE and ex_side != desired_side:
+                                # One-way mode: block opposite direction
+                                print(
+                                    f"        🧯 SKIP {action} on {sym}: existing {ex_side} position in one-way mode "
+                                    f"(cannot flip to {desired_side})"
+                                )
+                                continue
                     except Exception as e:
                         print(f"        ⚠️ Could not evaluate existing position for {sym}: {e}")
 

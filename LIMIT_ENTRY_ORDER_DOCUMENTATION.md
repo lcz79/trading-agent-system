@@ -2,17 +2,29 @@
 
 ## Overview
 
-This document describes the implementation of LIMIT entry order support in the position manager (`agents/07_position_manager/`). The implementation provides robust tracking, management, and lifecycle handling for LIMIT orders while maintaining backward compatibility with MARKET orders.
+This document describes the comprehensive end-to-end implementation of LIMIT entry order support in the trading system. The implementation provides DeepSeek AI-driven LIMIT entry decisions, deterministic cancel+replace logic, robust tracking, and lifecycle management while maintaining backward compatibility with MARKET orders.
 
 ## Features
 
-### 1. LIMIT Order Submission
+### 1. AI-Driven LIMIT Entry Decisions
+- DeepSeek AI can now choose between MARKET and LIMIT entry types
+- AI specifies exact entry_price for LIMIT orders
+- Configurable TTL (time-to-live) via entry_expires_sec (10-3600 seconds)
+- Automatic fallback to MARKET if LIMIT parameters are invalid
+- Intelligent decision-making based on setup quality and market conditions
+
+### 2. LIMIT Order Submission
 - Submit LIMIT orders with a specific entry price
 - Automatic TTL (time-to-live) expiry with configurable timeout
 - Deterministic tracking using `orderLinkId=intent_id`
 - Returns both `orderId` and `orderLinkId` for reliable order management
 
-### 2. Pending Order Management
+### 3. Cancel+Replace Logic
+- Detects existing pending LIMIT orders for same symbol+direction
+- Automatically cancels old order when AI updates entry_price
+- Places new LIMIT order with updated parameters
+- Idempotent and deterministic state management
+- Price change threshold: 0.1% to avoid unnecessary cancellations
 - Background monitoring of pending LIMIT orders (30-second loop)
 - Automatic detection of order fills
 - Post-fill stop-loss placement using MarkPrice trigger
@@ -91,7 +103,67 @@ Response:
 }
 ```
 
-## Request Parameters
+## AI Decision Flow
+
+### DeepSeek AI Decision Fields
+
+When making a trading decision, DeepSeek AI now returns:
+
+```json
+{
+  "symbol": "BTCUSDT",
+  "action": "OPEN_LONG",
+  "leverage": 5.0,
+  "size_pct": 0.15,
+  "confidence": 80,
+  "rationale": "Setup LONG with price near support. Using LIMIT entry for precision.",
+  "tp_pct": 0.02,
+  "sl_pct": 0.015,
+  "time_in_trade_limit_sec": 3600,
+  "entry_type": "LIMIT",
+  "entry_price": 50000.0,
+  "entry_expires_sec": 240
+}
+```
+
+### AI Decision Semantics
+
+**entry_type**: "MARKET" | "LIMIT"
+- "MARKET": Immediate entry at market price (default)
+- "LIMIT": Entry at specific price, waits for fill or TTL expiry
+
+**entry_price** (required when entry_type="LIMIT"): Exact entry price
+- For LONG: typically slightly below current price (e.g., -0.1% to -0.5%)
+- For SHORT: typically slightly above current price (e.g., +0.1% to +0.5%)
+- If invalid or missing, system falls back to MARKET with warning
+
+**entry_expires_sec** (optional, default 240): TTL in seconds (range 10-3600)
+- Strong setup: 60-120 sec (1-2 min)
+- Normal setup: 180-300 sec (3-5 min)
+- Patient setup: 300-600 sec (5-10 min)
+- Max recommended: 600 sec (10 min) for scalping
+
+### When AI Chooses LIMIT Entry
+
+✅ **Use LIMIT when:**
+- Price near support/resistance, want precise entry
+- Clean setup but price not ideal yet
+- Want to optimize entry and reduce slippage
+- High confidence price will reach target level
+
+❌ **Use MARKET when:**
+- Time-sensitive breakout/momentum trade
+- High volatility (LIMIT might not fill)
+- Lower confidence setup (want quick entry)
+- Need immediate position establishment
+
+### Validation and Fallback
+
+The system validates LIMIT parameters and falls back to MARKET if:
+- `entry_type=LIMIT` but `entry_price` is missing or invalid (≤ 0)
+- System logs warning: `"⚠️ LIMIT entry without valid entry_price: falling back to MARKET"`
+- Rationale updated: `"[FALLBACK TO MARKET: invalid entry_price] <original rationale>"`
+- `entry_expires_sec` clamped to range [10, 3600] if out of bounds
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
@@ -210,7 +282,73 @@ When a LIMIT order fills, the system:
 4. Retries with exponential backoff (5 attempts)
 5. Emergency closes position if SL fails to set
 
-### 4. TTL Expiration
+### 4. Cancel+Replace Logic
+
+**Orchestrator automatically manages LIMIT order updates:**
+
+When a new AI decision arrives with `entry_type=LIMIT`:
+
+1. **Query pending intents** from position manager
+2. **Check for existing PENDING LIMIT** for same symbol+direction
+3. **Compare entry_price**:
+   - If price changed > 0.1%: Cancel old order, submit new
+   - If price changed ≤ 0.1%: Skip duplicate submission
+4. **Cancel old order** via `orderLinkId` (preferred) or `orderId`
+5. **Submit new order** with updated parameters
+
+**Example Flow:**
+
+```
+Cycle 1: AI decides LIMIT LONG BTCUSDT at 50000
+→ Submit LIMIT order at 50000
+
+Cycle 2: AI decides LIMIT LONG BTCUSDT at 50500 (price moved)
+→ Detect existing pending order at 50000
+→ Price diff: 1.0% > 0.1% threshold
+→ Cancel order at 50000
+→ Submit new LIMIT order at 50500
+
+Cycle 3: AI decides LIMIT LONG BTCUSDT at 50510 (small change)
+→ Detect existing pending order at 50500
+→ Price diff: 0.02% < 0.1% threshold
+→ Skip - order already pending at similar price
+```
+
+**Benefits:**
+- Automatic price adjustment as market moves
+- Avoids duplicate orders
+- Maintains single pending entry per symbol+direction (unless scale-in enabled)
+- Deterministic state management
+
+**Endpoints Added:**
+
+```bash
+# Query pending intents
+GET /get_pending_intents
+Response: {
+  "intents": [
+    {
+      "intent_id": "abc123",
+      "symbol": "BTCUSDT",
+      "side": "long",
+      "entry_type": "LIMIT",
+      "entry_price": 50000.0,
+      "status": "PENDING",
+      ...
+    }
+  ],
+  "count": 1
+}
+
+# Cancel an intent
+POST /cancel_intent
+Body: {"intent_id": "abc123"}
+Response: {
+  "status": "success",
+  "msg": "Intent abc123 cancelled",
+  "intent_id": "abc123"
+}
+```
 
 When a LIMIT order expires:
 
@@ -277,6 +415,44 @@ When a LIMIT order expires:
 | `ENTRY_SL_USE_ATR` | true | Use ATR for entry SL calculation |
 | `ENTRY_SL_MAX_PCT` | 0.02 | Maximum SL percentage (2%) |
 | `ENTRY_SL_MIN_PCT_DEFAULT` | 0.007 | Minimum SL percentage (0.7%) |
+| `BYBIT_HEDGE_MODE` | false | Allow long+short positions on same symbol simultaneously |
+| `ALLOW_SCALE_IN` | false | Allow multiple entries in same direction (use with caution) |
+| `MAX_PENDING_ENTRIES_PER_SYMBOL_SIDE` | 1 | Max pending LIMIT entries per symbol+side (if ALLOW_SCALE_IN=true) |
+
+### Scale-In Guardrail Behavior
+
+**Default Mode (ALLOW_SCALE_IN=false):**
+- System blocks new entries if position already open on same symbol (one-way mode)
+- Prevents accidental position doubling or flip/churn
+- Safest mode for most strategies
+
+**Scale-In Mode (ALLOW_SCALE_IN=true):**
+- Allows multiple LIMIT entries in same direction on same symbol
+- Useful for DCA (dollar-cost averaging) or scaling into positions
+- **Safety checks:**
+  - Max pending entries per symbol+side enforced (default 1)
+  - Each entry tracked separately with unique intent_id
+  - System prevents exceeding `MAX_PENDING_ENTRIES_PER_SYMBOL_SIDE`
+- **Logs:**
+  ```
+  ✅ Scale-in allowed: 1/2 pending entries for BTCUSDT long
+  🧯 SKIP OPEN_LONG on BTCUSDT: max pending entries (2/2) reached for scale-in
+  ```
+
+**Example Configuration:**
+```bash
+# .env
+ALLOW_SCALE_IN=true
+MAX_PENDING_ENTRIES_PER_SYMBOL_SIDE=2
+
+# Result: System allows up to 2 pending LIMIT orders per symbol+side
+# e.g., BTCUSDT LONG at 50000 + BTCUSDT LONG at 49500
+```
+
+**Recommendation:**
+- Start with `ALLOW_SCALE_IN=false` (default)
+- Only enable scale-in if your strategy explicitly requires it
+- Keep `MAX_PENDING_ENTRIES_PER_SYMBOL_SIDE` low (1-2) to avoid over-exposure
 
 ## Error Handling
 
