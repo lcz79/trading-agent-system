@@ -1,4 +1,8 @@
 import asyncio, httpx, json, os, uuid
+import sys, os
+sys.path.insert(0, os.path.dirname(__file__))
+import sys, os
+sys.path.append(os.path.dirname(__file__))
 from datetime import datetime
 import re
 from datetime import timedelta
@@ -723,15 +727,21 @@ async def analysis_cycle():
             dec_data = resp.json()
             analysis_text = dec_data.get('analysis', 'No text')
             decisions_list = dec_data.get('decisions', [])
+            print(f"        📦 AI decisions: {len(decisions_list)}")
 
             print(f"        📝 AI Says: {analysis_text}")
 
             if not decisions_list:
+                print("        💤 No AI decisions (empty list)")
                 print("        ℹ️ AI non ha generato ordini")
                 return
 
             # 6. EXECUTION
             for d in decisions_list:
+                try:
+                    print(f"        🧾 DECISION: {d.get(symbol)} {d.get(action)} entry={d.get(entry_type)} conf={d.get(confidence)} size={d.get(size_pct)} lev={d.get(leverage)} ttl={d.get(entry_expires_sec)}")
+                except Exception:
+                    pass
                 sym = d['symbol']
                 action = d['action']
                 rationale = d.get('rationale', '')
