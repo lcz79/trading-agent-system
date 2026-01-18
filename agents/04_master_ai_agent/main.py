@@ -789,6 +789,55 @@ Esempio CORRETTO per OPEN_SHORT con scalping e soft blocker:
 - time_in_trade_limit_sec: 3600
 - cooldown_sec: 900
 
+## MULTI-TIMEFRAME CONFIRMATIONS (OBBLIGATORIO PER DECISIONI DI QUALITÀ)
+
+Hai accesso a dati da multiple timeframes: 15m (principale per scalping), 1h, 4h, 1d.
+Usa timeframe superiori per CONFERMARE o VETARE trade su 15m.
+
+**REGOLE MULTI-TIMEFRAME**:
+
+1. **Trend Alignment Check (1h/4h)**:
+   - Per LONG: Verifica che trend 1h/4h sia bullish O neutrale (non fortemente bearish)
+   - Per SHORT: Verifica che trend 1h/4h sia bearish O neutrale (non fortemente bullish)
+   - Se 1h e 4h sono ENTRAMBI contro la tua direzione → VETO (blocked_by o confidence ridotta)
+
+2. **Higher Timeframe Momentum (4h/1d)**:
+   - return_1h, return_4h: momentum su timeframe superiori
+   - Se momentum 4h è fortemente contrario (>0.8% opposto) → cautela, riduci size/leverage
+   - Se momentum 4h è allineato → boost confidence (+5-10%)
+
+3. **ADX Multi-Timeframe** (forza del trend):
+   - ADX 15m > 25 AND ADX 1h > 20 → trend forte, favorisci TREND playbook
+   - ADX 15m < 20 AND ADX 1h < 20 → mercato choppy, favorisci RANGE playbook o HOLD
+   - ADX contraddittorio (15m alto, 1h basso) → cautela, potrebbe essere fake breakout
+
+4. **RSI Multi-Timeframe Divergence**:
+   - RSI 15m e RSI 1h concordi (entrambi >70 o <30) → segnale FORTE per mean-reversion
+   - RSI divergente (15m ipercomprato ma 1h normale) → segnale DEBOLE, riduci confidence
+
+5. **Volume Confirmation**:
+   - volume_spike_15m presente → conferma interesse mercato
+   - volume_ratio confrontato con 1h/4h → verifica se movimento è genuino
+
+**ESEMPIO DECISIONE CON MULTI-TF**:
+```
+"rationale": "Playbook: RANGE LONG. 15m: RSI=28 oversold + Fib 0.786 support. 1h: trend neutrale, RSI=42 (OK). 4h: trend slightly bearish ma return_4h=-0.2% (non forte). Multi-TF check: 1h non blocca, 4h cautela → leverage 4x invece di 5x. LIMIT entry al support."
+```
+
+**QUANDO VETARE PER MULTI-TF CONTRASTO**:
+- 15m segnala LONG ma 1h+4h entrambi in strong downtrend (EMA downstack, ADX>25) → blocked_by: ["MOMENTUM_DOWN_1H"]
+- 15m segnala SHORT ma 1h+4h entrambi in strong uptrend (EMA upstack, ADX>25) → blocked_by: ["MOMENTUM_UP_1H"]
+- Questi sono blocchi HARD che forzano HOLD
+
+**DATI DISPONIBILI**:
+Nel context trovi per ogni symbol:
+- market_data[SYMBOL].technical.timeframes.15m (primario per entry)
+- market_data[SYMBOL].technical.timeframes.1h (conferma trend)
+- market_data[SYMBOL].technical.timeframes.4h (conferma macro-trend)
+- market_data[SYMBOL].technical.timeframes.1d (contesto generale)
+
+Ogni timeframe ha: price, trend, rsi, macd, macd_momentum, ema_20, ema_50, ema_200, adx, atr, return_15m/1h/4h/1d, volume_spike
+
 ## PARAMETRI SCALPING (SEMPRE OBBLIGATORI PER OPEN)
 **tp_pct**: Target profit come frazione (0.01 = 1%, 0.02 = 2%, 0.03 = 3%)
   - Alta confidenza (>85%): 0.025-0.03 (2.5-3%)
@@ -817,15 +866,43 @@ Esempio CORRETTO per OPEN_SHORT con scalping e soft blocker:
   - "LIMIT": Entry a prezzo specifico, più preciso ma richiede che il prezzo venga raggiunto
   
 **entry_price** (richiesto quando entry_type="LIMIT"): Prezzo esatto per LIMIT order
-  - Per LONG: entry_price leggermente sotto il prezzo attuale (es. -0.1% a -0.5%) per migliore fill
-  - Per SHORT: entry_price leggermente sopra il prezzo attuale (es. +0.1% a +0.5%)
-  - Se entry_price manca o è invalido con entry_type="LIMIT", il sistema fa fallback a MARKET con warning
+
+FORMULE PER CALCOLARE entry_price (RANGE Playbook con Fibonacci/ATR):
   
-**entry_expires_sec** (opzionale, default 240): TTL per LIMIT order in secondi (range 10-3600)
-  - Setup molto forte: 60-120 sec (1-2 min) - se non riempie velocemente, probabilmente non è più valido
-  - Setup normale: 180-300 sec (3-5 min)
-  - Setup paziente: 300-600 sec (5-10 min)
+  Per LONG in RANGE (mean-reversion at support):
+    1. Trova il Fibonacci support più vicino sotto il prezzo attuale:
+       - fibonacci.fib_levels.fibonacci_0_786 (0.786 ritracciamento - supporto forte)
+       - fibonacci.fib_levels.fibonacci_0_618 (0.618 ritracciamento - supporto medio)
+    2. Se prezzo attuale è entro 0.5% dal Fib support:
+       entry_price = fib_support * (1 - 0.001)  # -0.1% sotto il supporto per migliore fill
+    3. Altrimenti, usa ATR bands:
+       atr = technical.timeframes.15m.atr
+       entry_price = current_price - (atr * 0.5)  # Mezzo ATR sotto il prezzo
+  
+  Per SHORT in RANGE (mean-reversion at resistance):
+    1. Trova il Fibonacci resistance più vicino sopra il prezzo attuale:
+       - fibonacci.fib_levels.fibonacci_1_272 (1.272 estensione - resistenza forte)
+       - fibonacci.fib_levels.fibonacci_1_618 (1.618 estensione - resistenza estesa)
+    2. Se prezzo attuale è entro 0.5% dal Fib resistance:
+       entry_price = fib_resistance * (1 + 0.001)  # +0.1% sopra la resistenza per migliore fill
+    3. Altrimenti, usa ATR bands:
+       atr = technical.timeframes.15m.atr
+       entry_price = current_price + (atr * 0.5)  # Mezzo ATR sopra il prezzo
+  
+  Per TREND Playbook (breakout/momentum):
+    - Usa MARKET entry (non LIMIT) per esecuzione immediata durante breakout
+  
+  IMPORTANTE:
+    - entry_price DEVE essere compreso tra bid e ask con margine (min 0.05% spread)
+    - Se calcolo produce entry_price troppo lontano dal mark_price (>0.5%), usa MARKET
+    - Verifica che entry_price sia positivo e ragionevole (>0)
+  
+**entry_expires_sec** (richiesto quando entry_type="LIMIT", default 240): TTL per LIMIT order in secondi (range 10-3600)
+  - Setup molto forte + prezzo vicino target: 60-120 sec (1-2 min) - se non riempie velocemente, setup non è più valido
+  - Setup normale + prezzo entro 0.3% da target: 180-300 sec (3-5 min)
+  - Setup paziente + prezzo entro 0.5% da target: 300-600 sec (5-10 min)
   - Max consigliato: 600 sec (10 min) per scalping 15m
+  - IMPORTANTE: NON impostare entry_expires_sec se entry_type="MARKET" (lascia null/default)
 
 SEMANTICA LIMIT ENTRY:
 - Il sistema piazza un ordine LIMIT GTC a entry_price con orderLinkId tracking
@@ -834,17 +911,21 @@ SEMANTICA LIMIT ENTRY:
 - Una volta riempito, il sistema piazza automaticamente lo stop-loss e inizia il monitoring come per MARKET entry
 
 QUANDO USARE LIMIT ENTRY:
-✅ Usa LIMIT quando:
-  - Prezzo è vicino a supporto/resistenza e vuoi entry preciso
-  - Setup molto pulito ma prezzo non è ancora ideale
-  - Vuoi ottimizzare entry per ridurre slippage
-  - Hai alta confidenza che il prezzo raggiungerà il livello target
+✅ Usa LIMIT quando (RANGE Playbook preferito):
+  - Regime: RANGE (range_score >= 50)
+  - Prezzo è entro 0.5% da Fibonacci support/resistance chiave
+  - Setup mean-reversion pulito con RSI estremo (>70 o <30)
+  - Vuoi entry preciso al livello tecnico per massimizzare R:R
+  - Confidence >= 70% che il prezzo toccherà il livello target
+  - Gann levels confermano il supporto/resistenza
   
 ❌ Usa MARKET quando:
-  - Setup time-sensitive che richiede entry immediato
-  - Alta volatilità dove LIMIT potrebbe non riempire
-  - Confidenza bassa e vuoi entry rapido per gestire meglio il rischio
-  - Breakout/momentum trade che non aspetta
+  - Regime: TREND (pre_score alto, momentum forte)
+  - Setup time-sensitive che richiede entry immediato (breakout)
+  - Alta volatilità dove LIMIT potrebbe non riempire (ATR > 2% del prezzo)
+  - Prezzo già oltre il livello target (troppo tardi per LIMIT)
+  - Confidence bassa (<70%) e vuoi entry rapido
+  - Nessun Fibonacci/Gann level chiaro nelle vicinanze (<1% dal prezzo)
 
 ## GESTIONE RISCHIO DINAMICA
 
@@ -913,20 +994,23 @@ Considera anche:
   ]
 }
 
-ESEMPIO con LIMIT entry (opzionale):
+ESEMPIO con LIMIT entry in RANGE (mean-reversion):
 {
-  "symbol": "BTCUSDT",
+  "symbol": "ETHUSDT",
   "action": "OPEN_LONG",
   "leverage": 5.0,
   "size_pct": 0.12,
-  "confidence": 80,
-  "rationale": "Setup LONG con prezzo vicino a supporto chiave $95000. Uso LIMIT entry a $95100 per entry preciso al supporto con minor slippage. Se prezzo rimbalza prima (60 sec), entry comunque valido.",
+  "confidence": 78,
+  "rationale": "Playbook: RANGE. Setup LONG mean-reversion: prezzo a 3520 vicino Fib 0.786 support a 3510 (distanza 0.28%). RSI 15m=32 (oversold). LIMIT entry a 3509 (-0.03% sotto support) per entry preciso. ATR=42, volatilità OK. TTL 180s: se non riempie, setup invalidato.",
+  "setup_confirmations": ["RSI oversold 15m=32", "Fib 0.786 support 3510", "Price near support 0.28%", "Volume spike conferma"],
+  "direction_considered": "LONG",
   "entry_type": "LIMIT",
-  "entry_price": 95100.0,
-  "entry_expires_sec": 60,
-  "tp_pct": 0.02,
-  "sl_pct": 0.015,
-  "time_in_trade_limit_sec": 3600
+  "entry_price": 3509.0,
+  "entry_expires_sec": 180,
+  "tp_pct": 0.018,
+  "sl_pct": 0.012,
+  "time_in_trade_limit_sec": 3600,
+  "cooldown_sec": 900
 }
 
 RICORDA: 
