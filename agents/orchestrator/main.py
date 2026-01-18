@@ -49,16 +49,15 @@ DISABLED_SYMBOLS = os.getenv("DISABLED_SYMBOLS", "").split(",")  # Comma-separat
 DISABLED_SYMBOLS = [s.strip().upper() for s in DISABLED_SYMBOLS if s.strip()]  # Clean up empty strings
 
 # Final universe
-SYMBOLS = [s for s in SYMBOLS if s not in DISABLED_SYMBOLS]  # Comma-separated list of disabled symbols
-DISABLED_SYMBOLS = [s.strip() for s in DISABLED_SYMBOLS if s.strip()]  # Clean up empty strings
+SYMBOLS = [s for s in SYMBOLS if s not in DISABLED_SYMBOLS]
 
 # --- CONFIGURAZIONE OTTIMIZZAZIONE ---
-MAX_POSITIONS = 3  # Numero massimo posizioni contemporanee
+# Maximum open positions (default 10, configurable via env)
+MAX_POSITIONS = int(os.getenv("MAX_OPEN_POSITIONS", "10"))
 REVERSE_THRESHOLD = float(os.getenv("REVERSE_THRESHOLD", "2.0"))  # Percentuale perdita per trigger reverse analysis
 CRITICAL_LOSS_PCT_LEV = float(os.getenv("CRITICAL_LOSS_PCT_LEV", "12.0"))  # % perdita (con leva) per trigger gestione critica
 CYCLE_INTERVAL = 60  # Secondi tra ogni ciclo di controllo (era 900)
 DRY_RUN = os.getenv("DRY_RUN", "false").lower() == "true"  # Se true, logga solo azioni senza eseguirle
-CRITICAL_LOSS_PCT_LEV = float(os.getenv("CRITICAL_LOSS_PCT_LEV", "12.0"))  # Soglia perdita % con leva per CRITICAL
 
 # --- HEDGE MODE & SCALE-IN CONFIGURATION ---
 HEDGE_MODE = os.getenv("BYBIT_HEDGE_MODE", "false").lower() == "true"  # Allow long+short same symbol
@@ -937,6 +936,22 @@ async def analysis_cycle():
             print(f"        ❌ AI/Exec Error: {e}")
 
 async def main_loop():
+    # Startup logging
+    print("\n" + "="*80)
+    print(" TRADING ORCHESTRATOR - STARTUP CONFIGURATION")
+    print("="*80)
+    print(f"📊 Symbol Universe: {len(SYMBOLS)} symbols")
+    print(f"   Active symbols: {', '.join(SYMBOLS)}")
+    if DISABLED_SYMBOLS:
+        print(f"   Disabled symbols: {', '.join(DISABLED_SYMBOLS)}")
+    print(f"\n🎯 Max Open Positions: {MAX_POSITIONS}")
+    print(f"⏱️  Cycle Interval: {CYCLE_INTERVAL}s")
+    print(f"🔄 Hedge Mode: {'Enabled' if HEDGE_MODE else 'Disabled'}")
+    print(f"📈 Scale-in: {'Enabled' if ALLOW_SCALE_IN else 'Disabled'}")
+    if DRY_RUN:
+        print(f"🔍 DRY RUN MODE: Actions will be logged but not executed")
+    print("="*80 + "\n")
+    
     while True:
         await manage_cycle()
         await analysis_cycle()
