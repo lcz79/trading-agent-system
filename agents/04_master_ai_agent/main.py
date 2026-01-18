@@ -377,6 +377,127 @@ SOFT_BLOCKER_REASONS = Literal[
     ""
 ]
 
+# Valid blocker values (used for normalization/mapping)
+VALID_HARD_BLOCKERS = {
+    "INSUFFICIENT_MARGIN",
+    "MAX_POSITIONS",
+    "COOLDOWN",
+    "DRAWDOWN_GUARD",
+    "CRASH_GUARD",
+    "LOW_PRE_SCORE",
+    "LOW_RANGE_SCORE",
+    "MOMENTUM_UP_15M",
+    "MOMENTUM_DOWN_15M",
+    "LOW_VOLATILITY",
+}
+
+VALID_SOFT_BLOCKERS = {
+    "LOW_CONFIDENCE",
+    "CONFLICTING_SIGNALS",
+}
+
+# Mapping for common aliases/variations
+HARD_BLOCKER_ALIASES = {
+    "INSUFFICIENT_BALANCE": "INSUFFICIENT_MARGIN",
+    "NO_MARGIN": "INSUFFICIENT_MARGIN",
+    "LOW_CONFIDENCE_SETUP": "LOW_PRE_SCORE",  # Map to closest hard blocker
+    "MAX_POSITION": "MAX_POSITIONS",
+    "POSITION_LIMIT": "MAX_POSITIONS",
+    "COOLDOWN_ACTIVE": "COOLDOWN",
+    "DRAWDOWN": "DRAWDOWN_GUARD",
+    "DRAWDOWN_LIMIT": "DRAWDOWN_GUARD",
+    "CRASH": "CRASH_GUARD",
+    "KNIFE_CATCHING": "CRASH_GUARD",
+    "LOW_VOL": "LOW_VOLATILITY",
+    "NO_VOLATILITY": "LOW_VOLATILITY",
+    "MOMENTUM_UP": "MOMENTUM_UP_15M",
+    "MOMENTUM_DOWN": "MOMENTUM_DOWN_15M",
+}
+
+SOFT_BLOCKER_ALIASES = {
+    "LOW_CONF": "LOW_CONFIDENCE",
+    "CONFIDENCE_LOW": "LOW_CONFIDENCE",
+    "CONFLICTING": "CONFLICTING_SIGNALS",
+    "MIXED_SIGNALS": "CONFLICTING_SIGNALS",
+}
+
+
+def normalize_blocker_value(value: str, blocker_type: str = "hard") -> Optional[str]:
+    """
+    Normalize a blocker value by:
+    1. Stripping whitespace
+    2. Extracting token before first space or '('
+    3. Converting to uppercase
+    4. Replacing '-' with '_'
+    5. Mapping common aliases to valid enum values
+    6. Returning None for unknown values (with warning)
+    
+    Args:
+        value: Raw blocker string from LLM (e.g., "LOW_PRE_SCORE (47)")
+        blocker_type: Either "hard" or "soft"
+    
+    Returns:
+        Normalized blocker string or None if invalid
+    """
+    if not value or not isinstance(value, str):
+        return None
+    
+    # Step 1: Strip whitespace
+    value = value.strip()
+    
+    # Step 2: Extract token before first space or '('
+    if ' ' in value:
+        value = value.split(' ')[0]
+    if '(' in value:
+        value = value.split('(')[0].strip()
+    
+    # Step 3: Uppercase
+    value = value.upper()
+    
+    # Step 4: Replace '-' with '_'
+    value = value.replace('-', '_')
+    
+    # Step 5: Check if already valid
+    if blocker_type == "hard":
+        if value in VALID_HARD_BLOCKERS or value == "":
+            return value
+        # Check aliases
+        if value in HARD_BLOCKER_ALIASES:
+            return HARD_BLOCKER_ALIASES[value]
+    else:  # soft
+        if value in VALID_SOFT_BLOCKERS or value == "":
+            return value
+        # Check aliases
+        if value in SOFT_BLOCKER_ALIASES:
+            return SOFT_BLOCKER_ALIASES[value]
+    
+    # Step 6: Unknown value - log warning and return None
+    logger.warning(f"⚠️ Unknown {blocker_type} blocker value: '{value}' - dropping")
+    return None
+
+
+def normalize_blocker_list(values: List[str], blocker_type: str = "hard") -> List[str]:
+    """
+    Normalize a list of blocker values, dropping invalid ones.
+    
+    Args:
+        values: List of raw blocker strings
+        blocker_type: Either "hard" or "soft"
+    
+    Returns:
+        List of normalized, valid blocker strings
+    """
+    if not values:
+        return []
+    
+    normalized = []
+    for value in values:
+        norm_value = normalize_blocker_value(value, blocker_type)
+        if norm_value is not None and norm_value != "":
+            normalized.append(norm_value)
+    
+    return normalized
+
 class Decision(BaseModel):
     symbol: str
     action: Literal["OPEN_LONG", "OPEN_SHORT", "HOLD", "CLOSE"]
@@ -388,8 +509,8 @@ class Decision(BaseModel):
     risk_factors: Optional[List[str]] = None
     # New structured fields for coherence
     setup_confirmations: Optional[List[str]] = None
-    blocked_by: Optional[List[HARD_BLOCKER_REASONS]] = None  # HARD constraints only
-    soft_blockers: Optional[List[SOFT_BLOCKER_REASONS]] = None  # SOFT warnings/flags
+    blocked_by: Optional[List[str]] = None  # HARD constraints only (validated via field_validator)
+    soft_blockers: Optional[List[str]] = None  # SOFT warnings/flags (validated via field_validator)
     direction_considered: Optional[Literal["LONG", "SHORT", "NONE"]] = None
     # Scalping parameters
     tp_pct: Optional[float] = None  # Take profit percentage (e.g., 0.02 for 2%)
@@ -401,6 +522,28 @@ class Decision(BaseModel):
     entry_type: Optional[Literal["MARKET", "LIMIT"]] = "MARKET"  # Entry order type
     entry_price: Optional[float] = None  # Entry price for LIMIT orders (required when entry_type=LIMIT)
     entry_expires_sec: Optional[int] = 240  # TTL for LIMIT orders in seconds (default 240, range 10-3600)
+    
+    @field_validator('blocked_by', mode='before')
+    @classmethod
+    def normalize_blocked_by(cls, v):
+        """Normalize blocked_by field to handle LLM output variations"""
+        if v is None:
+            return []
+        if not isinstance(v, list):
+            return []
+        # Normalize each value
+        return normalize_blocker_list(v, blocker_type="hard")
+    
+    @field_validator('soft_blockers', mode='before')
+    @classmethod
+    def normalize_soft_blockers(cls, v):
+        """Normalize soft_blockers field to handle LLM output variations"""
+        if v is None:
+            return []
+        if not isinstance(v, list):
+            return []
+        # Normalize each value
+        return normalize_blocker_list(v, blocker_type="soft")
 
 class AnalysisPayload(BaseModel):
     global_data: Dict[str, Any]
