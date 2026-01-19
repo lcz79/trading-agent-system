@@ -162,8 +162,13 @@ class CryptoTechnicalAnalysisBybit:
         
         Returns:
             Dict with bb_middle, bb_upper, bb_lower, bb_width_pct
+            Returns empty dict if insufficient data (< period candles)
         """
         try:
+            # Check if we have enough data
+            if len(close) < period:
+                return {}
+            
             # Create BollingerBands indicator once
             bb = ta.volatility.BollingerBands(close, window=period, window_dev=std_dev)
             
@@ -176,6 +181,11 @@ class CryptoTechnicalAnalysisBybit:
             last_middle = float(bb_middle.iloc[-1])
             last_upper = float(bb_upper.iloc[-1])
             last_lower = float(bb_lower.iloc[-1])
+            
+            # Check for NaN values (can happen with insufficient data)
+            import math
+            if math.isnan(last_middle) or math.isnan(last_upper) or math.isnan(last_lower):
+                return {}
             
             # Calculate BB width as percentage of middle
             if last_middle > 0:
