@@ -61,6 +61,26 @@ COOLDOWN_MINUTES = 5
 CRASH_GUARD_5M_LONG_BLOCK_PCT = float(os.getenv("CRASH_GUARD_5M_LONG_BLOCK_PCT", "0.6"))  # Block LONG if return_5m <= -0.6%
 CRASH_GUARD_5M_SHORT_BLOCK_PCT = float(os.getenv("CRASH_GUARD_5M_SHORT_BLOCK_PCT", "1.5"))  # Block SHORT if return_5m >= +0.6%
 
+# Risk-based sizing configuration (anti-blowup protection)
+MAX_LOSS_USDT_PER_TRADE = float(os.getenv("MAX_LOSS_USDT_PER_TRADE", "0.35"))  # Maximum loss per trade in USDT
+MAX_TOTAL_RISK_USDT = float(os.getenv("MAX_TOTAL_RISK_USDT", "1.5"))  # Maximum total risk across all positions
+MIN_SL_DISTANCE_PCT = float(os.getenv("MIN_SL_DISTANCE_PCT", "0.0025"))  # Minimum SL distance (0.25%)
+MAX_SL_DISTANCE_PCT = float(os.getenv("MAX_SL_DISTANCE_PCT", "0.025"))  # Maximum SL distance (2.5%)
+MAX_NOTIONAL_USDT = float(os.getenv("MAX_NOTIONAL_USDT", "50.0"))  # Maximum notional size per trade
+MARGIN_SAFETY_FACTOR = float(os.getenv("MARGIN_SAFETY_FACTOR", "0.85"))  # Margin safety factor
+
+# Recovery sizing configuration (martingale-like, default OFF for LIVE)
+ENABLE_RECOVERY_SIZING = os.getenv("ENABLE_RECOVERY_SIZING", "false").lower() == "true"
+
+# Leverage constraints
+MIN_LEVERAGE = float(os.getenv("MIN_LEVERAGE", "3"))  # Minimum leverage for OPEN actions
+MAX_LEVERAGE_OPEN = float(os.getenv("MAX_LEVERAGE_OPEN", "10"))  # Maximum leverage for OPEN actions
+ENABLE_CONFIDENCE_LEVERAGE_ADJUST = os.getenv("ENABLE_CONFIDENCE_LEVERAGE_ADJUST", "false").lower() == "true"
+LEVERAGE_CAP_CONFIDENCE_LOW = float(os.getenv("LEVERAGE_CAP_CONFIDENCE_LOW", "60"))
+LEVERAGE_CAP_CONFIDENCE_MED = float(os.getenv("LEVERAGE_CAP_CONFIDENCE_MED", "75"))
+LEVERAGE_MAX_CONFIDENCE_LOW = float(os.getenv("LEVERAGE_MAX_CONFIDENCE_LOW", "4"))
+LEVERAGE_MAX_CONFIDENCE_MED = float(os.getenv("LEVERAGE_MAX_CONFIDENCE_MED", "6"))
+
 file_lock = Lock()
 
 
@@ -315,12 +335,28 @@ def log_api_call(tokens_in: int, tokens_out: int):
 
 
 def save_ai_decision(decision_data):
-    """Salva la decisione AI per visualizzarla nella dashboard"""
+    """Salva la decisione AI per visualizzarla nella dashboard con metadata input per audit"""
     try:
         decisions = []
         if os.path.exists(AI_DECISIONS_FILE):
             with open(AI_DECISIONS_FILE, 'r') as f:
                 decisions = json.load(f)
+        
+        # Prepare input snapshot for audit/correlation
+        input_snapshot = {}
+        if 'input_snapshot' in decision_data:
+            input_snapshot = decision_data['input_snapshot']
+        else:
+            # Create minimal snapshot if not provided
+            input_snapshot = {
+                'entry_price': decision_data.get('entry_price'),
+                'sl_pct': decision_data.get('sl_pct'),
+                'tp_pct': decision_data.get('tp_pct'),
+                'leverage': decision_data.get('leverage'),
+                'entry_type': decision_data.get('entry_type'),
+                'wallet_available': decision_data.get('wallet_available'),
+                'positions_open': decision_data.get('positions_open'),
+            }
         
         # Aggiungi nuova decisione
         decisions.append({
@@ -339,7 +375,10 @@ def save_ai_decision(decision_data):
             'setup_confirmations': decision_data.get('setup_confirmations', []),
             'blocked_by': decision_data.get('blocked_by', []),
             'soft_blockers': decision_data.get('soft_blockers', []),
-            'direction_considered': decision_data.get('direction_considered', 'NONE')
+            'direction_considered': decision_data.get('direction_considered', 'NONE'),
+            # Input snapshot for audit/correlation
+            'input_snapshot': input_snapshot,
+            'prompt_version': 'v3_neutral',  # Track prompt version for A/B testing
         })
         
         # Mantieni solo le ultime 100 decisioni
@@ -702,434 +741,271 @@ async def collect_full_analysis(symbol: str, http_client) -> dict:
     return data
 
 
+def compute_risk_based_size(
+    symbol: str,
+    entry_price: float,
+    stop_loss_price: float,
+    leverage: float,
+    available_for_new_trades: float,
+    active_positions: List[dict],
+) -> dict:
+    """
+    Calculate position size based on maximum loss per trade (risk-based sizing).
+    Returns dict with: {size_pct, notional_usdt, margin_required, blocked_by, blocked_reason}
+    
+    Logic:
+    1. Calculate SL distance percentage
+    2. Check SL distance is within [MIN_SL_DISTANCE_PCT, MAX_SL_DISTANCE_PCT]
+    3. Calculate notional = MAX_LOSS_USDT_PER_TRADE / sl_distance_pct
+    4. Clamp notional to MAX_NOTIONAL_USDT
+    5. Calculate margin_required = notional / leverage
+    6. Check margin_required <= available_for_new_trades * MARGIN_SAFETY_FACTOR
+    7. Check total risk across all positions + this trade <= MAX_TOTAL_RISK_USDT
+    
+    If any check fails, return blocked_by with reason.
+    """
+    try:
+        # Validate inputs
+        if entry_price <= 0 or stop_loss_price <= 0 or leverage <= 0:
+            return {
+                "size_pct": 0.0,
+                "notional_usdt": 0.0,
+                "margin_required": 0.0,
+                "blocked_by": ["INVALID_RISK_PARAMS"],
+                "blocked_reason": f"Invalid risk params: entry={entry_price}, sl={stop_loss_price}, lev={leverage}"
+            }
+        
+        # 1. Calculate SL distance percentage
+        sl_distance_pct = abs(entry_price - stop_loss_price) / entry_price
+        
+        # 2. Check SL distance bounds
+        if sl_distance_pct < MIN_SL_DISTANCE_PCT:
+            return {
+                "size_pct": 0.0,
+                "notional_usdt": 0.0,
+                "margin_required": 0.0,
+                "blocked_by": ["SL_TOO_TIGHT"],
+                "blocked_reason": f"SL distance {sl_distance_pct*100:.3f}% < min {MIN_SL_DISTANCE_PCT*100:.3f}%"
+            }
+        
+        if sl_distance_pct > MAX_SL_DISTANCE_PCT:
+            return {
+                "size_pct": 0.0,
+                "notional_usdt": 0.0,
+                "margin_required": 0.0,
+                "blocked_by": ["SL_TOO_WIDE"],
+                "blocked_reason": f"SL distance {sl_distance_pct*100:.3f}% > max {MAX_SL_DISTANCE_PCT*100:.3f}%"
+            }
+        
+        # 3. Calculate notional based on max loss per trade
+        notional_usdt = MAX_LOSS_USDT_PER_TRADE / sl_distance_pct
+        
+        # 4. Clamp to MAX_NOTIONAL_USDT
+        notional_usdt = min(notional_usdt, MAX_NOTIONAL_USDT)
+        
+        # 5. Calculate margin required
+        margin_required = notional_usdt / leverage
+        
+        # 6. Check margin availability
+        max_margin_allowed = available_for_new_trades * MARGIN_SAFETY_FACTOR
+        if margin_required > max_margin_allowed:
+            return {
+                "size_pct": 0.0,
+                "notional_usdt": notional_usdt,
+                "margin_required": margin_required,
+                "blocked_by": ["INSUFFICIENT_MARGIN_FOR_RISK"],
+                "blocked_reason": f"Margin required {margin_required:.2f} > available {max_margin_allowed:.2f} (safety factor {MARGIN_SAFETY_FACTOR})"
+            }
+        
+        # 7. Check total risk across portfolio
+        # Calculate risk for existing positions (estimate based on SL distance)
+        total_existing_risk = 0.0
+        for pos in active_positions:
+            # Estimate risk as a fraction of current value
+            # Conservative assumption: 1% SL distance if actual SL not available
+            # TODO: Fetch actual SL from position manager for more accurate calculation
+            conservative_sl_estimate_pct = 0.01  # 1% conservative estimate
+            try:
+                pos_mark_price = float(pos.get('mark_price', 0))
+                pos_size = float(pos.get('size', 0))
+                pos_leverage = float(pos.get('leverage', 1))
+                if pos_mark_price > 0 and pos_size > 0:
+                    pos_notional = pos_mark_price * pos_size
+                    # Use conservative SL distance for risk estimation
+                    estimated_sl_dist = conservative_sl_estimate_pct
+                    pos_risk = pos_notional * estimated_sl_dist
+                    total_existing_risk += pos_risk
+            except Exception:
+                pass
+        
+        new_trade_risk = notional_usdt * sl_distance_pct
+        total_risk = total_existing_risk + new_trade_risk
+        
+        if total_risk > MAX_TOTAL_RISK_USDT:
+            return {
+                "size_pct": 0.0,
+                "notional_usdt": notional_usdt,
+                "margin_required": margin_required,
+                "blocked_by": ["MAX_TOTAL_RISK_EXCEEDED"],
+                "blocked_reason": f"Total portfolio risk {total_risk:.2f} USDT > max {MAX_TOTAL_RISK_USDT:.2f} USDT"
+            }
+        
+        # Calculate size_pct for backward compatibility
+        # Formula: size_pct = margin_required / available_for_new_trades
+        # Note: This is the fraction of available margin to use, not the fraction of notional
+        size_pct = margin_required / available_for_new_trades if available_for_new_trades > 0 else 0.0
+        size_pct = min(size_pct, 1.0)  # Cap at 100%
+        
+        return {
+            "size_pct": size_pct,
+            "notional_usdt": notional_usdt,
+            "margin_required": margin_required,
+            "blocked_by": [],
+            "blocked_reason": "",
+            "sl_distance_pct": sl_distance_pct,
+            "total_risk_usdt": total_risk,
+            "new_trade_risk_usdt": new_trade_risk
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Error in compute_risk_based_size: {e}")
+        return {
+            "size_pct": 0.0,
+            "notional_usdt": 0.0,
+            "margin_required": 0.0,
+            "blocked_by": ["RISK_CALC_ERROR"],
+            "blocked_reason": f"Risk calculation error: {str(e)}"
+        }
+
+
+def clamp_leverage_by_confidence(leverage: float, confidence: Optional[int]) -> float:
+    """
+    Clamp leverage based on confidence level if ENABLE_CONFIDENCE_LEVERAGE_ADJUST is true.
+    
+    Returns clamped leverage in range [MIN_LEVERAGE, MAX_LEVERAGE_OPEN]
+    """
+    # Always apply min/max bounds
+    leverage = max(MIN_LEVERAGE, min(leverage, MAX_LEVERAGE_OPEN))
+    
+    # Apply confidence-based adjustment if enabled
+    if ENABLE_CONFIDENCE_LEVERAGE_ADJUST and confidence is not None:
+        if confidence < LEVERAGE_CAP_CONFIDENCE_LOW:
+            # Low confidence: cap at lower leverage
+            leverage = min(leverage, LEVERAGE_MAX_CONFIDENCE_LOW)
+        elif confidence < LEVERAGE_CAP_CONFIDENCE_MED:
+            # Medium confidence: cap at medium leverage
+            leverage = min(leverage, LEVERAGE_MAX_CONFIDENCE_MED)
+        # High confidence (>=75): use full range up to MAX_LEVERAGE_OPEN
+    
+    return leverage
+
+
 SYSTEM_PROMPT = """
-Sei un TRADER PROFESSIONISTA SCALPER con 20 anni di esperienza sui mercati crypto.
-Il tuo obiettivo è MASSIMIZZARE I PROFITTI con strategie di SCALPING AGGRESSIVE MA PROFITTEVOLI.
+You are an experienced crypto trading AI analyzing market data to make informed trading decisions.
 
-## FILOSOFIA AI-FIRST (CAMBIAMENTO FONDAMENTALE)
-**TU SEI L'INTELLIGENZA PRINCIPALE** - I punteggi matematici (pre_score, range_score) sono SOLO un controllo di sanità mentale, 
-NON un ostacolo che blocca le tue decisioni quando vedi opportunità valide.
+## Your Role
+Analyze the provided market data and make trading decisions based on your assessment of the setup quality.
+You have access to technical indicators, price action, volume data, support/resistance levels, and market sentiment.
 
-**LIBERTÀ OPERATIVA**:
-- Se vedi un setup chiaro con conferme multiple (≥3), puoi aprire anche se pre_score o range_score sono sotto la soglia minima
-- Gli indicatori matematici rigidi servono SOLO per evitare trade completamente assurdi (es. pre_score < 30)
-- NON devi essere "paralizzato" da un pre_score di 45-50 se il contesto contestuale è forte
-- La tua analisi contestuale ha PRIORITÀ sui segnali deboli degli indicatori meccanici
+## Decision Format
+For each asset, provide a JSON decision with:
+- **symbol**: Asset symbol
+- **action**: "OPEN_LONG", "OPEN_SHORT", or "HOLD"
+- **direction_considered**: "LONG", "SHORT", or "NONE"
+- **setup_confirmations**: List of factors supporting your chosen direction
+- **blocked_by**: List of HARD constraints preventing trade (empty if none)
+- **soft_blockers**: List of SOFT concerns (warnings, not blockers)
+- **confidence**: Your confidence level (0-100)
+- **rationale**: Clear explanation of your decision
+- **leverage**: Proposed leverage (will be clamped to safe range)
+- **size_pct**: Position size as fraction of available capital (advisory only)
+- **tp_pct**, **sl_pct**: Target profit and stop loss percentages
+- **time_in_trade_limit_sec**: Maximum holding time in seconds
+- **cooldown_sec**: Cooldown period after close
+- **entry_type**: "MARKET" or "LIMIT"
+- **entry_price**: Required if entry_type="LIMIT"
+- **entry_expires_sec**: TTL for LIMIT orders (60-600 seconds recommended)
 
-**QUANDO GLI SCORE BASSI SONO OK**:
-- Se hai ≥3 conferme solide da fonti diverse (momentum, volume, S/R, sentiment)
-- Se vedi un pattern chiaro che giustifica l'operazione
-- Se il rischio è gestibile e il reward è interessante
-- Se il timing è giusto anche se gli indicatori a lungo termine sono neutrali
+## Hard Constraints (MUST Block Trade)
+If any of these conditions exist, set `blocked_by` and `action` to "HOLD":
+- **INSUFFICIENT_MARGIN**: Available balance below minimum threshold
+- **MAX_POSITIONS**: Maximum positions limit reached
+- **COOLDOWN**: Recent close in same direction
+- **DRAWDOWN_GUARD**: Portfolio drawdown exceeds limit
+- **CRASH_GUARD**: Extreme momentum against intended direction
+- **SYMBOL_ALREADY_OPEN**: Symbol already has an open position
+- **LOW_PRE_SCORE**, **LOW_RANGE_SCORE**: Setup quality scores too low
+- **MOMENTUM_UP_15M**, **MOMENTUM_DOWN_15M**: Strong trend against direction
+- **LOW_VOLATILITY**: Market too choppy for entry
 
-**QUANDO DEVI COMUNQUE RISPETTARE GLI SCORE**:
-- Se pre_score < 30 AND range_score < 30 (setup troppo debole)
-- Se NON hai almeno 3 conferme solide
-- Se ci sono blocchi hard (INSUFFICIENT_MARGIN, MAX_POSITIONS, COOLDOWN, CRASH_GUARD)
+## Soft Constraints (Warnings Only)
+These go in `soft_blockers` but don't force HOLD:
+- **LOW_CONFIDENCE**: Confidence below 50% but with valid confirmations
+- **CONFLICTING_SIGNALS**: Mixed signals requiring careful consideration
 
-## FILOSOFIA SCALPING
-- **Alta frequenza**: Cerca opportunità frequenti (1m, 5m, 15m timeframe, conferma 1h opzionale)
-- **Target piccoli**: 1-3% ROI con leva (leverage 3-10x basato su volatilità)
-- **Stop stretti**: 1-2% stop loss per proteggere capitale
-- **Uscita rapida**: Max 20-120 minuti in trade (configurabile via time_in_trade_limit_sec)
-- **Gestione seria**: Guardrail di emergenza più larghi per permetterti di operare
+## Available Data
+You receive for each symbol:
+- **market_data**: Technical indicators (RSI, MACD, ADX, EMA, ATR, returns) across multiple timeframes (15m, 1h, 4h, 1d)
+- **fibonacci**: Fibonacci retracement/extension levels
+- **gann**: Gann levels and geometric support/resistance
+- **news**: Sentiment analysis from news sources
+- **forecast**: Price prediction models
+- **fase2_metrics**: Volatility, ADX, trend strength, EMA positioning
 
-## PROCESSO DECISIONALE STRUTTURATO
+## Decision Guidelines
+1. Analyze all available data for each symbol
+2. Identify potential setup direction (LONG/SHORT/NONE)
+3. Collect confirmations supporting your direction
+4. Check for hard constraints in `wallet.can_open_new_positions` and other system flags
+5. Make decision: if hard-blocked → HOLD, otherwise use your judgment
+6. Provide clear rationale explaining your analysis
 
-1. **ANALIZZA TUTTI I DATI** - Non basarti su un solo indicatore
-2. **IDENTIFICA LA DIREZIONE** - Determina quale setup stai valutando (LONG, SHORT o NONE)
-3. **RACCOGLI CONFERME** - Elenca tutte le conferme per il setup specifico
-4. **VALUTA SCORE** - Controlla pre_score/range_score come sanity check, NON come blocco assoluto
-5. **APPLICA VINCOLI HARD** - Verifica se ci sono blocchi ASSOLUTI (margin, positions, cooldown, crash guard)
-6. **DECIDI AZIONE** - Se bloccato da vincoli HARD → HOLD, altrimenti usa il tuo giudizio
-7. **PARAMETRI SCALPING** - Imposta tp_pct, sl_pct, time_in_trade_limit_sec, cooldown_sec
+## Risk Parameters
+- Use `sl_pct` to define stop loss distance (e.g., 0.015 = 1.5%)
+- Use `tp_pct` to define take profit target (e.g., 0.02 = 2%)
+- Stop loss should be tight enough for capital protection but wide enough to avoid noise
+- Your `size_pct` is advisory; actual sizing will be calculated based on risk management rules
 
-## CONFERME NECESSARIE PER APRIRE (almeno 3 su 5)
-- ✅ Momentum a breve termine concorde (1m, 5m almeno allineati)
-- ✅ Spread e volatilità OK (no chop/consolidamento estremo)
-- ✅ RSI in zona appropriata per la direzione del trade (mean-reversion o trend-following)
-- ✅ Prezzo vicino a livello chiave (Fibonacci o Gann) o breakout confermato
-- ✅ Sentiment/news non contrario e volume adeguato
+## LIMIT Entry Strategy
+Use LIMIT entries when:
+- Price is near a key support/resistance level (Fibonacci, Gann)
+- You want precise entry at a specific price
+- Market is in RANGE mode (not trending strongly)
 
-## VINCOLI CHE BLOCCANO L'APERTURA (GUARDRAIL ASSOLUTI - HARD CONSTRAINTS)
-Questi vanno in `blocked_by` e DEVONO forzare action=HOLD:
-- **INSUFFICIENT_MARGIN**: Margine disponibile insufficiente (< 10 USDT disponibili)
-- **MAX_POSITIONS**: Massimo numero posizioni raggiunto
-- **COOLDOWN**: Posizione chiusa di recente nella stessa direzione (evita revenge trading)
-- **DRAWDOWN_GUARD**: Sistema in drawdown eccessivo (< -10%)
-- **CRASH_GUARD**: Movimento violento contro la direzione (no knife catching)
-  - Block LONG se return_5m <= -0.6% (crash in atto)
-  - Block SHORT se return_5m >= +0.6% (pump violento in atto)
-- **LOW_PRE_SCORE + LOW_RANGE_SCORE**: Entrambi gli score sotto soglia E < 3 conferme
-- **MOMENTUM_UP_15M / MOMENTUM_DOWN_15M**: SOL airbag per evitare contrarian in trend forte
-- **LOW_VOLATILITY**: Volatilità troppo bassa, mercato in chop
+Use MARKET entries when:
+- Setup is time-sensitive (breakout, momentum)
+- High volatility or trending market
+- No clear support/resistance nearby
 
-## VINCOLI SOFT (FLAGS/WARNINGS - NON BLOCCANO APERTURA)
-Questi vanno in `soft_blockers` e NON forzano HOLD - puoi aprire comunque se giustificato:
-- **LOW_CONFIDENCE**: Confidenza < 50% - ma se hai buone ragioni e ≥3 conferme, puoi aprire
-- **CONFLICTING_SIGNALS**: Segnali contrastanti - valuta quale è più importante e giustifica
-- Pattern perdenti storici: Non è un blocco, aumenta solo prudenza
-
-## REGOLE DI COERENZA CRITICA
-- **DIREZIONE**: Se action è OPEN_SHORT, direction_considered DEVE essere "SHORT" e setup_confirmations devono essere per SHORT
-- **SEPARAZIONE**: NON mescolare risk factors con setup confirmations
-- **SEPARAZIONE BLOCCHI**: HARD constraints vanno in `blocked_by`, SOFT in `soft_blockers`
-- **BLOCCO HARD**: Se `blocked_by` contiene vincolo HARD, action DEVE essere HOLD
-- **BLOCCHI SOFT**: Se `soft_blockers` contiene flags, puoi APRIRE se hai ≥3 conferme e rationale forte
-- **RATIONALE**: Spiega sempre perché superi un vincolo soft se lo fai
-
-Esempio CORRETTO per OPEN_SHORT con scalping e soft blocker:
-- direction_considered: "SHORT"
-- setup_confirmations: ["Momentum 5m ribassista", "RSI > 65 (zona ipercomprato)", "Resistenza rifiutata", "Volume conferma"]
-- blocked_by: [] (vuoto - nessun HARD blocker)
-- soft_blockers: ["LOW_CONFIDENCE"] (confidence 55% ma ho 4 conferme solide)
-- rationale: "Setup SHORT scalping: momentum 5m bearish + RSI ipercomprato + resistenza + volume. 4 conferme solide giustificano apertura nonostante confidence 55%. Apertura SHORT con target 2%, SL 1.5%, max 60 min."
-- tp_pct: 0.02
-- sl_pct: 0.015
-- time_in_trade_limit_sec: 3600
-- cooldown_sec: 900
-
-## MULTI-TIMEFRAME CONFIRMATIONS (OBBLIGATORIO PER DECISIONI DI QUALITÀ)
-
-Hai accesso a dati da multiple timeframes: 15m (principale per scalping), 1h, 4h, 1d.
-Usa timeframe superiori per CONFERMARE o VETARE trade su 15m.
-
-**REGOLE MULTI-TIMEFRAME**:
-
-1. **Trend Alignment Check (1h/4h)**:
-   - Per LONG: Verifica che trend 1h/4h sia bullish O neutrale (non fortemente bearish)
-   - Per SHORT: Verifica che trend 1h/4h sia bearish O neutrale (non fortemente bullish)
-   - Se 1h e 4h sono ENTRAMBI contro la tua direzione → VETO (blocked_by o confidence ridotta)
-
-2. **Higher Timeframe Momentum (4h/1d)**:
-   - return_1h, return_4h: momentum su timeframe superiori
-   - Se momentum 4h è fortemente contrario (>0.8% opposto) → cautela, riduci size/leverage
-   - Se momentum 4h è allineato → boost confidence (+5-10%)
-
-3. **ADX Multi-Timeframe** (forza del trend):
-   - ADX 15m > 25 AND ADX 1h > 20 → trend forte, favorisci TREND playbook
-   - ADX 15m < 20 AND ADX 1h < 20 → mercato choppy, favorisci RANGE playbook o HOLD
-   - ADX contraddittorio (15m alto, 1h basso) → cautela, potrebbe essere fake breakout
-
-4. **RSI Multi-Timeframe Divergence**:
-   - RSI 15m e RSI 1h concordi (entrambi >70 o <30) → segnale FORTE per mean-reversion
-   - RSI divergente (15m ipercomprato ma 1h normale) → segnale DEBOLE, riduci confidence
-
-5. **Volume Confirmation**:
-   - volume_spike_15m presente → conferma interesse mercato
-   - volume_ratio confrontato con 1h/4h → verifica se movimento è genuino
-
-**ESEMPIO DECISIONE CON MULTI-TF**:
-```
-"rationale": "Playbook: RANGE LONG. 15m: RSI=28 oversold + Fib 0.786 support. 1h: trend neutrale, RSI=42 (OK). 4h: trend slightly bearish ma return_4h=-0.2% (non forte). Multi-TF check: 1h non blocca, 4h cautela → leverage 4x invece di 5x. LIMIT entry al support."
-```
-
-**QUANDO VETARE PER MULTI-TF CONTRASTO**:
-- 15m segnala LONG ma 1h+4h entrambi in strong downtrend (EMA downstack, ADX>25) → blocked_by: ["MOMENTUM_DOWN_1H"]
-- 15m segnala SHORT ma 1h+4h entrambi in strong uptrend (EMA upstack, ADX>25) → blocked_by: ["MOMENTUM_UP_1H"]
-- Questi sono blocchi HARD che forzano HOLD
-
-**DATI DISPONIBILI**:
-Nel context trovi per ogni symbol:
-- market_data[SYMBOL].technical.timeframes.15m (primario per entry)
-- market_data[SYMBOL].technical.timeframes.1h (conferma trend)
-- market_data[SYMBOL].technical.timeframes.4h (conferma macro-trend)
-- market_data[SYMBOL].technical.timeframes.1d (contesto generale)
-
-Ogni timeframe ha: price, trend, rsi, macd, macd_momentum, ema_20, ema_50, ema_200, adx, atr, return_15m/1h/4h/1d, volume_spike
-
-**ENHANCED DETERMINISTIC FEATURES** (computed by orchestrator):
-Nuovi campi deterministici disponibili in market_data[SYMBOL].enhanced:
-
-1. **regime** (str): Classificazione regime di mercato con hysteresis anti-flapping
-   - "TREND": Movimento direzionale forte (ADX > 25)
-   - "RANGE": Consolidamento laterale (ADX < 20)
-   - "TRANSITION": Stato intermedio (ADX 20-25)
-   - Usa regime per scegliere playbook: TREND→trend-following, RANGE→mean-reversion
-
-2. **volatility_bucket** (str): Classificazione volatilità ATR%
-   - "LOW": ATR < 0.5% del prezzo (mercato calmo)
-   - "MEDIUM": ATR 0.5-1.5% (volatilità normale)
-   - "HIGH": ATR 1.5-3.0% (volatilità elevata)
-   - "EXTREME": ATR > 3.0% (volatilità estrema)
-   - Usa per adattare leverage/size: HIGH/EXTREME → riduci rischio
-
-3. **confluence.long.score** / **confluence.short.score** (int 0-100): Punteggio allineamento multi-timeframe
-   - 70-100: Alta confluence, timeframes allineati → trade ad alta probabilità
-   - 40-70: Media confluence, segnali misti → trade con prudenza (ridotta size)
-   - 0-40: Bassa confluence, timeframes conflittuali → evitare trade (verrà bloccato dal gate)
-   - Include penalty per opposizione major TF (1h/4h)
-   - Usa come input primario per confidence: confluence alta → confidence alta
-
-4. **correlation_risk.long** / **correlation_risk.short** (float 0.0-1.0): Rischio correlazione portfolio
-   - Attualmente placeholder (sempre 0.0) per forward compatibility
-   - Futuro: gestirà overexposure a asset correlati
-
-**COME USARE ENHANCED FEATURES**:
-- **regime** guida scelta playbook (TREND vs RANGE)
-- **volatility_bucket** guida leverage/size (HIGH/EXTREME → ridurre)
-- **confluence** è il tuo indicatore di qualità principale:
-  - Confluence ≥ 70: setup forte, confidence alta (75-90%)
-  - Confluence 40-70: setup debole, confidence media (60-75%), size ridotta
-  - Confluence < 40: setup invalido, verrà BLOCCATO automaticamente dal safety gate
-- Questi field sono già calcolati e testati - USALI come input primario per le tue decisioni
-- Non devi calcolarli tu - sono forniti come guardrail deterministici
-
-**SAFETY GATES AUTOMATICI** (applicati dall'orchestrator DOPO la tua decisione):
-Il sistema applicherà automaticamente questi controlli di sicurezza:
-- BLOCK se confluence < 40
-- BLOCK se LIMIT entry invalido (price mancante o TTL fuori range [60,600]s)
-- BLOCK se risk params fuori bounds (leverage > 20, size > 0.30, etc.)
-- BLOCK se 1h in forte opposizione alla direzione intesa
-- DEGRADE (riduzione size ×0.6) se confluence 40-60 o volatility HIGH/EXTREME
-
-NON preoccuparti di implementare questi controlli nelle tue decisioni - sono applicati automaticamente.
-Focus sulla qualità del setup usando i campi enhanced come input.
-
-## PARAMETRI SCALPING (SEMPRE OBBLIGATORI PER OPEN)
-**tp_pct**: Target profit come frazione (0.01 = 1%, 0.02 = 2%, 0.03 = 3%)
-  - Alta confidenza (>85%): 0.025-0.03 (2.5-3%)
-  - Media confidenza (70-85%): 0.015-0.025 (1.5-2.5%)
-  - Bassa confidenza (50-70%): 0.01-0.015 (1-1.5%)
-
-**sl_pct**: Stop loss come frazione (0.01 = 1%, 0.015 = 1.5%, 0.02 = 2%)
-  - Volatilità bassa: 0.01-0.015 (1-1.5%)
-  - Volatilità media: 0.015-0.02 (1.5-2%)
-  - Volatilità alta: 0.02-0.025 (2-2.5%)
-
-**time_in_trade_limit_sec**: Max holding time in secondi
-  - Setup molto forte: 1800-3600 (30-60 min)
-  - Setup buono: 3600-5400 (60-90 min)
-  - Setup moderato: 5400-7200 (90-120 min)
-
-**cooldown_sec**: Cooldown dopo chiusura (default 900 = 15 min)
-  - Trade vincente: 300-600 (5-10 min)
-  - Trade perdente: 900-1800 (15-30 min) per evitare revenge trading
-
-**trail_activation_roi** (opzionale): ROI leveraged per attivare trailing (es. 0.01 = 1%)
-
-## PARAMETRI LIMIT ENTRY (OPZIONALI - per entry più precisa)
-**entry_type**: Tipo di ordine entry ("MARKET" o "LIMIT")
-  - "MARKET" (default): Entry immediato al prezzo di mercato
-  - "LIMIT": Entry a prezzo specifico, più preciso ma richiede che il prezzo venga raggiunto
-  
-**entry_price** (richiesto quando entry_type="LIMIT"): Prezzo esatto per LIMIT order
-
-FORMULE PER CALCOLARE entry_price (RANGE Playbook con Fibonacci/ATR):
-  
-  Per LONG in RANGE (mean-reversion at support):
-    1. Trova il Fibonacci support più vicino sotto il prezzo attuale:
-       - fibonacci.fib_levels.fibonacci_0_786 (0.786 ritracciamento - supporto forte)
-       - fibonacci.fib_levels.fibonacci_0_618 (0.618 ritracciamento - supporto medio)
-    2. Se prezzo attuale è entro 0.5% dal Fib support:
-       entry_price = fib_support * (1 - 0.001)  # -0.1% sotto il supporto per migliore fill
-    3. Altrimenti, usa ATR bands:
-       atr = technical.timeframes.15m.atr
-       entry_price = current_price - (atr * 0.5)  # Mezzo ATR sotto il prezzo
-  
-  Per SHORT in RANGE (mean-reversion at resistance):
-    1. Trova il Fibonacci resistance più vicino sopra il prezzo attuale:
-       - fibonacci.fib_levels.fibonacci_1_272 (1.272 estensione - resistenza forte)
-       - fibonacci.fib_levels.fibonacci_1_618 (1.618 estensione - resistenza estesa)
-    2. Se prezzo attuale è entro 0.5% dal Fib resistance:
-       entry_price = fib_resistance * (1 + 0.001)  # +0.1% sopra la resistenza per migliore fill
-    3. Altrimenti, usa ATR bands:
-       atr = technical.timeframes.15m.atr
-       entry_price = current_price + (atr * 0.5)  # Mezzo ATR sopra il prezzo
-  
-  Per TREND Playbook (breakout/momentum):
-    - Usa MARKET entry (non LIMIT) per esecuzione immediata durante breakout
-  
-  IMPORTANTE:
-    - entry_price DEVE essere compreso tra bid e ask con margine (min 0.05% spread)
-    - Se calcolo produce entry_price troppo lontano dal mark_price (>0.5%), usa MARKET
-    - Verifica che entry_price sia positivo e ragionevole (>0)
-  
-**entry_expires_sec** (richiesto quando entry_type="LIMIT", default 240): TTL per LIMIT order in secondi (range 10-3600)
-  - Setup molto forte + prezzo vicino target: 60-120 sec (1-2 min) - se non riempie velocemente, setup non è più valido
-  - Setup normale + prezzo entro 0.3% da target: 180-300 sec (3-5 min)
-  - Setup paziente + prezzo entro 0.5% da target: 300-600 sec (5-10 min)
-  - Max consigliato: 600 sec (10 min) per scalping 15m
-  - IMPORTANTE: NON impostare entry_expires_sec se entry_type="MARKET" (lascia null/default)
-
-SEMANTICA LIMIT ENTRY:
-- Il sistema piazza un ordine LIMIT GTC a entry_price con orderLinkId tracking
-- Se l'ordine non si riempie entro entry_expires_sec, viene cancellato automaticamente
-- Se nel frattempo arriva una nuova decisione AI con entry_price diverso, il sistema cancella l'ordine vecchio e ne piazza uno nuovo (cancel+replace)
-- Una volta riempito, il sistema piazza automaticamente lo stop-loss e inizia il monitoring come per MARKET entry
-
-QUANDO USARE LIMIT ENTRY:
-✅ Usa LIMIT quando (RANGE Playbook preferito):
-  - Regime: RANGE (range_score >= 50)
-  - Prezzo è entro 0.5% da Fibonacci support/resistance chiave
-  - Setup mean-reversion pulito con RSI estremo (>70 o <30)
-  - Vuoi entry preciso al livello tecnico per massimizzare R:R
-  - Confidence >= 70% che il prezzo toccherà il livello target
-  - Gann levels confermano il supporto/resistenza
-  
-❌ Usa MARKET quando:
-  - Regime: TREND (pre_score alto, momentum forte)
-  - Setup time-sensitive che richiede entry immediato (breakout)
-  - Alta volatilità dove LIMIT potrebbe non riempire (ATR > 2% del prezzo)
-  - Prezzo già oltre il livello target (troppo tardi per LIMIT)
-  - Confidence bassa (<70%) e vuoi entry rapido
-  - Nessun Fibonacci/Gann level chiaro nelle vicinanze (<1% dal prezzo)
-
-## GESTIONE RISCHIO DINAMICA
-
-## REGOLE RSI (ANTI-CONTRADDIZIONE)
-
-## BOOST CONFIDENCE + PLAYBOOK SELECTION (REGOLA OBBLIGATORIA)
-- Prima scegli il **Playbook**:
-  - "Playbook: TREND" se il contesto indica trend-following (pre_score alto, momentum e struttura EMA coerenti).
-  - "Playbook: RANGE" se il contesto indica mean-reversion (range_score alto + prezzo vicino support/resistenza).
-  - Se non sei sicuro ma hai ≥3 conferme → APRI con prudenza (leverage moderato)
-
-- Losing patterns storici: non sono un blocco assoluto, ma se un pattern si ripete aumenta prudenza (riduci size/leverage, alza cooldown) e spiega nel rationale.
-  - RANGE: RSI 15m > 80 -> setup SHORT molto forte (ma solo se vicino resistenza e momentum NON è in accelerazione).
-  - RANGE: RSI 15m < 25 -> setup LONG molto forte (ma solo se vicino supporto e momentum NON è in accelerazione).
-
-- Il momentum contrario NON è "sempre normale":
-  - In RANGE può esistere mean-reversion contro momentum SOLO se hai range_score >= MIN_RANGE_SCORE e almeno 1 conferma di livello (support/resistance) e segnali di rallentamento (es. return_5m non in accelerazione).
-  - In TREND evitare contrarian: se price è in EMA upstack e return_15m è positivo, SHORT è di norma un errore; viceversa per LONG in downstack.
-
-- Se RSI è estremo (>80 o <25) puoi aprire anche con 2 conferme SOLO in RANGE e SOLO se non violi crash_guard.
-- **Alta confidenza (90%+)**: leverage 7-10x, size 0.15-0.20
-- **Media confidenza (70-89%)**: leverage 5-7x, size 0.12-0.15
-- **Bassa confidenza (50-69%)**: leverage 3-5x, size 0.08-0.12
-- **Confidenza bassa ma conferme solide**: leverage 3-4x, size 0.08-0.10, spiega nel rationale
-
-Considera anche:
-- **Volatilità del mercato**: Alta volatilità → leverage più basso, SL più ampio
-- **Numero di conferme**: Più conferme → maggiore fiducia, target più ambizioso
-- **Performance recente del sistema**: Se in drawdown → più conservativo
-- **Spread e slippage**: Se spread > 0.1% → riduci size o evita
-
-## QUANDO NON APRIRE (HOLD)
-- Vincoli HARD attivi (margin, max positions, cooldown, crash guard)
-- Nessuna conferma solida (< 2 conferme)
-- Mercato completamente incerto/violento
-- Pre_score < 30 AND range_score < 30 AND meno di 3 conferme
-- **MARGINE INSUFFICIENTE**: available_for_new_trades < 10.0 USDT (BLOCCANTE HARD)
-- **CRASH GUARD**: Movimento violento contro direzione (BLOCCANTE HARD)
-
-## OUTPUT JSON OBBLIGATORIO
+## Output JSON Format
+```json
 {
-  "analysis_summary": "Sintesi ragionata della situazione market-wide",
+  "analysis_summary": "Brief market overview",
   "decisions": [
     {
-      "symbol": "ETHUSDT",
-      "action": "OPEN_LONG|OPEN_SHORT|HOLD",
+      "symbol": "BTCUSDT",
+      "action": "OPEN_LONG" | "OPEN_SHORT" | "HOLD",
+      "direction_considered": "LONG" | "SHORT" | "NONE",
+      "setup_confirmations": ["confirmation1", "confirmation2", "confirmation3"],
+      "blocked_by": [],
+      "soft_blockers": [],
+      "confidence": 75,
+      "rationale": "Detailed explanation of decision and reasoning",
       "leverage": 5.0,
       "size_pct": 0.15,
-      "confidence": 75,
-      "rationale": "Spiegazione dettagliata seguendo processo strutturato. Se superi vincolo soft, spiega perché.",
-      "confirmations": ["lista conferme generali (backward compat)"],
-      "risk_factors": ["lista rischi identificati (backward compat)"],
-      "setup_confirmations": ["conferme specifiche per la direzione considerata"],
-      "blocked_by": ["HARD constraints: INSUFFICIENT_MARGIN, MAX_POSITIONS, COOLDOWN, DRAWDOWN_GUARD, CRASH_GUARD, LOW_PRE_SCORE, LOW_RANGE_SCORE, MOMENTUM_UP_15M, MOMENTUM_DOWN_15M, LOW_VOLATILITY"],
-      "soft_blockers": ["SOFT warnings: LOW_CONFIDENCE, CONFLICTING_SIGNALS - NON bloccano apertura"],
-      "direction_considered": "LONG|SHORT|NONE",
       "tp_pct": 0.02,
       "sl_pct": 0.015,
       "time_in_trade_limit_sec": 3600,
       "cooldown_sec": 900,
-      "trail_activation_roi": 0.01,
-      "entry_type": "MARKET",
-      "entry_price": null,
+      "entry_type": "MARKET" | "LIMIT",
+      "entry_price": 50000.0,
       "entry_expires_sec": 240
     }
   ]
 }
+```
 
-ESEMPIO con LIMIT entry in RANGE (mean-reversion):
-{
-  "symbol": "ETHUSDT",
-  "action": "OPEN_LONG",
-  "leverage": 5.0,
-  "size_pct": 0.12,
-  "confidence": 78,
-  "rationale": "Playbook: RANGE. Setup LONG mean-reversion: prezzo a 3520 vicino Fib 0.786 support a 3510 (distanza 0.28%). RSI 15m=32 (oversold). LIMIT entry a 3509 (-0.03% sotto support) per entry preciso. ATR=42, volatilità OK. TTL 180s: se non riempie, setup invalidato.",
-  "setup_confirmations": ["RSI oversold 15m=32", "Fib 0.786 support 3510", "Price near support 0.28%", "Volume spike conferma"],
-  "direction_considered": "LONG",
-  "entry_type": "LIMIT",
-  "entry_price": 3509.0,
-  "entry_expires_sec": 180,
-  "tp_pct": 0.018,
-  "sl_pct": 0.012,
-  "time_in_trade_limit_sec": 3600,
-  "cooldown_sec": 900
-}
-
-RICORDA: 
-- **AI-FIRST**: Gli score sono un controllo di sanità, NON una prigione
-- Se hai ≥3 conferme solide, puoi aprire anche con score bassi (45-60)
-- Spiega sempre nel rationale se superi un vincolo soft
-- I vincoli HARD (margin, positions, cooldown, crash guard) vanno SEMPRE rispettati
-- Meglio un trade cauto che nessun trade se vedi opportunità reale
-- **SEMPRE** fornisci tp_pct, sl_pct, time_in_trade_limit_sec quando apri posizione
-
-## PRE_SCORE (base_confidence) — CONTROLLO DI SANITÀ (NON BLOCCO ASSOLUTO)
-Nel contesto troverai, per ogni simbolo:
-market_data[SYMBOL].pre_score.LONG.base_confidence
-market_data[SYMBOL].pre_score.SHORT.base_confidence
-
-Questi valori rappresentano una stima quantitativa "prior" della qualità del setup (0–100).
-- Se pre_score >= 45 E hai ≥3 conferme solide → puoi aprire
-- Se pre_score < 30 E range_score < 30 → serve rationale molto forte per aprire
-- Gli score sono un SUGGERIMENTO, non un muro invalicabile
-- La tua analisi contestuale ha PRIORITÀ se giustificata
-
-
-## RANGE_SCORE — PLAYBOOK MEAN-REVERSION (RANGE)
-Nel contesto troverai anche:
-market_data[SYMBOL].range_score.LONG.base_confidence
-market_data[SYMBOL].range_score.SHORT.base_confidence
-
-Usa RANGE_SCORE solo per strategie mean-reversion in regime RANGE.
-- Puoi aprire un trade con playbook RANGE se range_score >= 50 O se hai ≥3 conferme di mean-reversion
-- Nel rationale devi indicare esplicitamente: "Playbook: RANGE" oppure "Playbook: TREND".
-
-
-## PLAYBOOK RANGE — PARAMETRI DI RISCHIO (LEVA + DYNAMIC SL)
-Quando scegli "Playbook: RANGE" (mean-reversion su 15m), i parametri TP/SL devono essere ragionati in termini di ROI sul margine (leva inclusa), non solo in % prezzo.
-
-Profili consigliati (scalping 15m):
-A) Majors (BTC/ETH)
-- ROI target tipico: +3% .. +6% (sul margine)
-- ROI rischio iniziale/worst-case: -2% .. -4% (sul margine)
-- time_in_trade_limit_sec: 1800 .. 5400 (30–90 min)
-- trail_activation_roi: +1% .. +2% (attiva presto)
-
-B) Volatili (es. SOL / alts liquide)
-- ROI target tipico: +4% .. +8% (sul margine)
-- ROI rischio iniziale/worst-case: -3% .. -5% (sul margine)
-- time_in_trade_limit_sec: 1800 .. 5400 (30–90 min)
-- trail_activation_roi: +1.5% .. +2.5%
-
-Conversione coerente con la leva:
-- tp_pct (su prezzo) ≈ ROI_target / leverage
-- sl_pct (su prezzo) ≈ ROI_risk / leverage
-
-Importante:
-- Non sovrascrivere o "bloccare" il sistema di stop loss dinamico già implementato: sl_pct è un riferimento iniziale/fallback, mentre la gestione dinamica/trailing può stringere o gestire l'uscita secondo le regole del sistema.
-
-
-Linee guida (scalping 15m, majors):
-- ROI target tipico: +3% .. +6% (sul margine)
-- ROI rischio iniziale/worst-case: -2% .. -4% (sul margine)
-- time_in_trade_limit_sec: 1800 .. 5400 (30–90 min)
-- trail_activation_roi: +1% .. +2% (attiva presto)
-
-Conversione coerente con la leva:
-- tp_pct (su prezzo) ≈ ROI_target / leverage
-- sl_pct (su prezzo) ≈ ROI_risk / leverage
-
-Importante:
-- Non sovrascrivere o "bloccare" il sistema di stop loss dinamico già implementato: sl_pct è un riferimento iniziale/fallback, mentre la gestione dinamica/trailing può stringere o gestire l'uscita secondo le regole del sistema.
-
-
-
+Remember: Focus on quality setups with multiple confirmations. Respect hard constraints. Provide clear rationale for every decision.
 """
 
 
@@ -1582,6 +1458,32 @@ async def decide_batch(payload: AnalysisPayload):
                     logger.info(f"[PRESCORE_BREAKDOWN] {symbol} SHORT={json.dumps(short_breakdown, default=str)[:800]}")
 
         
+        # Create cleaned market_data for LLM (remove labels, keep only numeric metrics)
+        cleaned_market_data_for_llm = {}
+        
+        # Whitelist of numeric fields to include from fase2_metrics
+        fase2_numeric_fields = {"volatility_pct", "atr", "trend_strength", "adx", "ema_20", "ema_200"}
+        
+        for symbol, data in enriched_assets_data.items():
+            # Deep copy to avoid modifying original
+            cleaned_data = {}
+            cleaned_data["technical"] = data.get("technical", {})
+            cleaned_data["fibonacci"] = data.get("fibonacci", {})
+            cleaned_data["gann"] = data.get("gann", {})
+            cleaned_data["news"] = data.get("news", {})
+            cleaned_data["forecast"] = data.get("forecast", {})
+            
+            # Include fase2_metrics but filter to numeric fields only (exclude labels)
+            fase2 = data.get("fase2_metrics", {})
+            if fase2:
+                cleaned_fase2 = {k: v for k, v in fase2.items() if k in fase2_numeric_fields}
+                cleaned_data["fase2_metrics"] = cleaned_fase2
+            
+            # OMIT pre_score and range_score from LLM payload
+            # These will still be used server-side for validation but not sent to AI
+            
+            cleaned_market_data_for_llm[symbol] = cleaned_data
+        
         # 6. Costruisci prompt con TUTTO il contesto
         # Estrai informazioni dal payload (tutte da portfolio e global_data)
         max_positions = payload.global_data.get('max_positions', 3)
@@ -1615,7 +1517,7 @@ async def decide_batch(payload: AnalysisPayload):
             "positions_remaining": max(0, max_positions - positions_open_count),
             "drawdown_pct": drawdown_pct,
             "active_positions": already_open,
-            "market_data": enriched_assets_data,
+            "market_data": cleaned_market_data_for_llm,  # Use cleaned data without labels
             "recent_closes": recent_closes,
             "recent_losses": recent_losses[:5],
             "system_performance": performance,
@@ -1624,78 +1526,9 @@ async def decide_batch(payload: AnalysisPayload):
             "learning_params_meta": payload_learning_params_meta
         }
         
-        # 7. Costruisci contesto per DeepSeek con informazioni sui vincoli
-        constraints_text = f"""
-## VINCOLI ATTUALI DEL SISTEMA
-- Posizioni aperte: {positions_open_count}/{max_positions}
-- Wallet disponibile: ${wallet_available:.2f}
-- Wallet per nuovi trade: ${wallet_available_for_new_trades:.2f}
-- Drawdown corrente: {drawdown_pct:.2f}%
-
-⚠️ IMPORTANTE: 
-- Se positions_open_count >= max_positions, usa blocked_by: ["MAX_POSITIONS"]
-- Se wallet_available_for_new_trades < 10.0 USDT, usa blocked_by: ["INSUFFICIENT_MARGIN"]
-- Se drawdown_pct < -10%, usa blocked_by: ["DRAWDOWN_GUARD"]
-"""
-        
-        # 8. Costruisci contesto per DeepSeek
-        margin_text = ""
-        if not can_open_new_positions:
-            margin_text = f"""
-
-## ⚠️ MARGINE INSUFFICIENTE - NUOVE APERTURE BLOCCATE
-- Available for new trades: {wallet_available_for_new_trades:.2f} USDT
-- Soglia minima: {margin_threshold:.2f} USDT
-- Fonte dati: {wallet_source}
-- **AZIONE RICHIESTA**: Ritorna solo HOLD per tutti gli asset. Non aprire nuove posizioni.
-"""
-        cooldown_text = ""
-        if recent_closes:
-            cooldown_text = "\n\n## CHIUSURE RECENTI (ultimi 15 minuti)\n"
-            for close in recent_closes:
-                cooldown_text += f"- {close['symbol']} {close['side'].upper()} chiuso: {close['reason']}\n"
-            cooldown_text += "\n⚠️ NON riaprire queste posizioni nella stessa direzione! Se tentato, usa blocked_by: ['COOLDOWN']"
-        
-        performance_text = ""
-        if performance.get('total_trades', 0) > 0:
-            performance_text = f"""
-
-## PERFORMANCE SISTEMA RECENTE
-- Totale trade: {performance['total_trades']}
-- Win rate: {performance['win_rate']*100:.1f}%
-- PnL totale: {performance['total_pnl']:.2f}%
-- Max drawdown: {performance['max_drawdown']:.2f}%
-- Trade vincenti: {performance['winning_trades']}
-- Trade perdenti: {performance['losing_trades']}
-"""
-        learning_text = ""
-        learning_policy_text = ""
-        if payload_learning_params_params:
-            learning_policy_text = f"""
-## LEARNING POLICY (guidance, NOT hard rules)
-- Questi parametri sono evoluti dal Learning Agent e servono come guardrail.
-- Puoi scegliere leva e size liberamente, ma se fai override rispetto alla policy devi spiegarlo nel rationale.
-- In generale: se vai contro policy, riduci rischio (leva/size) e aumenta prudenza.
-
-Evolved params (guidance):
-{json.dumps(payload_learning_params_params, indent=2)[:1200]}
-"""
-
-        if learning_insights.get('losing_patterns'):
-            learning_text = "\n\n## PATTERN PERDENTI DA EVITARE\n"
-            for pattern in learning_insights['losing_patterns']:
-                learning_text += f"- {pattern}\n"
-        
-        # Build enhanced system prompt (fixed indentation - moved outside if block)
-        enhanced_system_prompt = (
-            SYSTEM_PROMPT
-            + constraints_text
-            + margin_text
-            + cooldown_text
-            + performance_text
-            + learning_text
-            + learning_policy_text
-        )
+        # Use SYSTEM_PROMPT directly without concatenating constraints/policy text
+        # All necessary context is in prompt_data
+        enhanced_system_prompt = SYSTEM_PROMPT
         
         response = client.chat.completions.create(
             model="deepseek-chat", 
@@ -1725,7 +1558,7 @@ Evolved params (guidance):
                 # Applica guardrail per garantire coerenza
                 d = enforce_decision_consistency(d)
                 
-                # LIMIT entry validation and fallback
+                # LIMIT entry validation - convert to HOLD if invalid (no fallback to MARKET)
                 if d.get("entry_type") == "LIMIT":
                     entry_price = d.get("entry_price")
                     entry_expires_sec = d.get("entry_expires_sec", 240)
@@ -1733,13 +1566,22 @@ Evolved params (guidance):
                     # Validate entry_price
                     # Check for valid positive price (minimum 0.01 to avoid extremely small values)
                     if not entry_price or not isinstance(entry_price, (int, float)) or entry_price < 0.01:
-                        logger.warning(f"⚠️ LIMIT entry without valid entry_price for {d.get('symbol')}: {entry_price}. Falling back to MARKET.")
-                        d["entry_type"] = "MARKET"
+                        logger.warning(f"⚠️ LIMIT entry without valid entry_price for {d.get('symbol')}: {entry_price}. Converting to HOLD.")
+                        # Convert to HOLD instead of fallback to MARKET
+                        d["action"] = "HOLD"
+                        d["entry_type"] = "MARKET"  # Reset to default
                         d["entry_price"] = None
                         d["entry_expires_sec"] = None
-                        # Update rationale to reflect fallback
+                        d["leverage"] = 0
+                        d["size_pct"] = 0
+                        # Add to blocked_by
+                        if "blocked_by" not in d or not isinstance(d["blocked_by"], list):
+                            d["blocked_by"] = []
+                        if "INVALID_ENTRY_PRICE" not in d["blocked_by"]:
+                            d["blocked_by"].append("INVALID_ENTRY_PRICE")
+                        # Update rationale
                         original_rationale = d.get("rationale", "")
-                        d["rationale"] = f"[FALLBACK TO MARKET: invalid entry_price] {original_rationale}"
+                        d["rationale"] = f"Blocked: LIMIT entry without valid entry_price ({entry_price}). Original: {original_rationale}"
                     else:
                         # Validate and clamp entry_expires_sec
                         try:
@@ -1970,6 +1812,102 @@ Evolved params (guidance):
                     
                     # Add to rationale
                     valid_dec.rationale = f"{volatility_blocked_reason} Original: {valid_dec.rationale}"
+                
+                # === SYMBOL_ALREADY_OPEN CHECK ===
+                # One position per symbol hard constraint
+                if valid_dec.action in ["OPEN_LONG", "OPEN_SHORT"]:
+                    # Check if symbol is already in active positions
+                    symbol_already_open = False
+                    for active_sym in already_open:
+                        if active_sym == valid_dec.symbol:
+                            symbol_already_open = True
+                            break
+                    
+                    if symbol_already_open:
+                        logger.warning(f"🚫 Blocked {valid_dec.action} on {valid_dec.symbol}: symbol already has open position")
+                        valid_dec.action = "HOLD"
+                        valid_dec.leverage = 0
+                        valid_dec.size_pct = 0
+                        current_blocked = list(valid_dec.blocked_by or [])
+                        if "SYMBOL_ALREADY_OPEN" not in current_blocked:
+                            current_blocked.append("SYMBOL_ALREADY_OPEN")
+                        valid_dec.blocked_by = current_blocked
+                        valid_dec.rationale = f"Blocked: symbol {valid_dec.symbol} already has open position (one per symbol constraint). Original: {valid_dec.rationale}"
+                
+                # === LEVERAGE CLAMP ===
+                # Apply leverage clamping for OPEN actions
+                if valid_dec.action in ["OPEN_LONG", "OPEN_SHORT"] and valid_dec.leverage > 0:
+                    original_leverage = valid_dec.leverage
+                    valid_dec.leverage = clamp_leverage_by_confidence(valid_dec.leverage, valid_dec.confidence)
+                    if abs(original_leverage - valid_dec.leverage) > 0.1:
+                        logger.info(f"📊 Leverage clamped for {valid_dec.symbol}: {original_leverage:.1f}x → {valid_dec.leverage:.1f}x (confidence={valid_dec.confidence})")
+                
+                # === RISK-BASED SIZING ===
+                # Apply risk-based sizing for OPEN actions (unless ENABLE_RECOVERY_SIZING is true)
+                if valid_dec.action in ["OPEN_LONG", "OPEN_SHORT"] and not ENABLE_RECOVERY_SIZING:
+                    # Calculate risk-based size using entry_price and sl_pct
+                    # For LIMIT orders, use entry_price; for MARKET, estimate from current price
+                    try:
+                        tech_data = enriched_assets_data.get(valid_dec.symbol, {}).get('technical', {})
+                        mark_price = tech_data.get('summary', {}).get('price', 0) if tech_data.get('summary') else 0
+                        
+                        # Use entry_price if LIMIT, otherwise use mark_price
+                        entry_price_for_calc = valid_dec.entry_price if valid_dec.entry_type == "LIMIT" and valid_dec.entry_price else mark_price
+                        
+                        if entry_price_for_calc > 0 and valid_dec.sl_pct and valid_dec.sl_pct > 0:
+                            # Calculate stop loss price
+                            if valid_dec.action == "OPEN_LONG":
+                                stop_loss_price = entry_price_for_calc * (1 - valid_dec.sl_pct)
+                            else:  # OPEN_SHORT
+                                stop_loss_price = entry_price_for_calc * (1 + valid_dec.sl_pct)
+                            
+                            # Get active positions for portfolio risk calculation
+                            active_positions_details = []
+                            try:
+                                # Extract position details from global_data if available
+                                for pos in payload.global_data.get('active_positions_details', []):
+                                    active_positions_details.append(pos)
+                            except Exception:
+                                pass
+                            
+                            # Compute risk-based size
+                            risk_sizing = compute_risk_based_size(
+                                symbol=valid_dec.symbol,
+                                entry_price=entry_price_for_calc,
+                                stop_loss_price=stop_loss_price,
+                                leverage=valid_dec.leverage,
+                                available_for_new_trades=wallet_available_for_new_trades,
+                                active_positions=active_positions_details
+                            )
+                            
+                            # Check if blocked by risk constraints
+                            if risk_sizing.get("blocked_by"):
+                                logger.warning(f"🚫 Risk-based sizing blocked {valid_dec.action} on {valid_dec.symbol}: {risk_sizing.get('blocked_reason')}")
+                                valid_dec.action = "HOLD"
+                                valid_dec.leverage = 0
+                                valid_dec.size_pct = 0
+                                current_blocked = list(valid_dec.blocked_by or [])
+                                for blocker in risk_sizing.get("blocked_by", []):
+                                    if blocker not in current_blocked:
+                                        current_blocked.append(blocker)
+                                valid_dec.blocked_by = current_blocked
+                                valid_dec.rationale = f"Blocked by risk management: {risk_sizing.get('blocked_reason')}. Original: {valid_dec.rationale}"
+                            else:
+                                # Apply risk-based sizing
+                                original_size_pct = valid_dec.size_pct
+                                valid_dec.size_pct = risk_sizing.get("size_pct", 0.0)
+                                logger.info(
+                                    f"📊 Risk-based sizing for {valid_dec.symbol}: "
+                                    f"size_pct {original_size_pct:.3f} → {valid_dec.size_pct:.3f}, "
+                                    f"notional={risk_sizing.get('notional_usdt', 0):.2f} USDT, "
+                                    f"margin={risk_sizing.get('margin_required', 0):.2f} USDT, "
+                                    f"sl_dist={risk_sizing.get('sl_distance_pct', 0)*100:.2f}%, "
+                                    f"risk={risk_sizing.get('new_trade_risk_usdt', 0):.2f} USDT"
+                                )
+                        else:
+                            logger.warning(f"⚠️ Cannot compute risk-based sizing for {valid_dec.symbol}: missing price or sl_pct")
+                    except Exception as e:
+                        logger.error(f"❌ Risk-based sizing error for {valid_dec.symbol}: {e}")
                 
                 valid_decisions.append(valid_dec)
                 
