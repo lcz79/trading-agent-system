@@ -109,8 +109,10 @@ class CryptoTechnicalAnalysisBybit:
         Returns:
             Dict with range_high, range_low, range_mid, range_width_pct,
             distance_to_range_low_pct, distance_to_range_high_pct
+            Returns empty dict if insufficient data (< window candles)
         """
         if df.empty or len(df) < window:
+            # Insufficient data - return empty dict (graceful degradation for backward compatibility)
             return {}
         
         try:
@@ -145,7 +147,8 @@ class CryptoTechnicalAnalysisBybit:
                 "distance_to_range_high_pct": round(distance_to_range_high_pct, 3)
             }
         except Exception as e:
-            print(f"Error calculating range metrics: {e}")
+            # Log error with context for debugging
+            print(f"Error calculating range metrics (len={len(df)}, window={window}): {e}")
             return {}
 
     def calculate_bollinger_bands(self, close: pd.Series, period: int = 20, std_dev: float = 2.0) -> Dict:
