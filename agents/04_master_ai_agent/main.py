@@ -81,6 +81,12 @@ LEVERAGE_CAP_CONFIDENCE_MED = float(os.getenv("LEVERAGE_CAP_CONFIDENCE_MED", "75
 LEVERAGE_MAX_CONFIDENCE_LOW = float(os.getenv("LEVERAGE_MAX_CONFIDENCE_LOW", "4"))
 LEVERAGE_MAX_CONFIDENCE_MED = float(os.getenv("LEVERAGE_MAX_CONFIDENCE_MED", "6"))
 
+# Opportunistic LIMIT configuration (conservative mode)
+OPP_LIMIT_MIN_TP_PCT = float(os.getenv("OPP_LIMIT_MIN_TP_PCT", "0.008"))  # Minimum TP 0.8%
+OPP_LIMIT_MIN_RR = float(os.getenv("OPP_LIMIT_MIN_RR", "1.5"))  # Minimum risk/reward ratio
+OPP_LIMIT_MAX_ENTRY_DISTANCE_PCT = float(os.getenv("OPP_LIMIT_MAX_ENTRY_DISTANCE_PCT", "0.006"))  # Max entry distance 0.6%
+OPP_LIMIT_MIN_EDGE_SCORE = float(os.getenv("OPP_LIMIT_MIN_EDGE_SCORE", "60"))  # Minimum edge score
+
 file_lock = Lock()
 
 
@@ -920,17 +926,21 @@ def validate_opportunistic_limit(
     
     # Gate 1: Must be presented only if action == HOLD
     if action != "HOLD":
+        reason = f"Opportunistic LIMIT only allowed with HOLD, got {action}"
+        logger.info(f"🚫 Opportunistic LIMIT rejected for {symbol}: {reason}")
         return {
             "valid": False,
-            "reasons": [f"Opportunistic LIMIT only allowed with HOLD, got {action}"],
+            "reasons": [reason],
             "modified": None
         }
     
     # Gate 2: Cannot be present if hard blockers active
     if blocked_by:
+        reason = f"Opportunistic LIMIT blocked due to hard constraints: {blocked_by}"
+        logger.info(f"🚫 Opportunistic LIMIT rejected for {symbol}: {reason}")
         return {
             "valid": False,
-            "reasons": [f"Opportunistic LIMIT blocked due to hard constraints: {blocked_by}"],
+            "reasons": [reason],
             "modified": None
         }
     
@@ -978,11 +988,13 @@ def validate_opportunistic_limit(
             "modified": None
         }
     
-    # Gate 5: tp_pct >= 0.010 (1%)
-    if not tp_pct or not isinstance(tp_pct, (int, float)) or tp_pct < 0.010:
+    # Gate 5: tp_pct >= OPP_LIMIT_MIN_TP_PCT (configurable, default 0.008)
+    if not tp_pct or not isinstance(tp_pct, (int, float)) or tp_pct < OPP_LIMIT_MIN_TP_PCT:
+        reason = f"tp_pct {tp_pct} < {OPP_LIMIT_MIN_TP_PCT} (minimum via OPP_LIMIT_MIN_TP_PCT)"
+        logger.info(f"🚫 Opportunistic LIMIT rejected for {symbol}: {reason}")
         return {
             "valid": False,
-            "reasons": [f"tp_pct {tp_pct} < 0.010 (1% minimum)"],
+            "reasons": [reason],
             "modified": None
         }
     
@@ -1001,39 +1013,57 @@ def validate_opportunistic_limit(
             "modified": None
         }
     
-    # Gate 7: rr >= 1.5
-    if not rr or not isinstance(rr, (int, float)) or rr < 1.5:
+    # Gate 7: rr >= OPP_LIMIT_MIN_RR (configurable, default 1.5)
+    if not rr or not isinstance(rr, (int, float)) or rr < OPP_LIMIT_MIN_RR:
+        reason = f"rr {rr} < {OPP_LIMIT_MIN_RR} (minimum via OPP_LIMIT_MIN_RR)"
+        logger.info(f"🚫 Opportunistic LIMIT rejected for {symbol}: {reason}")
         return {
             "valid": False,
-            "reasons": [f"rr {rr} < 1.5 (minimum risk/reward ratio)"],
+            "reasons": [reason],
             "modified": None
         }
     
-    # Gate 8: entry_price distance from current price <= 0.8%
+    # Gate 8: entry_price distance from current price <= OPP_LIMIT_MAX_ENTRY_DISTANCE_PCT (configurable, default 0.006)
     if current_price > 0:
         price_diff_pct = abs(entry_price - current_price) / current_price
-        if price_diff_pct > 0.008:  # 0.8%
+        if price_diff_pct > OPP_LIMIT_MAX_ENTRY_DISTANCE_PCT:
+            reason = f"Entry price {entry_price} too far from current {current_price} ({price_diff_pct*100:.2f}% > {OPP_LIMIT_MAX_ENTRY_DISTANCE_PCT*100:.1f}%)"
+            logger.info(f"🚫 Opportunistic LIMIT rejected for {symbol}: {reason}")
             return {
                 "valid": False,
-                "reasons": [f"Entry price {entry_price} too far from current {current_price} ({price_diff_pct*100:.2f}% > 0.8%)"],
+                "reasons": [reason],
                 "modified": None
             }
     
     # Gate 9: Check volatility (opportunistic LIMIT requires some volatility)
     if volatility_pct < 0.0010:  # Very low volatility
+        reason = f"Volatility too low for opportunistic LIMIT: {volatility_pct:.4f} < 0.0010"
+        logger.info(f"🚫 Opportunistic LIMIT rejected for {symbol}: {reason}")
         return {
             "valid": False,
-            "reasons": [f"Volatility too low for opportunistic LIMIT: {volatility_pct:.4f} < 0.0010"],
+            "reasons": [reason],
             "modified": None
         }
     
-    # Gate 10: edge_score should be reasonable (optional but recommended)
-    if edge_score is not None and (not isinstance(edge_score, (int, float)) or edge_score < 0 or edge_score > 100):
-        reasons.append(f"edge_score {edge_score} out of range [0, 100], ignoring")
+    # Gate 10: edge_score >= OPP_LIMIT_MIN_EDGE_SCORE (configurable, default 60, optional but recommended)
+    if edge_score is not None:
+        if not isinstance(edge_score, (int, float)) or edge_score < 0 or edge_score > 100:
+            reasons.append(f"edge_score {edge_score} out of range [0, 100], ignoring")
+        elif edge_score < OPP_LIMIT_MIN_EDGE_SCORE:
+            reason = f"edge_score {edge_score} < {OPP_LIMIT_MIN_EDGE_SCORE} (minimum via OPP_LIMIT_MIN_EDGE_SCORE)"
+            logger.info(f"🚫 Opportunistic LIMIT rejected for {symbol}: {reason}")
+            return {
+                "valid": False,
+                "reasons": [reason],
+                "modified": None
+            }
     
     # Gate 11: reasoning_bullets should be a list (optional but recommended)
     if reasoning_bullets is not None and not isinstance(reasoning_bullets, list):
         reasons.append("reasoning_bullets should be a list, ignoring")
+    
+    # All gates passed - log success
+    logger.info(f"🎯 Opportunistic LIMIT VALIDATED for {symbol}: {side} @ {entry_price}, RR={rr:.2f}, TP={tp_pct*100:.1f}%, SL={sl_pct*100:.1f}%, edge_score={edge_score}")
     
     # All gates passed
     return {
@@ -1088,7 +1118,12 @@ These go in `soft_blockers` but don't force HOLD:
 
 ## Available Data
 You receive for each symbol:
-- **market_data**: Technical indicators (RSI, MACD, ADX, EMA, ATR, returns) across multiple timeframes (15m, 1h, 4h, 1d)
+- **market_data**: Technical indicators across multiple timeframes (15m, 1h, 4h, 1d):
+  - Price action: RSI, MACD, ADX, EMA (20/50/200), ATR
+  - **Range metrics (15m, 1h)**: range_high, range_low, range_mid, range_width_pct, distance_to_range_low_pct, distance_to_range_high_pct (64-candle window)
+  - **Bollinger Bands (15m, 1h)**: bb_upper, bb_middle, bb_lower, bb_width_pct (20-period, 2 std dev)
+  - **Volume z-score (15m, 1h)**: Standardized volume indicator showing volume spikes/drops relative to 20-period average
+  - Returns and momentum metrics
 - **fibonacci**: Fibonacci retracement/extension levels
 - **gann**: Gann levels and geometric support/resistance
 - **news**: Sentiment analysis from news sources
@@ -1111,9 +1146,10 @@ You receive for each symbol:
 
 ## LIMIT Entry Strategy
 Use LIMIT entries when:
-- Price is near a key support/resistance level (Fibonacci, Gann)
+- Price is near a key support/resistance level (Fibonacci, Gann, range boundaries, Bollinger Bands)
 - You want precise entry at a specific price
 - Market is in RANGE mode (not trending strongly)
+- Volume z-score shows accumulation/distribution at key levels
 
 Use MARKET entries when:
 - Setup is time-sensitive (breakout, momentum)
@@ -1121,23 +1157,31 @@ Use MARKET entries when:
 - No clear support/resistance nearby
 
 ## Opportunistic LIMIT (Conservative Mode for HOLD)
-When your main `action` is HOLD, you MAY propose an **opportunistic_limit** for a conservative LIMIT order:
-- Only if you see a valid opportunity with good risk/reward
-- The opportunistic LIMIT must be a separate object with these fields:
+When your main `action` is HOLD, you **MUST** evaluate whether an **opportunistic_limit** is appropriate:
+- **If YES**: Propose an opportunistic LIMIT with proper justification
+- **If NO**: Set opportunistic_limit to null and include ONE reasoning bullet in your rationale explaining why no opportunistic setup exists
+
+Use the new indicators to identify opportunistic opportunities:
+- **Range metrics**: Entry near range_low (for LONG) or range_high (for SHORT) with distance_to_range_* showing proximity
+- **Bollinger Bands**: Entry near bb_lower (for LONG) or bb_upper (for SHORT), especially if BB width shows volatility
+- **Volume z-score**: High positive z-score at support (accumulation) or resistance (distribution) confirms opportunity
+
+The opportunistic LIMIT must be a separate object with these fields:
   - `side`: "LONG" or "SHORT"
-  - `entry_price`: float (required, specific entry price)
+  - `entry_price`: float (required, specific entry price near key level)
   - `entry_expires_sec`: int (60-300 seconds recommended)
-  - `tp_pct`: float (>= 0.010, minimum 1%)
+  - `tp_pct`: float (>= 0.008, minimum 0.8% via config)
   - `sl_pct`: float (within safe bounds)
-  - `rr`: float (reward/risk ratio, must be >= 1.5)
-  - `edge_score`: int (0-100, your confidence in this opportunistic setup)
-  - `reasoning_bullets`: list of strings explaining the opportunity
+  - `rr`: float (reward/risk ratio, must be >= 1.5 via config)
+  - `edge_score`: int (>= 60 via config, your confidence in this opportunistic setup)
+  - `reasoning_bullets`: list of strings explaining the opportunity (mention range/BB/volume if used)
 
 **Conservative Rules for Opportunistic LIMIT:**
 - Only propose when action=HOLD (not when blocked by hard constraints)
-- RR must be >= 1.5
-- tp_pct must be >= 0.010 (1% minimum)
-- entry_price should be within 0.8% of current price
+- RR must be >= 1.5 (configurable via OPP_LIMIT_MIN_RR)
+- tp_pct must be >= 0.008 or 0.8% (configurable via OPP_LIMIT_MIN_TP_PCT)
+- entry_price should be within 0.6% of current price (configurable via OPP_LIMIT_MAX_ENTRY_DISTANCE_PCT)
+- edge_score must be >= 60 (configurable via OPP_LIMIT_MIN_EDGE_SCORE)
 - entry_expires_sec between 60 and 300
 - Do NOT propose if `blocked_by` contains hard blockers
 - Do NOT propose if volatility too low or crash guard active
@@ -1149,15 +1193,15 @@ When your main `action` is HOLD, you MAY propose an **opportunistic_limit** for 
   "side": "LONG",
   "entry_price": 50100.0,
   "entry_expires_sec": 180,
-  "tp_pct": 0.015,
-  "sl_pct": 0.010,
+  "tp_pct": 0.012,
+  "sl_pct": 0.008,
   "rr": 1.5,
   "edge_score": 72,
   "reasoning_bullets": [
-    "Price near Fib 0.618 support at 50100",
-    "RSI 15m oversold at 32",
-    "Volume spike confirms support test",
-    "1h trend neutral, no opposition"
+    "Price near range_low at 50100 (distance_to_range_low_pct: 0.3%)",
+    "Price touching bb_lower, BB width shows volatility spike",
+    "Volume z-score +2.1 confirms accumulation at support",
+    "RSI 15m oversold at 32, 1h trend neutral"
   ]
 }
 ```
