@@ -335,12 +335,28 @@ def log_api_call(tokens_in: int, tokens_out: int):
 
 
 def save_ai_decision(decision_data):
-    """Salva la decisione AI per visualizzarla nella dashboard"""
+    """Salva la decisione AI per visualizzarla nella dashboard con metadata input per audit"""
     try:
         decisions = []
         if os.path.exists(AI_DECISIONS_FILE):
             with open(AI_DECISIONS_FILE, 'r') as f:
                 decisions = json.load(f)
+        
+        # Prepare input snapshot for audit/correlation
+        input_snapshot = {}
+        if 'input_snapshot' in decision_data:
+            input_snapshot = decision_data['input_snapshot']
+        else:
+            # Create minimal snapshot if not provided
+            input_snapshot = {
+                'entry_price': decision_data.get('entry_price'),
+                'sl_pct': decision_data.get('sl_pct'),
+                'tp_pct': decision_data.get('tp_pct'),
+                'leverage': decision_data.get('leverage'),
+                'entry_type': decision_data.get('entry_type'),
+                'wallet_available': decision_data.get('wallet_available'),
+                'positions_open': decision_data.get('positions_open'),
+            }
         
         # Aggiungi nuova decisione
         decisions.append({
@@ -359,7 +375,10 @@ def save_ai_decision(decision_data):
             'setup_confirmations': decision_data.get('setup_confirmations', []),
             'blocked_by': decision_data.get('blocked_by', []),
             'soft_blockers': decision_data.get('soft_blockers', []),
-            'direction_considered': decision_data.get('direction_considered', 'NONE')
+            'direction_considered': decision_data.get('direction_considered', 'NONE'),
+            # Input snapshot for audit/correlation
+            'input_snapshot': input_snapshot,
+            'prompt_version': 'v3_neutral',  # Track prompt version for A/B testing
         })
         
         # Mantieni solo le ultime 100 decisioni
@@ -1435,6 +1454,36 @@ async def decide_batch(payload: AnalysisPayload):
                     logger.info(f"[PRESCORE_BREAKDOWN] {symbol} SHORT={json.dumps(short_breakdown, default=str)[:800]}")
 
         
+        # Create cleaned market_data for LLM (remove labels, keep only numeric metrics)
+        cleaned_market_data_for_llm = {}
+        for symbol, data in enriched_assets_data.items():
+            # Deep copy to avoid modifying original
+            cleaned_data = {}
+            cleaned_data["technical"] = data.get("technical", {})
+            cleaned_data["fibonacci"] = data.get("fibonacci", {})
+            cleaned_data["gann"] = data.get("gann", {})
+            cleaned_data["news"] = data.get("news", {})
+            cleaned_data["forecast"] = data.get("forecast", {})
+            
+            # Include fase2_metrics but remove "regime" label (keep numeric metrics only)
+            fase2 = data.get("fase2_metrics", {})
+            if fase2:
+                cleaned_fase2 = {
+                    "volatility_pct": fase2.get("volatility_pct"),
+                    "atr": fase2.get("atr"),
+                    "trend_strength": fase2.get("trend_strength"),
+                    "adx": fase2.get("adx"),
+                    "ema_20": fase2.get("ema_20"),
+                    "ema_200": fase2.get("ema_200")
+                    # Intentionally OMIT "regime" label to let AI decide without bias
+                }
+                cleaned_data["fase2_metrics"] = cleaned_fase2
+            
+            # OMIT pre_score and range_score from LLM payload
+            # These will still be used server-side for validation but not sent to AI
+            
+            cleaned_market_data_for_llm[symbol] = cleaned_data
+        
         # 6. Costruisci prompt con TUTTO il contesto
         # Estrai informazioni dal payload (tutte da portfolio e global_data)
         max_positions = payload.global_data.get('max_positions', 3)
@@ -1468,7 +1517,7 @@ async def decide_batch(payload: AnalysisPayload):
             "positions_remaining": max(0, max_positions - positions_open_count),
             "drawdown_pct": drawdown_pct,
             "active_positions": already_open,
-            "market_data": enriched_assets_data,
+            "market_data": cleaned_market_data_for_llm,  # Use cleaned data without labels
             "recent_closes": recent_closes,
             "recent_losses": recent_losses[:5],
             "system_performance": performance,
@@ -1477,78 +1526,9 @@ async def decide_batch(payload: AnalysisPayload):
             "learning_params_meta": payload_learning_params_meta
         }
         
-        # 7. Costruisci contesto per DeepSeek con informazioni sui vincoli
-        constraints_text = f"""
-## VINCOLI ATTUALI DEL SISTEMA
-- Posizioni aperte: {positions_open_count}/{max_positions}
-- Wallet disponibile: ${wallet_available:.2f}
-- Wallet per nuovi trade: ${wallet_available_for_new_trades:.2f}
-- Drawdown corrente: {drawdown_pct:.2f}%
-
-⚠️ IMPORTANTE: 
-- Se positions_open_count >= max_positions, usa blocked_by: ["MAX_POSITIONS"]
-- Se wallet_available_for_new_trades < 10.0 USDT, usa blocked_by: ["INSUFFICIENT_MARGIN"]
-- Se drawdown_pct < -10%, usa blocked_by: ["DRAWDOWN_GUARD"]
-"""
-        
-        # 8. Costruisci contesto per DeepSeek
-        margin_text = ""
-        if not can_open_new_positions:
-            margin_text = f"""
-
-## ⚠️ MARGINE INSUFFICIENTE - NUOVE APERTURE BLOCCATE
-- Available for new trades: {wallet_available_for_new_trades:.2f} USDT
-- Soglia minima: {margin_threshold:.2f} USDT
-- Fonte dati: {wallet_source}
-- **AZIONE RICHIESTA**: Ritorna solo HOLD per tutti gli asset. Non aprire nuove posizioni.
-"""
-        cooldown_text = ""
-        if recent_closes:
-            cooldown_text = "\n\n## CHIUSURE RECENTI (ultimi 15 minuti)\n"
-            for close in recent_closes:
-                cooldown_text += f"- {close['symbol']} {close['side'].upper()} chiuso: {close['reason']}\n"
-            cooldown_text += "\n⚠️ NON riaprire queste posizioni nella stessa direzione! Se tentato, usa blocked_by: ['COOLDOWN']"
-        
-        performance_text = ""
-        if performance.get('total_trades', 0) > 0:
-            performance_text = f"""
-
-## PERFORMANCE SISTEMA RECENTE
-- Totale trade: {performance['total_trades']}
-- Win rate: {performance['win_rate']*100:.1f}%
-- PnL totale: {performance['total_pnl']:.2f}%
-- Max drawdown: {performance['max_drawdown']:.2f}%
-- Trade vincenti: {performance['winning_trades']}
-- Trade perdenti: {performance['losing_trades']}
-"""
-        learning_text = ""
-        learning_policy_text = ""
-        if payload_learning_params_params:
-            learning_policy_text = f"""
-## LEARNING POLICY (guidance, NOT hard rules)
-- Questi parametri sono evoluti dal Learning Agent e servono come guardrail.
-- Puoi scegliere leva e size liberamente, ma se fai override rispetto alla policy devi spiegarlo nel rationale.
-- In generale: se vai contro policy, riduci rischio (leva/size) e aumenta prudenza.
-
-Evolved params (guidance):
-{json.dumps(payload_learning_params_params, indent=2)[:1200]}
-"""
-
-        if learning_insights.get('losing_patterns'):
-            learning_text = "\n\n## PATTERN PERDENTI DA EVITARE\n"
-            for pattern in learning_insights['losing_patterns']:
-                learning_text += f"- {pattern}\n"
-        
-        # Build enhanced system prompt (fixed indentation - moved outside if block)
-        enhanced_system_prompt = (
-            SYSTEM_PROMPT
-            + constraints_text
-            + margin_text
-            + cooldown_text
-            + performance_text
-            + learning_text
-            + learning_policy_text
-        )
+        # Use SYSTEM_PROMPT directly without concatenating constraints/policy text
+        # All necessary context is in prompt_data
+        enhanced_system_prompt = SYSTEM_PROMPT
         
         response = client.chat.completions.create(
             model="deepseek-chat", 
@@ -1578,7 +1558,7 @@ Evolved params (guidance):
                 # Applica guardrail per garantire coerenza
                 d = enforce_decision_consistency(d)
                 
-                # LIMIT entry validation and fallback
+                # LIMIT entry validation - convert to HOLD if invalid (no fallback to MARKET)
                 if d.get("entry_type") == "LIMIT":
                     entry_price = d.get("entry_price")
                     entry_expires_sec = d.get("entry_expires_sec", 240)
@@ -1586,13 +1566,22 @@ Evolved params (guidance):
                     # Validate entry_price
                     # Check for valid positive price (minimum 0.01 to avoid extremely small values)
                     if not entry_price or not isinstance(entry_price, (int, float)) or entry_price < 0.01:
-                        logger.warning(f"⚠️ LIMIT entry without valid entry_price for {d.get('symbol')}: {entry_price}. Falling back to MARKET.")
-                        d["entry_type"] = "MARKET"
+                        logger.warning(f"⚠️ LIMIT entry without valid entry_price for {d.get('symbol')}: {entry_price}. Converting to HOLD.")
+                        # Convert to HOLD instead of fallback to MARKET
+                        d["action"] = "HOLD"
+                        d["entry_type"] = "MARKET"  # Reset to default
                         d["entry_price"] = None
                         d["entry_expires_sec"] = None
-                        # Update rationale to reflect fallback
+                        d["leverage"] = 0
+                        d["size_pct"] = 0
+                        # Add to blocked_by
+                        if "blocked_by" not in d or not isinstance(d["blocked_by"], list):
+                            d["blocked_by"] = []
+                        if "INVALID_ENTRY_PRICE" not in d["blocked_by"]:
+                            d["blocked_by"].append("INVALID_ENTRY_PRICE")
+                        # Update rationale
                         original_rationale = d.get("rationale", "")
-                        d["rationale"] = f"[FALLBACK TO MARKET: invalid entry_price] {original_rationale}"
+                        d["rationale"] = f"Blocked: LIMIT entry without valid entry_price ({entry_price}). Original: {original_rationale}"
                     else:
                         # Validate and clamp entry_expires_sec
                         try:
@@ -1823,6 +1812,102 @@ Evolved params (guidance):
                     
                     # Add to rationale
                     valid_dec.rationale = f"{volatility_blocked_reason} Original: {valid_dec.rationale}"
+                
+                # === SYMBOL_ALREADY_OPEN CHECK ===
+                # One position per symbol hard constraint
+                if valid_dec.action in ["OPEN_LONG", "OPEN_SHORT"]:
+                    # Check if symbol is already in active positions
+                    symbol_already_open = False
+                    for active_sym in already_open:
+                        if active_sym == valid_dec.symbol:
+                            symbol_already_open = True
+                            break
+                    
+                    if symbol_already_open:
+                        logger.warning(f"🚫 Blocked {valid_dec.action} on {valid_dec.symbol}: symbol already has open position")
+                        valid_dec.action = "HOLD"
+                        valid_dec.leverage = 0
+                        valid_dec.size_pct = 0
+                        current_blocked = list(valid_dec.blocked_by or [])
+                        if "SYMBOL_ALREADY_OPEN" not in current_blocked:
+                            current_blocked.append("SYMBOL_ALREADY_OPEN")
+                        valid_dec.blocked_by = current_blocked
+                        valid_dec.rationale = f"Blocked: symbol {valid_dec.symbol} already has open position (one per symbol constraint). Original: {valid_dec.rationale}"
+                
+                # === LEVERAGE CLAMP ===
+                # Apply leverage clamping for OPEN actions
+                if valid_dec.action in ["OPEN_LONG", "OPEN_SHORT"] and valid_dec.leverage > 0:
+                    original_leverage = valid_dec.leverage
+                    valid_dec.leverage = clamp_leverage_by_confidence(valid_dec.leverage, valid_dec.confidence)
+                    if abs(original_leverage - valid_dec.leverage) > 0.1:
+                        logger.info(f"📊 Leverage clamped for {valid_dec.symbol}: {original_leverage:.1f}x → {valid_dec.leverage:.1f}x (confidence={valid_dec.confidence})")
+                
+                # === RISK-BASED SIZING ===
+                # Apply risk-based sizing for OPEN actions (unless ENABLE_RECOVERY_SIZING is true)
+                if valid_dec.action in ["OPEN_LONG", "OPEN_SHORT"] and not ENABLE_RECOVERY_SIZING:
+                    # Calculate risk-based size using entry_price and sl_pct
+                    # For LIMIT orders, use entry_price; for MARKET, estimate from current price
+                    try:
+                        tech_data = enriched_assets_data.get(valid_dec.symbol, {}).get('technical', {})
+                        mark_price = tech_data.get('summary', {}).get('price', 0) if tech_data.get('summary') else 0
+                        
+                        # Use entry_price if LIMIT, otherwise use mark_price
+                        entry_price_for_calc = valid_dec.entry_price if valid_dec.entry_type == "LIMIT" and valid_dec.entry_price else mark_price
+                        
+                        if entry_price_for_calc > 0 and valid_dec.sl_pct and valid_dec.sl_pct > 0:
+                            # Calculate stop loss price
+                            if valid_dec.action == "OPEN_LONG":
+                                stop_loss_price = entry_price_for_calc * (1 - valid_dec.sl_pct)
+                            else:  # OPEN_SHORT
+                                stop_loss_price = entry_price_for_calc * (1 + valid_dec.sl_pct)
+                            
+                            # Get active positions for portfolio risk calculation
+                            active_positions_details = []
+                            try:
+                                # Extract position details from global_data if available
+                                for pos in payload.global_data.get('active_positions_details', []):
+                                    active_positions_details.append(pos)
+                            except Exception:
+                                pass
+                            
+                            # Compute risk-based size
+                            risk_sizing = compute_risk_based_size(
+                                symbol=valid_dec.symbol,
+                                entry_price=entry_price_for_calc,
+                                stop_loss_price=stop_loss_price,
+                                leverage=valid_dec.leverage,
+                                available_for_new_trades=wallet_available_for_new_trades,
+                                active_positions=active_positions_details
+                            )
+                            
+                            # Check if blocked by risk constraints
+                            if risk_sizing.get("blocked_by"):
+                                logger.warning(f"🚫 Risk-based sizing blocked {valid_dec.action} on {valid_dec.symbol}: {risk_sizing.get('blocked_reason')}")
+                                valid_dec.action = "HOLD"
+                                valid_dec.leverage = 0
+                                valid_dec.size_pct = 0
+                                current_blocked = list(valid_dec.blocked_by or [])
+                                for blocker in risk_sizing.get("blocked_by", []):
+                                    if blocker not in current_blocked:
+                                        current_blocked.append(blocker)
+                                valid_dec.blocked_by = current_blocked
+                                valid_dec.rationale = f"Blocked by risk management: {risk_sizing.get('blocked_reason')}. Original: {valid_dec.rationale}"
+                            else:
+                                # Apply risk-based sizing
+                                original_size_pct = valid_dec.size_pct
+                                valid_dec.size_pct = risk_sizing.get("size_pct", 0.0)
+                                logger.info(
+                                    f"📊 Risk-based sizing for {valid_dec.symbol}: "
+                                    f"size_pct {original_size_pct:.3f} → {valid_dec.size_pct:.3f}, "
+                                    f"notional={risk_sizing.get('notional_usdt', 0):.2f} USDT, "
+                                    f"margin={risk_sizing.get('margin_required', 0):.2f} USDT, "
+                                    f"sl_dist={risk_sizing.get('sl_distance_pct', 0)*100:.2f}%, "
+                                    f"risk={risk_sizing.get('new_trade_risk_usdt', 0):.2f} USDT"
+                                )
+                        else:
+                            logger.warning(f"⚠️ Cannot compute risk-based sizing for {valid_dec.symbol}: missing price or sl_pct")
+                    except Exception as e:
+                        logger.error(f"❌ Risk-based sizing error for {valid_dec.symbol}: {e}")
                 
                 valid_decisions.append(valid_dec)
                 
