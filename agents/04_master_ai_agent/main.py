@@ -1,5 +1,41 @@
 import os
 import json
+
+from datetime import datetime
+
+def safe_json_loads(content: str, context_label: str = "unknown") -> dict:
+    """Parse JSON robustly from model output and save raw bad responses to /data."""
+    if content is None:
+        return {}
+
+    try:
+        return json.loads(content)
+    except Exception as e:
+        try:
+            ts = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
+            path = f"/data/deepseek_bad_response_{context_label}_{ts}.txt"
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(content)
+            logger.error(f"AI Critical Error ({context_label}): {repr(e)}. Saved raw response to {path}")
+        except Exception:
+            logger.error(f"AI Critical Error ({context_label}): {repr(e)} (also failed to write raw response)")
+
+    # Second attempt: extract largest JSON object
+    try:
+        s = content.strip()
+        if s.startswith("```"):
+            s = s.strip("`")
+            if s.startswith("json"):
+                s = s[4:].strip()
+        start = s.find("{")
+        end = s.rfind("}")
+        if start != -1 and end != -1 and end > start:
+            return json.loads(s[start:end+1])
+    except Exception as e2:
+        logger.error(f"AI Critical Error ({context_label}) after extraction: {repr(e2)}")
+
+    return {}
+
 import logging
 import httpx
 import asyncio
@@ -1789,7 +1825,7 @@ async def decide_batch(payload: AnalysisPayload):
         content = response.choices[0].message.content
         logger.info(f"AI Raw Response: {content}")
         
-        decision_json = json.loads(content)
+        decision_json = safe_json_loads(content, context_label="decide_batch")
         
         valid_decisions = []
         for d in decision_json.get("decisions", []):
@@ -2467,7 +2503,7 @@ Analizza TUTTI gli indicatori e decidi: HOLD, CLOSE o REVERSE."""
         content = response.choices[0].message.content
         logger.info(f"AI Reverse Analysis Response: {content}")
         
-        decision = json.loads(content)
+        decision = safe_json_loads(content, context_label="reverse_analysis")
         
         # Valida e normalizza la risposta
         action = decision.get("action", "HOLD").upper()
@@ -2704,7 +2740,7 @@ DECIDI: HOLD, CLOSE o REVERSE"""
                     )
                 
                 content = response.choices[0].message.content
-                decision_data = json.loads(content)
+                decision_data = safe_json_loads(content, context_label="position_llm")
                 
                 decision_action = decision_data.get("action", "CLOSE").upper()
                 decision_confidence = decision_data.get("confidence", 50)
