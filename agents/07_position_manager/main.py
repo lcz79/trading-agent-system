@@ -59,6 +59,9 @@ reverse_cooldown_tracker: Dict[str, float] = {}
 # --- COOLDOWN CONFIGURATION ---
 COOLDOWN_MINUTES = int(os.getenv("COOLDOWN_MINUTES", "5"))
 COOLDOWN_FILE = os.getenv("COOLDOWN_FILE", "/data/closed_cooldown.json")
+# --- STRICT ENTRY TYPE MODE ---
+# When enabled, reject orders without explicit entry_type instead of defaulting to MARKET
+STRICT_ENTRY_TYPE = os.getenv("STRICT_ENTRY_TYPE", "0") == "1"
 # --- SCALPING CONFIGURATION ---
 # Default time in trade limit for scalping mode (20-60 minutes)
 DEFAULT_TIME_IN_TRADE_LIMIT_SEC = int(os.getenv("DEFAULT_TIME_IN_TRADE_LIMIT_SEC", "7200"))  # 2 hours default - let trades develop
@@ -556,7 +559,8 @@ def check_pending_entry_orders():
                         entry_price=avg_price,
                         size=cum_exec_qty,
                         leverage=intent.leverage,
-                        cooldown_sec=intent.cooldown_sec
+                        cooldown_sec=intent.cooldown_sec,
+                        entry_type=intent.entry_type  # Persist entry_type from intent
                     )
                     trading_state.add_position(position_metadata)
                     
@@ -2254,6 +2258,46 @@ def open_position(order: OrderRequest):
         is_long_request = ("buy" in order.side.lower()) or ("long" in order.side.lower())
         requested_dir = "long" if is_long_request else "short"
         
+        # === STRICT ENTRY TYPE VALIDATION ===
+        # When STRICT_ENTRY_TYPE is enabled, reject orders without explicit entry_type
+        entry_type = order.entry_type
+        if STRICT_ENTRY_TYPE:
+            if not entry_type or entry_type == "":
+                error_msg = "STRICT_ENTRY_TYPE enabled: entry_type is required (MARKET or LIMIT)"
+                print(f"❌ STRICT MODE REJECTION: {sym_id} {requested_dir} - {error_msg}")
+                
+                # Create and immediately mark intent as FAILED
+                failed_intent = OrderIntent(
+                    intent_id=intent_id,
+                    symbol=sym_id,
+                    side=requested_dir,
+                    action=order.side,
+                    leverage=order.leverage,
+                    size_pct=order.size_pct,
+                    tp_pct=order.tp_pct,
+                    sl_pct=order.sl_pct,
+                    time_in_trade_limit_sec=order.time_in_trade_limit_sec,
+                    cooldown_sec=order.cooldown_sec,
+                    entry_type="",  # Empty to indicate missing
+                    entry_price=order.entry_price,
+                    features=(order.features or {}),
+                    status=OrderStatus.FAILED,
+                    error_message=error_msg
+                )
+                trading_state.add_intent(failed_intent)
+                
+                return {
+                    "status": "error",
+                    "msg": error_msg,
+                    "intent_id": intent_id,
+                    "symbol": sym_id,
+                    "side": requested_dir
+                }
+        
+        # Default to MARKET if not in strict mode
+        if not entry_type:
+            entry_type = "MARKET"
+        
         new_intent = OrderIntent(
             intent_id=intent_id,
             symbol=sym_id,
@@ -2265,7 +2309,7 @@ def open_position(order: OrderRequest):
             sl_pct=order.sl_pct,
             time_in_trade_limit_sec=order.time_in_trade_limit_sec,
             cooldown_sec=order.cooldown_sec,
-            entry_type=order.entry_type or "MARKET",
+            entry_type=entry_type,  # Use validated entry_type
             entry_price=order.entry_price,
             features=(order.features or {}),
         )
@@ -2426,7 +2470,7 @@ def open_position(order: OrderRequest):
         if order.time_in_trade_limit_sec:
             scalping_info = f" MaxTime={order.time_in_trade_limit_sec}s"
         
-        entry_type = order.entry_type or "MARKET"
+        # entry_type was already validated and set during intent creation
         print(f"🚀 ORDER {sym_ccxt}: type={entry_type} side={requested_side} qty={final_qty} SL={sl_str}" + 
               f" idx={pos_idx}{scalping_info}")
         
@@ -2543,7 +2587,8 @@ def open_position(order: OrderRequest):
             entry_price=price,
             size=final_qty,
             leverage=order.leverage,
-            cooldown_sec=order.cooldown_sec
+            cooldown_sec=order.cooldown_sec,
+            entry_type=entry_type  # Persist entry_type (validated earlier)
         )
         trading_state.add_position(position_metadata)
         
