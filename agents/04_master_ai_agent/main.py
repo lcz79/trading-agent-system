@@ -638,6 +638,30 @@ class AnalysisPayload(BaseModel):
     assets_data: Dict[str, Any]
     learning_params: Optional[Dict[str, Any]] = None
 
+# Fast decision models for low-latency path
+class DecisionFast(BaseModel):
+    """Minimal decision schema for fast response - only essential execution fields"""
+    symbol: str
+    action: Literal["OPEN_LONG", "OPEN_SHORT", "HOLD", "CLOSE"]
+    entry_type: Optional[Literal["MARKET", "LIMIT"]] = "MARKET"
+    entry_price: Optional[float] = None  # Required if entry_type=LIMIT
+    leverage: float = 1.0
+    size_pct: float = 0.0
+    tp_pct: Optional[float] = None
+    sl_pct: Optional[float] = None
+    time_in_trade_limit_sec: Optional[int] = None
+    cooldown_sec: Optional[int] = None
+    entry_expires_sec: Optional[int] = None
+    confidence: Optional[int] = None
+    reason_code: Optional[str] = None  # Short reason code (e.g., "LOW_VOL", "STRONG_LONG", "HOLD_WAIT")
+
+class ExplainBatchRequest(BaseModel):
+    """Request for verbose explanation after fast decision"""
+    context_ref: Optional[str] = None  # Optional reference ID to original request
+    fast_decisions: List[Dict[str, Any]]  # The fast decisions returned earlier
+    global_data: Dict[str, Any]  # Same context as fast call
+    assets_data: Dict[str, Any]
+
 class ReverseAnalysisRequest(BaseModel):
     symbol: str
     current_position: Dict[str, Any]
@@ -2326,6 +2350,346 @@ async def decide_batch(payload: AnalysisPayload):
     except Exception as e:
         logger.error(f"AI Critical Error: {e}")
         return {"analysis": "Error", "decisions": []}
+
+
+@app.post("/decide_batch_fast")
+async def decide_batch_fast(payload: AnalysisPayload):
+    """
+    Fast decision endpoint optimized for low latency and minimal response size.
+    
+    Returns minimal JSON with only essential execution parameters.
+    Designed to avoid DeepSeek truncation issues by:
+    - Using compact prompt with explicit JSON-only instructions
+    - Requesting minimal response fields
+    - Enforcing 20-30s timeout budget
+    - Safe fallback: all HOLD on parse failure
+    
+    For verbose rationale/analysis, use /explain_batch after receiving fast decisions.
+    """
+    start_time = datetime.now()
+    
+    try:
+        # 1. Extract context (reuse logic from decide_batch)
+        already_open = payload.global_data.get('already_open', [])
+        recent_closes = load_recent_closes()
+        
+        # Filter recent closes per symbol
+        recent_losses = []
+        try:
+            trading_history = load_json_file(TRADING_HISTORY_FILE, [])
+            recent_losses = [t for t in trading_history if t.get('pnl_pct', 0) < LOSS_THRESHOLD_PCT][-MAX_RECENT_LOSSES:]
+        except Exception:
+            pass
+        
+        # 2. Get learning insights (best effort, skip if slow)
+        learning_insights = {}
+        try:
+            learning_insights = await asyncio.wait_for(get_learning_insights(), timeout=5.0)
+        except Exception as e:
+            logger.warning(f"⚠️ Fast path: skipped learning insights: {e}")
+        
+        # 3. Prepare minimal market data (numeric only, no verbose labels)
+        assets_symbols = list(payload.assets_data.keys())
+        minimal_market_data = {}
+        
+        for symbol, asset_data in payload.assets_data.items():
+            tech = asset_data.get('tech', {})
+            timeframes = tech.get('timeframes', {})
+            tf_15m = timeframes.get('15m', {})
+            
+            # Extract only essential numeric fields for decision
+            minimal_market_data[symbol] = {
+                "price": tf_15m.get('price', 0),
+                "rsi": tf_15m.get('rsi', 50),
+                "trend": tf_15m.get('trend', 'neutral'),
+                "adx": tf_15m.get('adx', 20),
+                "atr": tf_15m.get('atr', 0),
+                "volatility_pct": (tf_15m.get('atr', 0) / tf_15m.get('price', 1)) if tf_15m.get('price', 0) > 0 else 0,
+                "return_5m": tech.get('summary', {}).get('return_5m', 0),
+                "return_15m": tech.get('summary', {}).get('return_15m', 0),
+            }
+        
+        # 4. Build compact prompt for fast response
+        portfolio = payload.global_data.get('portfolio', {})
+        wallet_available = portfolio.get('available_for_new_trades', portfolio.get('available', 0) * 0.95)
+        can_open = wallet_available >= 10.0
+        
+        prompt_data = {
+            "symbols": assets_symbols,
+            "market_data": minimal_market_data,
+            "wallet_available_for_trades": wallet_available,
+            "can_open_new_positions": can_open,
+            "max_positions": payload.global_data.get('max_positions', 3),
+            "positions_open": len(already_open),
+            "already_open": already_open,
+            "recent_closes_count": len(recent_closes)
+        }
+        
+        # Compact system prompt for fast response
+        fast_system_prompt = """You are a crypto trading AI making FAST decisions with MINIMAL output.
+
+RESPOND WITH COMPACT JSON ONLY - NO MARKDOWN, NO EXPLANATIONS, NO EXTRA TEXT.
+
+For each symbol, return:
+{
+  "decisions": [
+    {
+      "symbol": "BTCUSDT",
+      "action": "OPEN_LONG|OPEN_SHORT|HOLD",
+      "entry_type": "MARKET|LIMIT",
+      "entry_price": 42000.0,  // if LIMIT
+      "leverage": 5.0,
+      "size_pct": 0.15,
+      "tp_pct": 0.02,
+      "sl_pct": 0.015,
+      "time_in_trade_limit_sec": 3600,
+      "cooldown_sec": 600,
+      "entry_expires_sec": 240,  // if LIMIT
+      "confidence": 75,
+      "reason_code": "STRONG_LONG"  // short code
+    }
+  ]
+}
+
+REASON CODES: Use short codes like:
+- "STRONG_LONG", "STRONG_SHORT" (high confidence setup)
+- "LOW_VOL" (volatility too low)
+- "NO_MARGIN" (insufficient balance)
+- "HOLD_WAIT" (no clear setup)
+- "CRASH_GUARD" (extreme momentum against)
+
+RULES:
+1. Use MARKET for urgent setups, LIMIT for precise entries at support/resistance
+2. If can_open_new_positions=false, all actions must be HOLD with reason_code="NO_MARGIN"
+3. Never open same symbol that's already_open
+4. Keep confidence realistic: 70-85 for OPEN, 40-60 for HOLD
+5. COMPACT OUTPUT ONLY - every extra character increases truncation risk"""
+
+        user_prompt = f"FAST DECISION FOR: {json.dumps(prompt_data, separators=(',', ':'))}"
+        
+        # 5. Call DeepSeek with tight timeout
+        try:
+            response = await asyncio.wait_for(
+                asyncio.to_thread(
+                    lambda: client.chat.completions.create(
+                        model="deepseek-chat",
+                        messages=[
+                            {"role": "system", "content": fast_system_prompt},
+                            {"role": "user", "content": user_prompt}
+                        ],
+                        response_format={"type": "json_object"},
+                        temperature=0.5,  # Lower temp for consistency
+                        max_tokens=2000  # Limit output size
+                    )
+                ),
+                timeout=25.0  # Hard 25s timeout
+            )
+            
+            # Log API costs
+            if hasattr(response, 'usage') and response.usage:
+                log_api_call(
+                    tokens_in=response.usage.prompt_tokens,
+                    tokens_out=response.usage.completion_tokens
+                )
+            
+            content = response.choices[0].message.content
+            logger.info(f"Fast AI Response ({len(content)} chars): {content[:200]}...")
+            
+            decision_json = safe_json_loads(content, context_label="decide_batch_fast")
+            
+        except asyncio.TimeoutError:
+            logger.error("⏱️ Fast path timeout (25s) - returning all HOLD")
+            decision_json = {}
+        except Exception as e:
+            logger.error(f"❌ Fast path LLM error: {e} - returning all HOLD")
+            decision_json = {}
+        
+        # 6. Parse and validate fast decisions
+        valid_decisions = []
+        decisions_raw = decision_json.get("decisions", [])
+        
+        if not decisions_raw:
+            # Safe fallback: all HOLD
+            logger.warning("⚠️ No decisions from fast AI, generating HOLD fallback")
+            for symbol in assets_symbols:
+                valid_decisions.append(DecisionFast(
+                    symbol=symbol,
+                    action="HOLD",
+                    reason_code="LLM_PARSE_ERROR",
+                    confidence=0
+                ))
+        else:
+            for d_raw in decisions_raw:
+                try:
+                    # Validate and normalize
+                    d = DecisionFast(**d_raw)
+                    valid_decisions.append(d)
+                except Exception as e:
+                    logger.warning(f"Invalid fast decision: {e}")
+                    # Add HOLD for this symbol
+                    symbol = d_raw.get('symbol', 'UNKNOWN')
+                    if symbol in assets_symbols:
+                        valid_decisions.append(DecisionFast(
+                            symbol=symbol,
+                            action="HOLD",
+                            reason_code="PARSE_ERROR",
+                            confidence=0
+                        ))
+        
+        # 7. Ensure all requested symbols have decisions (fill missing with HOLD)
+        decided_symbols = {d.symbol for d in valid_decisions}
+        for symbol in assets_symbols:
+            if symbol not in decided_symbols:
+                valid_decisions.append(DecisionFast(
+                    symbol=symbol,
+                    action="HOLD",
+                    reason_code="MISSING_DECISION",
+                    confidence=0
+                ))
+        
+        elapsed_ms = int((datetime.now() - start_time).total_seconds() * 1000)
+        
+        return {
+            "decisions": [d.model_dump() for d in valid_decisions],
+            "meta": {
+                "processing_time_ms": elapsed_ms,
+                "endpoint": "decide_batch_fast",
+                "symbols_count": len(valid_decisions)
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Fast path critical error: {e}")
+        # Ultimate fallback: all HOLD
+        fallback_decisions = []
+        try:
+            for symbol in payload.assets_data.keys():
+                fallback_decisions.append(DecisionFast(
+                    symbol=symbol,
+                    action="HOLD",
+                    reason_code="CRITICAL_ERROR",
+                    confidence=0
+                ).model_dump())
+        except Exception:
+            pass
+        
+        elapsed_ms = int((datetime.now() - start_time).total_seconds() * 1000)
+        return {
+            "decisions": fallback_decisions,
+            "meta": {
+                "processing_time_ms": elapsed_ms,
+                "endpoint": "decide_batch_fast",
+                "error": str(e)
+            }
+        }
+
+
+@app.post("/explain_batch")
+async def explain_batch(request: ExplainBatchRequest):
+    """
+    Generate verbose explanations for fast decisions.
+    
+    This endpoint is called AFTER /decide_batch_fast to provide:
+    - Detailed rationale for each decision
+    - Full analysis summary
+    - Blocker explanations
+    - Risk factors and confirmations
+    
+    This is non-blocking for the critical decision path.
+    """
+    try:
+        # Build explanation prompt using fast decisions as context
+        fast_decisions = request.fast_decisions
+        symbols = [d.get('symbol') for d in fast_decisions if d.get('symbol')]
+        
+        prompt_data = {
+            "fast_decisions": fast_decisions,
+            "symbols": symbols,
+            "context_ref": request.context_ref
+        }
+        
+        explanation_prompt = f"""You previously made these FAST trading decisions:
+
+{json.dumps(fast_decisions, indent=2)}
+
+Now provide DETAILED EXPLANATIONS for each decision:
+
+For each symbol, explain:
+1. Why this action was chosen
+2. What indicators/confirmations supported it
+3. What risks or blockers were considered
+4. Market regime and setup quality
+
+Return JSON:
+{{
+  "explanations": [
+    {{
+      "symbol": "BTCUSDT",
+      "rationale": "Detailed explanation of decision...",
+      "confirmations": ["RSI oversold", "Support at fib 0.618"],
+      "risk_factors": ["High volatility", "Recent losses"],
+      "blocked_by": [],  // Hard constraints
+      "soft_blockers": []  // Warnings
+    }}
+  ],
+  "analysis_summary": "Overall market analysis..."
+}}"""
+        
+        # Call DeepSeek for explanations (with longer timeout since non-critical)
+        response = await asyncio.wait_for(
+            asyncio.to_thread(
+                lambda: client.chat.completions.create(
+                    model="deepseek-chat",
+                    messages=[
+                        {"role": "system", "content": "You are a crypto trading analyst providing detailed explanations."},
+                        {"role": "user", "content": explanation_prompt}
+                    ],
+                    response_format={"type": "json_object"},
+                    temperature=0.7
+                )
+            ),
+            timeout=60.0  # Longer timeout OK for non-critical path
+        )
+        
+        # Log API costs
+        if hasattr(response, 'usage') and response.usage:
+            log_api_call(
+                tokens_in=response.usage.prompt_tokens,
+                tokens_out=response.usage.completion_tokens
+            )
+        
+        content = response.choices[0].message.content
+        explanation_json = safe_json_loads(content, context_label="explain_batch")
+        
+        return {
+            "explanations": explanation_json.get("explanations", []),
+            "analysis_summary": explanation_json.get("analysis_summary", ""),
+            "meta": {
+                "endpoint": "explain_batch",
+                "symbols_count": len(symbols)
+            }
+        }
+        
+    except asyncio.TimeoutError:
+        logger.warning("⏱️ Explanation timeout (60s) - returning minimal response")
+        return {
+            "explanations": [],
+            "analysis_summary": "Explanation generation timed out",
+            "meta": {
+                "endpoint": "explain_batch",
+                "error": "timeout"
+            }
+        }
+    except Exception as e:
+        logger.error(f"❌ Explanation error: {e}")
+        return {
+            "explanations": [],
+            "analysis_summary": f"Error generating explanations: {str(e)}",
+            "meta": {
+                "endpoint": "explain_batch",
+                "error": str(e)
+            }
+        }
 
 
 @app.post("/analyze_reverse")

@@ -688,8 +688,8 @@ async def analysis_cycle():
                     "error": str(e)
                 }
 
-        # 5. AI DECISION
-        print(f"        🤖 DeepSeek: Analizzando {list(assets_data.keys())}...")
+        # 5. AI DECISION - FAST PATH
+        print(f"        🤖 DeepSeek Fast: Analizzando {list(assets_data.keys())}...")
         try:
             # Garantisce che portfolio abbia tutti i campi necessari
             # Se available_for_new_trades manca, calcola fallback sicuro
@@ -714,17 +714,67 @@ async def analysis_cycle():
                     drawdown_pct = (total_pnl / equity) * 100
                     enhanced_global_data['drawdown_pct'] = drawdown_pct
             
-            resp = await async_post_with_retry(c, f"{URLS['ai']}/decide_batch", json_payload={
+            # Call FAST endpoint with shorter timeout (30s instead of 120s)
+            resp = await async_post_with_retry(c, f"{URLS['ai']}/decide_batch_fast", json_payload={
                     "learning_params": learning_params,
                 "global_data": enhanced_global_data,
                 "assets_data": assets_data
-            }, timeout=120.0)
+            }, timeout=35.0)  # Reduced from 120s to 35s (allows for retries)
             
             dec_data = resp.json()
-            analysis_text = dec_data.get('analysis', 'No text')
             decisions_list = dec_data.get('decisions', [])
-
-            print(f"        📝 AI Says: {analysis_text}")
+            meta = dec_data.get('meta', {})
+            
+            print(f"        ⚡ Fast response: {len(decisions_list)} decisions in {meta.get('processing_time_ms', 0)}ms")
+            
+            # Log fast response event
+            append_ai_decision_event({
+                "type": "AI_BATCH_FAST_RESPONSE",
+                "status": "success",
+                "details": {
+                    "decisions_count": len(decisions_list),
+                    "processing_time_ms": meta.get('processing_time_ms', 0),
+                    "symbols": [d.get('symbol') for d in decisions_list]
+                }
+            })
+            
+            # Optional: Fetch verbose explanations asynchronously (best-effort, non-blocking)
+            # Only if we have valid decisions and not in tight loop
+            if decisions_list and len(decisions_list) > 0:
+                try:
+                    # Fire and forget - don't wait for explanation
+                    async def fetch_explanations():
+                        try:
+                            exp_resp = await c.post(
+                                f"{URLS['ai']}/explain_batch",
+                                json={
+                                    "fast_decisions": decisions_list,
+                                    "global_data": enhanced_global_data,
+                                    "assets_data": assets_data,
+                                    "context_ref": f"cycle_{datetime.now().isoformat()}"
+                                },
+                                timeout=60.0
+                            )
+                            if exp_resp.status_code == 200:
+                                exp_data = exp_resp.json()
+                                print(f"        📝 Explanations fetched: {len(exp_data.get('explanations', []))} items")
+                                append_ai_decision_event({
+                                    "type": "AI_BATCH_EXPLANATION_RESPONSE",
+                                    "status": "success",
+                                    "details": exp_data
+                                })
+                        except Exception as exp_err:
+                            print(f"        ⚠️ Explanation fetch failed (non-critical): {exp_err}")
+                            append_ai_decision_event({
+                                "type": "AI_BATCH_EXPLANATION_ERROR",
+                                "status": "error",
+                                "error": str(exp_err)
+                            })
+                    
+                    # Start explanation fetch in background (don't await)
+                    asyncio.create_task(fetch_explanations())
+                except Exception as bg_err:
+                    print(f"        ⚠️ Could not start background explanation task: {bg_err}")
 
             if not decisions_list:
                 print("        ℹ️ AI non ha generato ordini")
@@ -734,14 +784,15 @@ async def analysis_cycle():
             for d in decisions_list:
                 sym = d['symbol']
                 action = d['action']
-                rationale = d.get('rationale', '')
+                reason_code = d.get('reason_code', '')
                 
                 if action == "CLOSE":
                     print(f"        🛡️ Ignorato CLOSE su {sym} (Auto-Close Disabled)")
                     continue
                 
                 # === OPPORTUNISTIC LIMIT HANDLING ===
-                # Check for opportunistic_limit when action=HOLD
+                # Note: Fast endpoint doesn't support opportunistic_limit (kept for backward compat with full endpoint)
+                # Check for opportunistic_limit when action=HOLD (from legacy /decide_batch calls if any)
                 if action == "HOLD":
                     opportunistic_limit = d.get('opportunistic_limit')
                     if opportunistic_limit and isinstance(opportunistic_limit, dict):
@@ -839,11 +890,11 @@ async def analysis_cycle():
                         
                         continue  # Skip further processing for this HOLD decision
                     
-                    # Log HOLD dovuto a margine insufficiente
-                    if "insufficient" in rationale.lower() and "margin" in rationale.lower():
+                    # Log HOLD based on reason_code (fast response uses reason_code instead of rationale)
+                    if reason_code and reason_code in ["NO_MARGIN", "INSUFFICIENT_MARGIN"]:
                         available_for_new = portfolio.get('available_for_new_trades', portfolio.get('available', 0))
                         available_source = portfolio.get('available_source', 'unknown')
-                        print(f"        🚫 HOLD on {sym}: {rationale}")
+                        print(f"        🚫 HOLD on {sym}: {reason_code}")
                         print(f"           Wallet: available={available_for_new:.2f} USDT (source: {available_source})")
                         continue
                     
