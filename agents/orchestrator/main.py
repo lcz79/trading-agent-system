@@ -77,6 +77,11 @@ pending_critical_closes = {}
 # Tracks last close time per symbol. Format: {symbol: datetime}
 last_close_times = {}
 COOLDOWN_AFTER_CLOSE_SEC = 300  # 5 minuti di cooldown dopo chiusura
+
+# --- FAST DECISION PATH TIMEOUTS ---
+# Timeout for fast AI decision calls (lower than original 120s to fail faster)
+FAST_DECISION_CALL_TIMEOUT_SEC = float(os.getenv("FAST_DECISION_CALL_TIMEOUT_SEC", "35.0"))
+
 # --- AI PARAMS VALIDATION CONFIG (no silent clamping) ---
 # These are used for warnings only - Master AI should follow these ranges
 MIN_LEVERAGE = 3
@@ -714,12 +719,12 @@ async def analysis_cycle():
                     drawdown_pct = (total_pnl / equity) * 100
                     enhanced_global_data['drawdown_pct'] = drawdown_pct
             
-            # Call FAST endpoint with shorter timeout (30s instead of 120s)
+            # Call FAST endpoint with configurable timeout (reduced from 120s)
             resp = await async_post_with_retry(c, f"{URLS['ai']}/decide_batch_fast", json_payload={
                     "learning_params": learning_params,
                 "global_data": enhanced_global_data,
                 "assets_data": assets_data
-            }, timeout=35.0)  # Reduced from 120s to 35s (allows for retries)
+            }, timeout=FAST_DECISION_CALL_TIMEOUT_SEC)  # Configurable timeout (default 35s)
             
             dec_data = resp.json()
             decisions_list = dec_data.get('decisions', [])

@@ -123,6 +123,11 @@ OPP_LIMIT_MIN_RR = float(os.getenv("OPP_LIMIT_MIN_RR", "1.5"))  # Minimum risk/r
 OPP_LIMIT_MAX_ENTRY_DISTANCE_PCT = float(os.getenv("OPP_LIMIT_MAX_ENTRY_DISTANCE_PCT", "0.006"))  # Max entry distance 0.6%
 OPP_LIMIT_MIN_EDGE_SCORE = float(os.getenv("OPP_LIMIT_MIN_EDGE_SCORE", "60"))  # Minimum edge score
 
+# Fast decision path timeouts (to avoid DeepSeek truncation/timeout issues)
+FAST_DECISION_TIMEOUT_SEC = float(os.getenv("FAST_DECISION_TIMEOUT_SEC", "25.0"))  # Hard timeout for fast decisions
+FAST_DECISION_MAX_TOKENS = int(os.getenv("FAST_DECISION_MAX_TOKENS", "2000"))  # Limit LLM output to prevent truncation
+EXPLANATION_TIMEOUT_SEC = float(os.getenv("EXPLANATION_TIMEOUT_SEC", "60.0"))  # Timeout for verbose explanations
+
 file_lock = Lock()
 
 
@@ -2479,10 +2484,10 @@ RULES:
                         ],
                         response_format={"type": "json_object"},
                         temperature=0.5,  # Lower temp for consistency
-                        max_tokens=2000  # Limit output size
+                        max_tokens=FAST_DECISION_MAX_TOKENS  # Configurable limit
                     )
                 ),
-                timeout=25.0  # Hard 25s timeout
+                timeout=FAST_DECISION_TIMEOUT_SEC  # Configurable timeout
             )
             
             # Log API costs
@@ -2648,7 +2653,7 @@ Return JSON:
                     temperature=0.7
                 )
             ),
-            timeout=60.0  # Longer timeout OK for non-critical path
+            timeout=EXPLANATION_TIMEOUT_SEC  # Configurable timeout for non-critical path
         )
         
         # Log API costs
