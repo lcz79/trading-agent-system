@@ -70,6 +70,7 @@ class PositionMetadata:
     time_in_trade_limit_sec: Optional[int] = None
     cooldown_sec: Optional[int] = None
     intent_id: Optional[str] = None
+    entry_type: Optional[str] = None  # MARKET or LIMIT
 
     features: dict = field(default_factory=dict)
     def to_dict(self) -> dict:
@@ -79,7 +80,7 @@ class PositionMetadata:
     def from_dict(cls, data:  dict) -> 'PositionMetadata':
         valid_fields = {'symbol', 'side', 'entry_price', 'size', 'leverage', 'opened_at',
                        'tp_pct', 'sl_pct', 'time_in_trade_limit_sec', 'cooldown_sec', 'intent_id',
-                       'features'}
+                       'entry_type', 'features'}
         data = {k: v for k, v in data.items() if k in valid_fields}
         return cls(**data)
 
@@ -134,7 +135,8 @@ class TradingState:
             "intents": {},
             "positions": {},
             "cooldowns": [],
-            "trailing_stops": {}
+            "trailing_stops": {},
+            "closed_trades": []
         }
 
     def _normalize_state(self, state: Any) -> dict:
@@ -155,6 +157,8 @@ class TradingState:
             state["trailing_stops"] = {}
         if not isinstance(state.get("cooldowns"), list):
             state["cooldowns"] = []
+        if not isinstance(state.get("closed_trades"), list):
+            state["closed_trades"] = []
 
         return state
 
@@ -239,28 +243,32 @@ class TradingState:
                 expired.append(pos)
         return expired
 
-    def prune_positions(self, active_keys: set) -> List[str]:
+    def prune_positions(self, active_keys: set) -> dict:
         """Remove positions from state that are not currently active on the exchange.
 
         active_keys must contain entries like 'ETHUSDT_long' or 'ETHUSDT_short'.
-        Returns list of removed keys.
+        Returns dict with: {"removed_keys": [...], "removed_positions": [...]}
+        where removed_positions are dict snapshots of PositionMetadata.
         """
-        removed: List[str] = []
+        removed_keys: List[str] = []
+        removed_positions: List[dict] = []
         positions = self._state.get("positions", {})
         if not isinstance(positions, dict):
-            return removed
+            return {"removed_keys": [], "removed_positions": []}
         for k in list(positions.keys()):
             if k not in active_keys:
-                removed.append(k)
+                removed_keys.append(k)
+                # Store position data before removing
+                removed_positions.append(dict(positions[k]))
                 del positions[k]
                 # also prune trailing stop state for stale positions
                 ts = self._state.get("trailing_stops", {})
                 if isinstance(ts, dict) and k in ts:
                     del ts[k]
-        if removed:
+        if removed_keys:
             self._state["positions"] = positions
             self._save_state()
-        return removed
+        return {"removed_keys": removed_keys, "removed_positions": removed_positions}
 
     # --- Cooldown Management ---
     def add_cooldown(self, cooldown: Cooldown):
@@ -300,6 +308,30 @@ class TradingState:
         if key in self._state["trailing_stops"]: 
             del self._state["trailing_stops"][key]
             self._save_state()
+
+    # --- Closed Trades Management ---
+    def add_closed_trade(self, record: dict, keep_last: int = 500):
+        """Add a closed trade record to the closed_trades array.
+        
+        Keeps only the last `keep_last` records to prevent unbounded growth.
+        """
+        if not isinstance(self._state.get("closed_trades"), list):
+            self._state["closed_trades"] = []
+        
+        self._state["closed_trades"].append(record)
+        
+        # Trim to keep_last records
+        if len(self._state["closed_trades"]) > keep_last:
+            self._state["closed_trades"] = self._state["closed_trades"][-keep_last:]
+        
+        self._save_state()
+
+    def get_closed_trades(self) -> List[dict]:
+        """Retrieve all closed trade records."""
+        closed_trades = self._state.get("closed_trades", [])
+        if not isinstance(closed_trades, list):
+            return []
+        return closed_trades
 
 def get_trading_state() -> TradingState:
     return TradingState()
