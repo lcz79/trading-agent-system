@@ -209,7 +209,13 @@ def test_backward_compatibility():
 
 
 def test_validator_with_env_overrides():
-    """Test validator with environment variable overrides"""
+    """
+    Test validator with environment variable overrides.
+    
+    Note: This test uses module reloading to verify environment variable reading.
+    While complex, this is necessary to test that the module correctly reads env vars
+    at import time. In production, env vars are set before module import.
+    """
     print("=" * 80)
     print("TEST 5: Validator with Environment Overrides")
     print("=" * 80)

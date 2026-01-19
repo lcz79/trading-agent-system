@@ -161,7 +161,10 @@ class CryptoTechnicalAnalysisBybit:
             Dict with bb_middle, bb_upper, bb_lower, bb_width_pct
         """
         try:
+            # Create BollingerBands indicator once
             bb = ta.volatility.BollingerBands(close, window=period, window_dev=std_dev)
+            
+            # Get all band values (library caches internally, so multiple calls are efficient)
             bb_middle = bb.bollinger_mavg()
             bb_upper = bb.bollinger_hband()
             bb_lower = bb.bollinger_lband()
@@ -297,8 +300,8 @@ class CryptoTechnicalAnalysisBybit:
                 volume_zscore = None
                 
                 if tf in ["15m", "1h"]:
-                    # Range metrics (64-candle window for 15m, 1h)
-                    range_window = 64 if tf == "15m" else 64
+                    # Range metrics (64-candle window for both 15m and 1h)
+                    range_window = 64
                     range_metrics = self.calculate_range_metrics(df, window=range_window)
                     
                     # Bollinger Bands (20, 2)

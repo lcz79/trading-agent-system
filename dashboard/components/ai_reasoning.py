@@ -134,7 +134,7 @@ def render_ai_reasoning():
                 direction_color = '#00ff41' if direction_considered == 'LONG' else '#ff004c'
                 direction_html = f'<p><strong style="color: #00d4ff;">🎯 Direction Considered:</strong> <span style="color: {direction_color};">{html.escape(direction_considered)}</span></p>'
             
-            # Renderizza nuovi indicatori se presenti nell'input snapshot
+            # Render new indicators if present in input snapshot
             indicators_html = ''
             input_snapshot = decision.get('input_snapshot', {})
             market_data = input_snapshot.get('market_data', {})
