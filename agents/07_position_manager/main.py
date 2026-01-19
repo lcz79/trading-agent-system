@@ -59,6 +59,9 @@ reverse_cooldown_tracker: Dict[str, float] = {}
 # --- COOLDOWN CONFIGURATION ---
 COOLDOWN_MINUTES = int(os.getenv("COOLDOWN_MINUTES", "5"))
 COOLDOWN_FILE = os.getenv("COOLDOWN_FILE", "/data/closed_cooldown.json")
+# --- STRICT ENTRY TYPE MODE ---
+# When enabled, reject orders without explicit entry_type instead of defaulting to MARKET
+STRICT_ENTRY_TYPE = os.getenv("STRICT_ENTRY_TYPE", "0") == "1"
 # --- SCALPING CONFIGURATION ---
 # Default time in trade limit for scalping mode (20-60 minutes)
 DEFAULT_TIME_IN_TRADE_LIMIT_SEC = int(os.getenv("DEFAULT_TIME_IN_TRADE_LIMIT_SEC", "7200"))  # 2 hours default - let trades develop
@@ -556,7 +559,8 @@ def check_pending_entry_orders():
                         entry_price=avg_price,
                         size=cum_exec_qty,
                         leverage=intent.leverage,
-                        cooldown_sec=intent.cooldown_sec
+                        cooldown_sec=intent.cooldown_sec,
+                        entry_type=intent.entry_type  # Persist entry_type from intent
                     )
                     trading_state.add_position(position_metadata)
                     
@@ -602,12 +606,41 @@ def state_cleanup_loop():
                         side = (p.get("side") or "").lower()
                         if sym and side in ("long", "short"):
                             active_keys.add(f"{sym}_{side}")
-                removed = trading_state.prune_positions(active_keys)
-                if removed:
-                    print(f"🧹 Pruned stale positions from trading_state: {removed}")
-                    # If a position disappeared from exchange, treat it as closed and apply cooldown
+                
+                # prune_positions now returns dict with removed_keys and removed_positions
+                prune_result = trading_state.prune_positions(active_keys)
+                removed_keys = prune_result.get("removed_keys", [])
+                removed_positions = prune_result.get("removed_positions", [])
+                
+                if removed_keys:
+                    print(f"🧹 Pruned stale positions from trading_state: {removed_keys}")
+                    
+                    # Persist closed trades before discarding position metadata
+                    for pos_data in removed_positions:
+                        try:
+                            # Create closed trade record
+                            closed_trade_record = {
+                                "symbol": pos_data.get("symbol"),
+                                "side": pos_data.get("side"),
+                                "entry_price": pos_data.get("entry_price"),
+                                "entry_type": pos_data.get("entry_type"),
+                                "opened_at": pos_data.get("opened_at"),
+                                "closed_at": datetime.now().isoformat(),
+                                "exit_reason": "stale_prune",
+                                "intent_id": pos_data.get("intent_id"),
+                                "leverage": pos_data.get("leverage"),
+                                "size": pos_data.get("size")
+                            }
+                            
+                            # Add to closed_trades
+                            trading_state.add_closed_trade(closed_trade_record)
+                            print(f"   💾 Persisted closed trade: {pos_data.get('symbol')} {pos_data.get('side')}")
+                        except Exception as e:
+                            print(f"   ⚠️ Failed to persist closed trade: {e}")
+                    
+                    # Apply cooldown for each removed position
                     try:
-                        for key in removed:
+                        for key in removed_keys:
                             if "_" in key:
                                 sym, side = key.split("_", 1)
                                 if side in ("long", "short"):
@@ -2111,22 +2144,83 @@ def get_closed():
     if not exchange:
         return []
     try:
+        # Get Bybit closed PnL data
         res = exchange.private_get_v5_position_closed_pnl({"category": "linear", "limit": 20})
-        if res and str(res.get("retCode")) == "0":
-            items = (res.get("result", {}) or {}).get("list", []) or []
-            clean = []
-            for i in items:
-                ts = int(to_float(i.get("updatedTime"), 0))
-                clean.append({
-                    "datetime": datetime.fromtimestamp(ts / 1000).strftime("%Y-%m-%d %H:%M"),
-                    "symbol": (i.get("symbol") or "").upper(),
-                    "side": (i.get("side") or "").lower(),
-                    "price": to_float(i.get("avgExitPrice"), 0.0),
-                    "closedPnl": to_float(i.get("closedPnl"), 0.0),
-                })
-            return clean
-        return []
-    except Exception:
+        if not res or str(res.get("retCode")) != "0":
+            return []
+        
+        bybit_items = (res.get("result", {}) or {}).get("list", []) or []
+        
+        # Get local closed trades
+        trading_state = get_trading_state()
+        closed_trades = trading_state.get_closed_trades()
+        
+        # Process Bybit items and enrich with local data
+        enriched = []
+        for bybit_item in bybit_items:
+            ts_ms = int(to_float(bybit_item.get("updatedTime"), 0))
+            if ts_ms == 0:
+                continue
+            
+            ts_sec = ts_ms / 1000.0
+            symbol = (bybit_item.get("symbol") or "").upper()
+            side_raw = (bybit_item.get("side") or "").lower()  # buy/sell
+            
+            # Normalize Bybit side to pos_side (buy closes short, sell closes long)
+            pos_side = "short" if side_raw == "buy" else "long"
+            
+            # Base record from Bybit (backward compatible)
+            record = {
+                "datetime": datetime.fromtimestamp(ts_sec).strftime("%Y-%m-%d %H:%M"),
+                "symbol": symbol,
+                "side": side_raw,  # Keep original for backward compatibility
+                "price": to_float(bybit_item.get("avgExitPrice"), 0.0),
+                "closedPnl": to_float(bybit_item.get("closedPnl"), 0.0),
+            }
+            
+            # Try to match with local closed_trades
+            # Matching strategy: symbol + pos_side + nearest close time within 12hr window
+            best_match = None
+            best_match_time_diff = float('inf')
+            time_window_sec = 12 * 3600  # 12 hours
+            
+            for local_trade in closed_trades:
+                local_symbol = local_trade.get("symbol", "").upper()
+                local_side = local_trade.get("side", "").lower()
+                local_closed_at = local_trade.get("closed_at", "")
+                
+                # Match symbol and pos_side
+                if local_symbol != symbol or local_side != pos_side:
+                    continue
+                
+                # Parse local close time
+                try:
+                    local_closed_dt = datetime.fromisoformat(local_closed_at)
+                    local_closed_sec = local_closed_dt.timestamp()
+                    time_diff = abs(local_closed_sec - ts_sec)
+                    
+                    # Within time window and closer than previous best
+                    if time_diff <= time_window_sec and time_diff < best_match_time_diff:
+                        best_match = local_trade
+                        best_match_time_diff = time_diff
+                except Exception:
+                    continue
+            
+            # Enrich record with local data if match found
+            if best_match:
+                record["intent_id"] = best_match.get("intent_id")
+                record["entry_type"] = best_match.get("entry_type")
+                record["entry_price"] = best_match.get("entry_price")
+                record["opened_at"] = best_match.get("opened_at")
+                record["exit_reason"] = best_match.get("exit_reason")
+                record["closed_at"] = best_match.get("closed_at")
+                record["pos_side"] = pos_side  # Add normalized position side
+            
+            enriched.append(record)
+        
+        return enriched
+    except Exception as e:
+        print(f"⚠️ Error in get_closed_positions: {e}")
         return []
 
 @app.get("/get_pending_intents")
@@ -2254,6 +2348,46 @@ def open_position(order: OrderRequest):
         is_long_request = ("buy" in order.side.lower()) or ("long" in order.side.lower())
         requested_dir = "long" if is_long_request else "short"
         
+        # === STRICT ENTRY TYPE VALIDATION ===
+        # When STRICT_ENTRY_TYPE is enabled, reject orders without explicit entry_type
+        entry_type = order.entry_type
+        if STRICT_ENTRY_TYPE:
+            if not entry_type or entry_type == "":
+                error_msg = "STRICT_ENTRY_TYPE enabled: entry_type is required (MARKET or LIMIT)"
+                print(f"❌ STRICT MODE REJECTION: {sym_id} {requested_dir} - {error_msg}")
+                
+                # Create and immediately mark intent as FAILED
+                failed_intent = OrderIntent(
+                    intent_id=intent_id,
+                    symbol=sym_id,
+                    side=requested_dir,
+                    action=order.side,
+                    leverage=order.leverage,
+                    size_pct=order.size_pct,
+                    tp_pct=order.tp_pct,
+                    sl_pct=order.sl_pct,
+                    time_in_trade_limit_sec=order.time_in_trade_limit_sec,
+                    cooldown_sec=order.cooldown_sec,
+                    entry_type="",  # Empty to indicate missing
+                    entry_price=order.entry_price,
+                    features=(order.features or {}),
+                    status=OrderStatus.FAILED,
+                    error_message=error_msg
+                )
+                trading_state.add_intent(failed_intent)
+                
+                return {
+                    "status": "error",
+                    "msg": error_msg,
+                    "intent_id": intent_id,
+                    "symbol": sym_id,
+                    "side": requested_dir
+                }
+        
+        # Default to MARKET if not in strict mode
+        if not entry_type:
+            entry_type = "MARKET"
+        
         new_intent = OrderIntent(
             intent_id=intent_id,
             symbol=sym_id,
@@ -2265,7 +2399,7 @@ def open_position(order: OrderRequest):
             sl_pct=order.sl_pct,
             time_in_trade_limit_sec=order.time_in_trade_limit_sec,
             cooldown_sec=order.cooldown_sec,
-            entry_type=order.entry_type or "MARKET",
+            entry_type=entry_type,  # Use validated entry_type
             entry_price=order.entry_price,
             features=(order.features or {}),
         )
@@ -2426,7 +2560,7 @@ def open_position(order: OrderRequest):
         if order.time_in_trade_limit_sec:
             scalping_info = f" MaxTime={order.time_in_trade_limit_sec}s"
         
-        entry_type = order.entry_type or "MARKET"
+        # entry_type was already validated and set during intent creation
         print(f"🚀 ORDER {sym_ccxt}: type={entry_type} side={requested_side} qty={final_qty} SL={sl_str}" + 
               f" idx={pos_idx}{scalping_info}")
         
@@ -2543,7 +2677,8 @@ def open_position(order: OrderRequest):
             entry_price=price,
             size=final_qty,
             leverage=order.leverage,
-            cooldown_sec=order.cooldown_sec
+            cooldown_sec=order.cooldown_sec,
+            entry_type=entry_type  # Persist entry_type (validated earlier)
         )
         trading_state.add_position(position_metadata)
         
