@@ -134,6 +134,38 @@ def render_ai_reasoning():
                 direction_color = '#00ff41' if direction_considered == 'LONG' else '#ff004c'
                 direction_html = f'<p><strong style="color: #00d4ff;">🎯 Direction Considered:</strong> <span style="color: {direction_color};">{html.escape(direction_considered)}</span></p>'
             
+            # Render new indicators if present in input snapshot
+            indicators_html = ''
+            input_snapshot = decision.get('input_snapshot', {})
+            market_data = input_snapshot.get('market_data', {})
+            
+            # Check for 15m timeframe indicators
+            tf_15m = market_data.get('15m', {})
+            if tf_15m:
+                range_high = tf_15m.get('range_high')
+                range_low = tf_15m.get('range_low')
+                bb_upper = tf_15m.get('bb_upper')
+                bb_lower = tf_15m.get('bb_lower')
+                volume_zscore = tf_15m.get('volume_zscore')
+                
+                if any([range_high, bb_upper, volume_zscore is not None]):
+                    indicators_parts = []
+                    
+                    if range_high and range_low:
+                        range_width = tf_15m.get('range_width_pct', 0)
+                        indicators_parts.append(f'Range: {range_low:.2f}-{range_high:.2f} (width: {range_width:.1f}%)')
+                    
+                    if bb_upper and bb_lower:
+                        bb_width = tf_15m.get('bb_width_pct', 0)
+                        indicators_parts.append(f'BB: {bb_lower:.2f}-{bb_upper:.2f} (width: {bb_width:.1f}%)')
+                    
+                    if volume_zscore is not None:
+                        vol_color = '#00ff41' if volume_zscore > 1 else ('#ff004c' if volume_zscore < -1 else '#ffa500')
+                        indicators_parts.append(f'<span style="color: {vol_color};">Vol Z-Score: {volume_zscore:.2f}</span>')
+                    
+                    if indicators_parts:
+                        indicators_html = f'<p style="font-size: 0.9em;"><strong style="color: #4da6ff;">📊 Market Indicators (15m):</strong> {" | ".join(indicators_parts)}</p>'
+            
             # Renderizza opportunistic_limit se presente
             opportunistic_html = ''
             if opportunistic_limit and isinstance(opportunistic_limit, dict):
@@ -194,6 +226,7 @@ def render_ai_reasoning():
                     {direction_html}
                     {blocked_html}
                     {setup_conf_html}
+                    {indicators_html}
                     {opportunistic_html}
                     {f'<p><strong style="color: #ffa500;">⚡ Leverage:</strong> {leverage}x | <strong style="color: #ffa500;">📈 Size:</strong> {size_pct*100:.1f}%</p>' if action in ['OPEN_LONG', 'OPEN_SHORT'] else ''}
                 </div>

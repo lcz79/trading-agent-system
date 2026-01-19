@@ -98,6 +98,139 @@ class CryptoTechnicalAnalysisBybit:
             "r2": pp + (high - low)
         }
 
+    def calculate_range_metrics(self, df: pd.DataFrame, window: int = 64) -> Dict:
+        """
+        Calculate range structure metrics over a specified window.
+        
+        Args:
+            df: DataFrame with OHLCV data
+            window: Number of candles to look back (default 64)
+        
+        Returns:
+            Dict with range_high, range_low, range_mid, range_width_pct,
+            distance_to_range_low_pct, distance_to_range_high_pct
+            Returns empty dict if insufficient data (< window candles)
+        """
+        if df.empty or len(df) < window:
+            # Insufficient data - return empty dict (graceful degradation for backward compatibility)
+            return {}
+        
+        try:
+            # Get last N candles
+            recent = df.tail(window)
+            current_price = float(df.iloc[-1]["close"])
+            
+            range_high = float(recent["high"].max())
+            range_low = float(recent["low"].min())
+            range_mid = (range_high + range_low) / 2.0
+            
+            # Calculate range width as percentage of mid
+            if range_mid > 0:
+                range_width_pct = ((range_high - range_low) / range_mid) * 100
+            else:
+                range_width_pct = 0
+            
+            # Calculate distance from current price to range boundaries
+            if current_price > 0:
+                distance_to_range_low_pct = ((current_price - range_low) / current_price) * 100
+                distance_to_range_high_pct = ((range_high - current_price) / current_price) * 100
+            else:
+                distance_to_range_low_pct = 0
+                distance_to_range_high_pct = 0
+            
+            return {
+                "range_high": round(range_high, 2),
+                "range_low": round(range_low, 2),
+                "range_mid": round(range_mid, 2),
+                "range_width_pct": round(range_width_pct, 3),
+                "distance_to_range_low_pct": round(distance_to_range_low_pct, 3),
+                "distance_to_range_high_pct": round(distance_to_range_high_pct, 3)
+            }
+        except Exception as e:
+            # Log error with context for debugging
+            print(f"Error calculating range metrics (len={len(df)}, window={window}): {e}")
+            return {}
+
+    def calculate_bollinger_bands(self, close: pd.Series, period: int = 20, std_dev: float = 2.0) -> Dict:
+        """
+        Calculate Bollinger Bands.
+        
+        Args:
+            close: Close price series
+            period: SMA period (default 20)
+            std_dev: Standard deviation multiplier (default 2.0)
+        
+        Returns:
+            Dict with bb_middle, bb_upper, bb_lower, bb_width_pct
+        """
+        try:
+            # Create BollingerBands indicator once
+            bb = ta.volatility.BollingerBands(close, window=period, window_dev=std_dev)
+            
+            # Get all band values (library caches internally, so multiple calls are efficient)
+            bb_middle = bb.bollinger_mavg()
+            bb_upper = bb.bollinger_hband()
+            bb_lower = bb.bollinger_lband()
+            
+            # Get last values
+            last_middle = float(bb_middle.iloc[-1])
+            last_upper = float(bb_upper.iloc[-1])
+            last_lower = float(bb_lower.iloc[-1])
+            
+            # Calculate BB width as percentage of middle
+            if last_middle > 0:
+                bb_width_pct = ((last_upper - last_lower) / last_middle) * 100
+            else:
+                bb_width_pct = 0
+            
+            return {
+                "bb_middle": round(last_middle, 2),
+                "bb_upper": round(last_upper, 2),
+                "bb_lower": round(last_lower, 2),
+                "bb_width_pct": round(bb_width_pct, 3)
+            }
+        except Exception as e:
+            print(f"Error calculating Bollinger Bands: {e}")
+            return {}
+
+    def calculate_volume_zscore(self, volume: pd.Series, window: int = 20) -> float:
+        """
+        Calculate volume z-score (standardized volume).
+        
+        Args:
+            volume: Volume series
+            window: Rolling window for mean/std (default 20)
+        
+        Returns:
+            Volume z-score for the last candle, clamped to reasonable bounds
+        """
+        try:
+            if len(volume) < window:
+                return 0.0
+            
+            # Calculate rolling mean and std
+            vol_mean = volume.rolling(window=window).mean()
+            vol_std = volume.rolling(window=window).std()
+            
+            # Get last values
+            last_vol = float(volume.iloc[-1])
+            last_mean = float(vol_mean.iloc[-1])
+            last_std = float(vol_std.iloc[-1])
+            
+            # Calculate z-score, handle std=0 case
+            if last_std > 0:
+                z_score = (last_vol - last_mean) / last_std
+            else:
+                z_score = 0.0
+            
+            # Clamp to reasonable range [-5, 5]
+            z_score = max(-5.0, min(5.0, z_score))
+            
+            return round(z_score, 3)
+        except Exception as e:
+            print(f"Error calculating volume z-score: {e}")
+            return 0.0
+
     def get_complete_analysis(self, ticker: str) -> Dict:
         df = self.fetch_ohlcv(ticker, "15m", limit=200)
         if df.empty: return {}
@@ -164,6 +297,23 @@ class CryptoTechnicalAnalysisBybit:
                 else: 
                     macd_momentum = "NEUTRAL"
                 
+                # Calculate new indicators for opportunistic limit (15m and 1h only)
+                range_metrics = {}
+                bb_metrics = {}
+                volume_zscore = None
+                
+                if tf in ["15m", "1h"]:
+                    # Range metrics (64-candle window for both 15m and 1h)
+                    range_window = 64
+                    range_metrics = self.calculate_range_metrics(df, window=range_window)
+                    
+                    # Bollinger Bands (20, 2)
+                    bb_metrics = self.calculate_bollinger_bands(df["close"], period=20, std_dev=2.0)
+                    
+                    # Volume z-score (20-period window)
+                    if "volume" in df.columns and len(df) >= 20:
+                        volume_zscore = self.calculate_volume_zscore(df["volume"], window=20)
+                
                 # Calculate crash guard metrics
                 crash_metrics = {}
                 
@@ -202,8 +352,14 @@ class CryptoTechnicalAnalysisBybit:
                     "ema_200": round(float(last["ema_200"]), 2),
                     "atr":  round(float(last["atr_14"]), 4),
                     "adx": round(float(last["adx_14"]), 2),
-                    **crash_metrics  # Include crash guard metrics
+                    **crash_metrics,  # Include crash guard metrics
+                    **range_metrics,  # Include range metrics
+                    **bb_metrics      # Include Bollinger Bands metrics
                 }
+                
+                # Add volume z-score separately if available
+                if volume_zscore is not None:
+                    result["timeframes"][tf]["volume_zscore"] = volume_zscore
             except Exception as e: 
                 print(f"Error analyzing {ticker} on {tf}: {e}")
                 continue
