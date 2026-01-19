@@ -265,9 +265,9 @@ Tester: [name]
 
 ## Known Limitations
 
-1. **Risk-based sizing** requires valid entry_price and sl_pct. If missing, falls back to warning but doesn't block.
-2. **Portfolio risk calculation** for existing positions is approximate (assumes 1% SL if actual SL unknown).
-3. **Confidence-based leverage** requires AI to provide confidence field (usually does).
+1. **Risk-based sizing** requires valid entry_price and sl_pct. If missing, decision proceeds with warning logged but uses AI-proposed size_pct as fallback.
+2. **Portfolio risk calculation** for existing positions is approximate (assumes conservative 1% SL distance if actual SL price unavailable). Future: fetch actual SL from position manager.
+3. **Confidence-based leverage** requires AI to provide confidence field (usually provided, but defaults to 50 if missing).
 
 ## Rollback Procedure
 

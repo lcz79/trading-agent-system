@@ -821,16 +821,18 @@ def compute_risk_based_size(
         # Calculate risk for existing positions (estimate based on SL distance)
         total_existing_risk = 0.0
         for pos in active_positions:
-            # Estimate risk as a fraction of current value (conservative: assume 1% SL distance)
-            # This is approximate since we don't have actual SL prices for existing positions
+            # Estimate risk as a fraction of current value
+            # Conservative assumption: 1% SL distance if actual SL not available
+            # TODO: Fetch actual SL from position manager for more accurate calculation
+            conservative_sl_estimate_pct = 0.01  # 1% conservative estimate
             try:
                 pos_mark_price = float(pos.get('mark_price', 0))
                 pos_size = float(pos.get('size', 0))
                 pos_leverage = float(pos.get('leverage', 1))
                 if pos_mark_price > 0 and pos_size > 0:
                     pos_notional = pos_mark_price * pos_size
-                    # Assume conservative 1% SL for risk estimation
-                    estimated_sl_dist = 0.01
+                    # Use conservative SL distance for risk estimation
+                    estimated_sl_dist = conservative_sl_estimate_pct
                     pos_risk = pos_notional * estimated_sl_dist
                     total_existing_risk += pos_risk
             except Exception:
@@ -848,8 +850,10 @@ def compute_risk_based_size(
                 "blocked_reason": f"Total portfolio risk {total_risk:.2f} USDT > max {MAX_TOTAL_RISK_USDT:.2f} USDT"
             }
         
-        # Calculate size_pct for backward compatibility (notional / available balance)
-        size_pct = notional_usdt / (leverage * available_for_new_trades) if available_for_new_trades > 0 else 0.0
+        # Calculate size_pct for backward compatibility
+        # Formula: size_pct = margin_required / available_for_new_trades
+        # Note: This is the fraction of available margin to use, not the fraction of notional
+        size_pct = margin_required / available_for_new_trades if available_for_new_trades > 0 else 0.0
         size_pct = min(size_pct, 1.0)  # Cap at 100%
         
         return {
@@ -1456,6 +1460,10 @@ async def decide_batch(payload: AnalysisPayload):
         
         # Create cleaned market_data for LLM (remove labels, keep only numeric metrics)
         cleaned_market_data_for_llm = {}
+        
+        # Whitelist of numeric fields to include from fase2_metrics
+        fase2_numeric_fields = {"volatility_pct", "atr", "trend_strength", "adx", "ema_20", "ema_200"}
+        
         for symbol, data in enriched_assets_data.items():
             # Deep copy to avoid modifying original
             cleaned_data = {}
@@ -1465,18 +1473,10 @@ async def decide_batch(payload: AnalysisPayload):
             cleaned_data["news"] = data.get("news", {})
             cleaned_data["forecast"] = data.get("forecast", {})
             
-            # Include fase2_metrics but remove "regime" label (keep numeric metrics only)
+            # Include fase2_metrics but filter to numeric fields only (exclude labels)
             fase2 = data.get("fase2_metrics", {})
             if fase2:
-                cleaned_fase2 = {
-                    "volatility_pct": fase2.get("volatility_pct"),
-                    "atr": fase2.get("atr"),
-                    "trend_strength": fase2.get("trend_strength"),
-                    "adx": fase2.get("adx"),
-                    "ema_20": fase2.get("ema_20"),
-                    "ema_200": fase2.get("ema_200")
-                    # Intentionally OMIT "regime" label to let AI decide without bias
-                }
+                cleaned_fase2 = {k: v for k, v in fase2.items() if k in fase2_numeric_fields}
                 cleaned_data["fase2_metrics"] = cleaned_fase2
             
             # OMIT pre_score and range_score from LLM payload
