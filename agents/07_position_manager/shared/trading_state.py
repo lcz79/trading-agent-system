@@ -125,6 +125,12 @@ class TradingState:
             return
         self._file_lock = threading.Lock()
         self._state = self._load_state()
+        # Persist normalized schema on startup so new fields (e.g. closed_trades)
+        # are written to disk without requiring a later state mutation.
+        try:
+            self._save_state()
+        except Exception:
+            pass
         self._initialized = True
 
     def _default_state(self) -> dict:
