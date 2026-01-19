@@ -566,6 +566,8 @@ class Decision(BaseModel):
     entry_type: Optional[Literal["MARKET", "LIMIT"]] = "MARKET"  # Entry order type
     entry_price: Optional[float] = None  # Entry price for LIMIT orders (required when entry_type=LIMIT)
     entry_expires_sec: Optional[int] = 240  # TTL for LIMIT orders in seconds (default 240, range 10-3600)
+    # Opportunistic LIMIT (conservative mode for HOLD scenarios)
+    opportunistic_limit: Optional[Dict[str, Any]] = None  # Optional opportunistic LIMIT when action=HOLD
     
     @field_validator('blocked_by', mode='before')
     @classmethod
@@ -900,6 +902,147 @@ def clamp_leverage_by_confidence(leverage: float, confidence: Optional[int]) -> 
     return leverage
 
 
+def validate_opportunistic_limit(
+    opportunistic_limit: Optional[Dict[str, Any]],
+    action: str,
+    blocked_by: List[str],
+    symbol: str,
+    current_price: float,
+    volatility_pct: float
+) -> dict:
+    """
+    Validate opportunistic_limit with hard gates (conservative mode).
+    
+    Returns dict with: {valid: bool, reasons: List[str], modified: Optional[dict]}
+    """
+    if opportunistic_limit is None:
+        return {"valid": True, "reasons": [], "modified": None}
+    
+    # Gate 1: Must be presented only if action == HOLD
+    if action != "HOLD":
+        return {
+            "valid": False,
+            "reasons": [f"Opportunistic LIMIT only allowed with HOLD, got {action}"],
+            "modified": None
+        }
+    
+    # Gate 2: Cannot be present if hard blockers active
+    if blocked_by:
+        return {
+            "valid": False,
+            "reasons": [f"Opportunistic LIMIT blocked due to hard constraints: {blocked_by}"],
+            "modified": None
+        }
+    
+    reasons = []
+    modified = dict(opportunistic_limit)
+    
+    # Extract and validate required fields
+    side = opportunistic_limit.get("side")
+    entry_price = opportunistic_limit.get("entry_price")
+    entry_expires_sec = opportunistic_limit.get("entry_expires_sec")
+    tp_pct = opportunistic_limit.get("tp_pct")
+    sl_pct = opportunistic_limit.get("sl_pct")
+    rr = opportunistic_limit.get("rr")
+    edge_score = opportunistic_limit.get("edge_score")
+    reasoning_bullets = opportunistic_limit.get("reasoning_bullets")
+    
+    # Gate 3: Validate required fields are present
+    if not side or side not in ["LONG", "SHORT"]:
+        return {
+            "valid": False,
+            "reasons": [f"Invalid or missing side: {side}"],
+            "modified": None
+        }
+    
+    if not entry_price or not isinstance(entry_price, (int, float)) or entry_price <= 0:
+        return {
+            "valid": False,
+            "reasons": [f"Invalid entry_price: {entry_price}"],
+            "modified": None
+        }
+    
+    # Gate 4: entry_expires_sec between 60 and 300
+    if not entry_expires_sec or not isinstance(entry_expires_sec, (int, float)):
+        return {
+            "valid": False,
+            "reasons": ["Missing entry_expires_sec"],
+            "modified": None
+        }
+    
+    entry_expires_sec = int(entry_expires_sec)
+    if entry_expires_sec < 60 or entry_expires_sec > 300:
+        return {
+            "valid": False,
+            "reasons": [f"entry_expires_sec {entry_expires_sec} not in range [60, 300]"],
+            "modified": None
+        }
+    
+    # Gate 5: tp_pct >= 0.010 (1%)
+    if not tp_pct or not isinstance(tp_pct, (int, float)) or tp_pct < 0.010:
+        return {
+            "valid": False,
+            "reasons": [f"tp_pct {tp_pct} < 0.010 (1% minimum)"],
+            "modified": None
+        }
+    
+    # Gate 6: sl_pct within MIN_SL_DISTANCE_PCT and MAX_SL_DISTANCE_PCT
+    if not sl_pct or not isinstance(sl_pct, (int, float)):
+        return {
+            "valid": False,
+            "reasons": ["Missing sl_pct"],
+            "modified": None
+        }
+    
+    if sl_pct < MIN_SL_DISTANCE_PCT or sl_pct > MAX_SL_DISTANCE_PCT:
+        return {
+            "valid": False,
+            "reasons": [f"sl_pct {sl_pct} not in range [{MIN_SL_DISTANCE_PCT}, {MAX_SL_DISTANCE_PCT}]"],
+            "modified": None
+        }
+    
+    # Gate 7: rr >= 1.5
+    if not rr or not isinstance(rr, (int, float)) or rr < 1.5:
+        return {
+            "valid": False,
+            "reasons": [f"rr {rr} < 1.5 (minimum risk/reward ratio)"],
+            "modified": None
+        }
+    
+    # Gate 8: entry_price distance from current price <= 0.8%
+    if current_price > 0:
+        price_diff_pct = abs(entry_price - current_price) / current_price
+        if price_diff_pct > 0.008:  # 0.8%
+            return {
+                "valid": False,
+                "reasons": [f"Entry price {entry_price} too far from current {current_price} ({price_diff_pct*100:.2f}% > 0.8%)"],
+                "modified": None
+            }
+    
+    # Gate 9: Check volatility (opportunistic LIMIT requires some volatility)
+    if volatility_pct < 0.0010:  # Very low volatility
+        return {
+            "valid": False,
+            "reasons": [f"Volatility too low for opportunistic LIMIT: {volatility_pct:.4f} < 0.0010"],
+            "modified": None
+        }
+    
+    # Gate 10: edge_score should be reasonable (optional but recommended)
+    if edge_score is not None and (not isinstance(edge_score, (int, float)) or edge_score < 0 or edge_score > 100):
+        reasons.append(f"edge_score {edge_score} out of range [0, 100], ignoring")
+    
+    # Gate 11: reasoning_bullets should be a list (optional but recommended)
+    if reasoning_bullets is not None and not isinstance(reasoning_bullets, list):
+        reasons.append("reasoning_bullets should be a list, ignoring")
+    
+    # All gates passed
+    return {
+        "valid": True,
+        "reasons": reasons,  # May contain warnings
+        "modified": modified
+    }
+
+
 SYSTEM_PROMPT = """
 You are an experienced crypto trading AI analyzing market data to make informed trading decisions.
 
@@ -977,6 +1120,48 @@ Use MARKET entries when:
 - High volatility or trending market
 - No clear support/resistance nearby
 
+## Opportunistic LIMIT (Conservative Mode for HOLD)
+When your main `action` is HOLD, you MAY propose an **opportunistic_limit** for a conservative LIMIT order:
+- Only if you see a valid opportunity with good risk/reward
+- The opportunistic LIMIT must be a separate object with these fields:
+  - `side`: "LONG" or "SHORT"
+  - `entry_price`: float (required, specific entry price)
+  - `entry_expires_sec`: int (60-300 seconds recommended)
+  - `tp_pct`: float (>= 0.010, minimum 1%)
+  - `sl_pct`: float (within safe bounds)
+  - `rr`: float (reward/risk ratio, must be >= 1.5)
+  - `edge_score`: int (0-100, your confidence in this opportunistic setup)
+  - `reasoning_bullets`: list of strings explaining the opportunity
+
+**Conservative Rules for Opportunistic LIMIT:**
+- Only propose when action=HOLD (not when blocked by hard constraints)
+- RR must be >= 1.5
+- tp_pct must be >= 0.010 (1% minimum)
+- entry_price should be within 0.8% of current price
+- entry_expires_sec between 60 and 300
+- Do NOT propose if `blocked_by` contains hard blockers
+- Do NOT propose if volatility too low or crash guard active
+- Maximum 1 opportunistic LIMIT per symbol
+
+**Example opportunistic_limit:**
+```json
+{
+  "side": "LONG",
+  "entry_price": 50100.0,
+  "entry_expires_sec": 180,
+  "tp_pct": 0.015,
+  "sl_pct": 0.010,
+  "rr": 1.5,
+  "edge_score": 72,
+  "reasoning_bullets": [
+    "Price near Fib 0.618 support at 50100",
+    "RSI 15m oversold at 32",
+    "Volume spike confirms support test",
+    "1h trend neutral, no opposition"
+  ]
+}
+```
+
 ## Output JSON Format
 ```json
 {
@@ -999,7 +1184,17 @@ Use MARKET entries when:
       "cooldown_sec": 900,
       "entry_type": "MARKET" | "LIMIT",
       "entry_price": 50000.0,
-      "entry_expires_sec": 240
+      "entry_expires_sec": 240,
+      "opportunistic_limit": {
+        "side": "LONG",
+        "entry_price": 50100.0,
+        "entry_expires_sec": 180,
+        "tp_pct": 0.015,
+        "sl_pct": 0.010,
+        "rr": 1.5,
+        "edge_score": 72,
+        "reasoning_bullets": ["reason1", "reason2"]
+      }
     }
   ]
 }
@@ -1909,10 +2104,109 @@ async def decide_batch(payload: AnalysisPayload):
                     except Exception as e:
                         logger.error(f"❌ Risk-based sizing error for {valid_dec.symbol}: {e}")
                 
+                # === OPPORTUNISTIC LIMIT VALIDATION ===
+                # Validate and process opportunistic_limit if present
+                opportunistic_gate_verdict = None
+                if valid_dec.opportunistic_limit:
+                    logger.info(f"🎯 Validating opportunistic_limit for {valid_dec.symbol}")
+                    
+                    # Get current price and volatility for validation
+                    tech_data = enriched_assets_data.get(valid_dec.symbol, {}).get('technical', {})
+                    mark_price = tech_data.get('summary', {}).get('price', 0) if tech_data.get('summary') else 0
+                    fase2_metrics_for_opp = enriched_assets_data.get(valid_dec.symbol, {}).get('fase2_metrics', {})
+                    volatility_pct_for_opp = fase2_metrics_for_opp.get('volatility_pct', 0)
+                    
+                    # Validate opportunistic_limit
+                    validation_result = validate_opportunistic_limit(
+                        opportunistic_limit=valid_dec.opportunistic_limit,
+                        action=valid_dec.action,
+                        blocked_by=valid_dec.blocked_by or [],
+                        symbol=valid_dec.symbol,
+                        current_price=mark_price,
+                        volatility_pct=volatility_pct_for_opp
+                    )
+                    
+                    if validation_result["valid"]:
+                        logger.info(f"✅ Opportunistic LIMIT passed gates for {valid_dec.symbol}")
+                        opportunistic_gate_verdict = {
+                            "passed": True,
+                            "reasons": validation_result["reasons"]
+                        }
+                        
+                        # Apply risk-based sizing to opportunistic LIMIT
+                        opp = valid_dec.opportunistic_limit
+                        try:
+                            opp_side = opp.get("side", "LONG")
+                            opp_entry_price = opp.get("entry_price", mark_price)
+                            opp_sl_pct = opp.get("sl_pct", 0.010)
+                            
+                            # Calculate stop loss price for opportunistic order
+                            if opp_side == "LONG":
+                                opp_stop_loss_price = opp_entry_price * (1 - opp_sl_pct)
+                            else:  # SHORT
+                                opp_stop_loss_price = opp_entry_price * (1 + opp_sl_pct)
+                            
+                            # Use conservative leverage for opportunistic orders (3-4x)
+                            opp_leverage = min(4.0, max(3.0, clamp_leverage_by_confidence(3.5, opp.get("edge_score"))))
+                            
+                            # Get active positions for portfolio risk calculation
+                            active_positions_details = []
+                            try:
+                                for pos in payload.global_data.get('active_positions_details', []):
+                                    active_positions_details.append(pos)
+                            except Exception:
+                                pass
+                            
+                            # Compute risk-based size for opportunistic order
+                            opp_risk_sizing = compute_risk_based_size(
+                                symbol=valid_dec.symbol,
+                                entry_price=opp_entry_price,
+                                stop_loss_price=opp_stop_loss_price,
+                                leverage=opp_leverage,
+                                available_for_new_trades=wallet_available_for_new_trades,
+                                active_positions=active_positions_details
+                            )
+                            
+                            if opp_risk_sizing.get("blocked_by"):
+                                logger.warning(f"🚫 Opportunistic LIMIT blocked by risk sizing: {opp_risk_sizing.get('blocked_reason')}")
+                                valid_dec.opportunistic_limit = None
+                                opportunistic_gate_verdict = {
+                                    "passed": False,
+                                    "reasons": [f"Risk sizing blocked: {opp_risk_sizing.get('blocked_reason')}"]
+                                }
+                            else:
+                                # Update opportunistic_limit with computed sizing
+                                opp["size_pct"] = opp_risk_sizing.get("size_pct", 0.0)
+                                opp["notional_usdt"] = opp_risk_sizing.get("notional_usdt", 0.0)
+                                opp["margin_required"] = opp_risk_sizing.get("margin_required", 0.0)
+                                opp["leverage"] = opp_leverage
+                                valid_dec.opportunistic_limit = opp
+                                
+                                logger.info(
+                                    f"📊 Opportunistic LIMIT sizing for {valid_dec.symbol}: "
+                                    f"side={opp_side}, entry={opp_entry_price:.2f}, "
+                                    f"size_pct={opp['size_pct']:.3f}, leverage={opp_leverage:.1f}x, "
+                                    f"notional={opp['notional_usdt']:.2f} USDT"
+                                )
+                        except Exception as opp_err:
+                            logger.error(f"❌ Opportunistic LIMIT sizing error: {opp_err}")
+                            valid_dec.opportunistic_limit = None
+                            opportunistic_gate_verdict = {
+                                "passed": False,
+                                "reasons": [f"Sizing error: {str(opp_err)}"]
+                            }
+                    else:
+                        logger.warning(f"🚫 Opportunistic LIMIT failed gates: {validation_result['reasons']}")
+                        valid_dec.opportunistic_limit = None
+                        opportunistic_gate_verdict = {
+                            "passed": False,
+                            "reasons": validation_result["reasons"]
+                        }
+                
                 valid_decisions.append(valid_dec)
                 
-                # Salva la decisione per la dashboard (including FASE 2 metrics)
-                save_ai_decision({
+                # Salva la decisione per la dashboard (including FASE 2 metrics and opportunistic_limit)
+                decision_data = {
                     'symbol': valid_dec.symbol,
                     'action': valid_dec.action,
                     'leverage': valid_dec.leverage,
@@ -1932,7 +2226,15 @@ async def decide_batch(payload: AnalysisPayload):
                     'trend_strength': fase2_metrics.get('trend_strength', 0),
                     'volatility_pct': fase2_metrics.get('volatility_pct', 0),
                     'adx': fase2_metrics.get('adx', 0)
-                })
+                }
+                
+                # Add opportunistic_limit data if present
+                if valid_dec.opportunistic_limit:
+                    decision_data['opportunistic_limit'] = valid_dec.opportunistic_limit
+                if opportunistic_gate_verdict:
+                    decision_data['opportunistic_gate'] = opportunistic_gate_verdict
+                
+                save_ai_decision(decision_data)
             except Exception as e: 
                 logger.warning(f"Invalid decision: {e}")
 
