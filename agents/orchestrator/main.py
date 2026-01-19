@@ -740,13 +740,116 @@ async def analysis_cycle():
                     print(f"        🛡️ Ignorato CLOSE su {sym} (Auto-Close Disabled)")
                     continue
                 
-                # Log HOLD dovuto a margine insufficiente
-                if action == "HOLD" and "insufficient" in rationale.lower() and "margin" in rationale.lower():
-                    available_for_new = portfolio.get('available_for_new_trades', portfolio.get('available', 0))
-                    available_source = portfolio.get('available_source', 'unknown')
-                    print(f"        🚫 HOLD on {sym}: {rationale}")
-                    print(f"           Wallet: available={available_for_new:.2f} USDT (source: {available_source})")
+                # === OPPORTUNISTIC LIMIT HANDLING ===
+                # Check for opportunistic_limit when action=HOLD
+                if action == "HOLD":
+                    opportunistic_limit = d.get('opportunistic_limit')
+                    if opportunistic_limit and isinstance(opportunistic_limit, dict):
+                        print(f"        🎯 HOLD with opportunistic_limit for {sym}")
+                        
+                        # Extract opportunistic LIMIT parameters
+                        opp_side = opportunistic_limit.get('side', 'LONG')
+                        opp_entry_price = opportunistic_limit.get('entry_price')
+                        opp_entry_expires_sec = opportunistic_limit.get('entry_expires_sec', 180)
+                        opp_tp_pct = opportunistic_limit.get('tp_pct')
+                        opp_sl_pct = opportunistic_limit.get('sl_pct')
+                        opp_leverage = opportunistic_limit.get('leverage', 3.5)
+                        opp_size_pct = opportunistic_limit.get('size_pct', 0.10)
+                        opp_rr = opportunistic_limit.get('rr', 1.5)
+                        opp_edge_score = opportunistic_limit.get('edge_score', 70)
+                        opp_reasoning = opportunistic_limit.get('reasoning_bullets', [])
+                        
+                        print(f"           Opportunistic {opp_side}: entry={opp_entry_price}, rr={opp_rr:.2f}, edge={opp_edge_score}")
+                        print(f"           Reasoning: {', '.join(opp_reasoning[:3])}")
+                        
+                        # Map to OPEN action for position manager
+                        opp_action = "OPEN_LONG" if opp_side == "LONG" else "OPEN_SHORT"
+                        
+                        # Check if we can execute opportunistic LIMIT (reuse existing guardrails)
+                        # Always fetch open positions before opening (fail-closed)
+                        open_positions = []
+                        try:
+                            _rpos = await c.get(f"{URLS['pos']}/get_open_positions")
+                            _pos_data = _rpos.json() or {}
+                            open_positions = _pos_data.get('details') or []
+                        except Exception as _e:
+                            print(f"        ⚠️ Cannot fetch open positions for opportunistic; skipping: {_e}")
+                            continue
+                        
+                        # Check if symbol already has open position
+                        desired_side = "long" if opp_side == "LONG" else "short"
+                        existing = None
+                        for p0 in (open_positions or []):
+                            if (p0.get('symbol') or '').upper() != sym.upper():
+                                continue
+                            qty = 0.0
+                            for k in ('contracts','size','positionAmt','qty'):
+                                try:
+                                    v = p0.get(k)
+                                    if v is None:
+                                        continue
+                                    qty = float(v)
+                                    break
+                                except Exception:
+                                    pass
+                            if abs(qty) > 0:
+                                existing = p0
+                                break
+                        
+                        if existing is not None:
+                            print(f"        🧯 SKIP opportunistic {opp_side} on {sym}: existing open position detected")
+                            continue
+                        
+                        # Generate intent_id for idempotency
+                        import uuid
+                        intent_id = str(uuid.uuid4())
+                        
+                        print(f"        🔥 EXECUTING opportunistic LIMIT {opp_side} on {sym} [intent:{intent_id[:8]}]...")
+                        
+                        # Build payload for position manager
+                        payload = {
+                            "symbol": sym,
+                            "side": opp_action,
+                            "leverage": opp_leverage,
+                            "size_pct": opp_size_pct,
+                            "intent_id": intent_id,
+                            "entry_type": "LIMIT",
+                            "entry_price": opp_entry_price,
+                            "entry_ttl_sec": opp_entry_expires_sec,
+                            "features": {
+                                "opportunistic": True,
+                                "rr": opp_rr,
+                                "edge_score": opp_edge_score,
+                                "reasoning": opp_reasoning,
+                                "original_action": "HOLD"
+                            }
+                        }
+                        
+                        # Add optional params if present
+                        if opp_tp_pct is not None:
+                            payload["tp_pct"] = opp_tp_pct
+                        if opp_sl_pct is not None:
+                            payload["sl_pct"] = opp_sl_pct
+                        
+                        try:
+                            res = await c.post(f"{URLS['pos']}/open_position", json=payload)
+                            print(f"        ✅ Opportunistic LIMIT result: {res.json()}")
+                        except Exception as opp_exec_err:
+                            print(f"        ❌ Opportunistic LIMIT execution error: {opp_exec_err}")
+                        
+                        continue  # Skip further processing for this HOLD decision
+                    
+                    # Log HOLD dovuto a margine insufficiente
+                    if "insufficient" in rationale.lower() and "margin" in rationale.lower():
+                        available_for_new = portfolio.get('available_for_new_trades', portfolio.get('available', 0))
+                        available_source = portfolio.get('available_source', 'unknown')
+                        print(f"        🚫 HOLD on {sym}: {rationale}")
+                        print(f"           Wallet: available={available_for_new:.2f} USDT (source: {available_source})")
+                        continue
+                    
+                    # Regular HOLD without opportunistic_limit
                     continue
+                
                 if action in ["OPEN_LONG", "OPEN_SHORT"]:
                     # HARD GATE: do not trade if AI itself flagged blockers / low confidence
                     confidence = float(d.get("confidence", 0) or 0)

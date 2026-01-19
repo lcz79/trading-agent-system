@@ -67,6 +67,8 @@ def render_ai_reasoning():
         setup_confirmations = decision.get('setup_confirmations', [])
         blocked_by = decision.get('blocked_by', [])
         direction_considered = decision.get('direction_considered', 'NONE')
+        opportunistic_limit = decision.get('opportunistic_limit')
+        opportunistic_gate = decision.get('opportunistic_gate')
         
         # Gestione speciale per decisioni PORTFOLIO
         if symbol == 'PORTFOLIO':
@@ -132,6 +134,51 @@ def render_ai_reasoning():
                 direction_color = '#00ff41' if direction_considered == 'LONG' else '#ff004c'
                 direction_html = f'<p><strong style="color: #00d4ff;">🎯 Direction Considered:</strong> <span style="color: {direction_color};">{html.escape(direction_considered)}</span></p>'
             
+            # Renderizza opportunistic_limit se presente
+            opportunistic_html = ''
+            if opportunistic_limit and isinstance(opportunistic_limit, dict):
+                opp_side = html.escape(str(opportunistic_limit.get('side', 'N/A')))
+                opp_entry = opportunistic_limit.get('entry_price', 0)
+                opp_rr = opportunistic_limit.get('rr', 0)
+                opp_tp = opportunistic_limit.get('tp_pct', 0)
+                opp_sl = opportunistic_limit.get('sl_pct', 0)
+                opp_edge = opportunistic_limit.get('edge_score', 0)
+                opp_reasoning = opportunistic_limit.get('reasoning_bullets', [])
+                
+                opp_side_color = '#00ff41' if opp_side == 'LONG' else '#ff004c'
+                
+                opp_reasoning_items = ''
+                if opp_reasoning:
+                    opp_reasoning_items = '<ul style="margin: 5px 0; padding-left: 20px;">'
+                    for r in opp_reasoning[:3]:  # Show first 3 bullets
+                        opp_reasoning_items += f'<li>{html.escape(str(r))}</li>'
+                    opp_reasoning_items += '</ul>'
+                
+                # Check gate verdict
+                gate_status = ''
+                if opportunistic_gate:
+                    gate_passed = opportunistic_gate.get('passed', False)
+                    gate_reasons = opportunistic_gate.get('reasons', [])
+                    if gate_passed:
+                        gate_status = f'<span style="color: #00ff41;">✅ Passed Gates</span>'
+                    else:
+                        gate_reasons_str = ', '.join(html.escape(str(r)) for r in gate_reasons[:2])
+                        gate_status = f'<span style="color: #ff6b6b;">❌ Failed: {gate_reasons_str}</span>'
+                
+                opportunistic_html = f'''
+                <div style="margin-top: 10px; padding: 10px; background: rgba(0,255,157,0.05); border-left: 3px solid #00ff9d; border-radius: 4px;">
+                    <strong style="color: #00ff9d;">🎯 Opportunistic LIMIT:</strong> 
+                    <span style="color: {opp_side_color};">{opp_side}</span> @ {opp_entry:.2f} 
+                    {gate_status}
+                    <br/>
+                    <span style="color: #ffa500;">RR: {opp_rr:.2f}</span> | 
+                    <span style="color: #00ff41;">TP: {opp_tp*100:.1f}%</span> | 
+                    <span style="color: #ff004c;">SL: {opp_sl*100:.1f}%</span> | 
+                    <span style="color: #4da6ff;">Edge: {opp_edge}</span>
+                    {opp_reasoning_items}
+                </div>
+                '''
+            
             st.markdown(f"""
             <div class="ai-decision-card">
                 <div class="decision-header">
@@ -147,6 +194,7 @@ def render_ai_reasoning():
                     {direction_html}
                     {blocked_html}
                     {setup_conf_html}
+                    {opportunistic_html}
                     {f'<p><strong style="color: #ffa500;">⚡ Leverage:</strong> {leverage}x | <strong style="color: #ffa500;">📈 Size:</strong> {size_pct*100:.1f}%</p>' if action in ['OPEN_LONG', 'OPEN_SHORT'] else ''}
                 </div>
             </div>
