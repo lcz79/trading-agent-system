@@ -118,4 +118,4 @@ def render_equity_chart(equity_history):
         borderpad=10
     )
     
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width='stretch')

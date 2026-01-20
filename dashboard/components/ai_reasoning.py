@@ -14,6 +14,18 @@ def render_ai_reasoning():
     """, unsafe_allow_html=True)
     
     decisions = get_ai_decisions()
+
+    # --- NEW: filtra via eventi non-decisione (es. AI_BATCH_FAST_RESPONSE) ---
+    def _is_renderable_decision(d: dict) -> bool:
+        if not isinstance(d, dict):
+            return False
+        t = str(d.get("type", "")).strip()
+        if t in {"AI_BATCH_FAST_RESPONSE"}:
+            return False
+        # Deve avere almeno un minimo di contenuto "decisionale"
+        return any(k in d and d.get(k) not in (None, "", [], {}) for k in ("action", "symbol", "rationale", "analysis_summary", "positions"))
+
+    decisions = [d for d in decisions if _is_renderable_decision(d)]
     
     if not decisions:
         st.markdown("""

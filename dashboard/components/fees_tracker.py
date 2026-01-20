@@ -10,6 +10,9 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from bybit_client import BybitClient
 
+# NEW
+from utils.reset_manager import get_reset_date_iso
+
 
 @st.cache_data(ttl=3600)  # Cache 1 ora
 def get_trading_fees() -> Dict[str, float]:
@@ -23,8 +26,14 @@ def get_trading_fees() -> Dict[str, float]:
     try:
         client = BybitClient()
         
-        # Chiama il nuovo metodo che usa l'API executions
-        fees = client.get_execution_fees()
+        reset_iso = get_reset_date_iso()
+
+        # Chiama il metodo executions: se supporta un filtro data, lo usiamo per baselining
+        try:
+            fees = client.get_execution_fees(start_iso=reset_iso)
+        except TypeError:
+            # Fallback: metodo non supporta ancora start_iso; ritorna valori globali
+            fees = client.get_execution_fees()
         
         return fees
     except Exception as e:

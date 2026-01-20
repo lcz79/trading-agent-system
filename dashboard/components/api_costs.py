@@ -7,6 +7,9 @@ import os
 from datetime import datetime, timedelta
 from typing import Dict
 
+# NEW
+from utils.reset_manager import get_reset_date_iso
+
 
 # Path del file di log dei costi API
 # Nota: Il volume shared_data è montato in /data/ per tutti i containers
@@ -29,6 +32,16 @@ def load_api_costs():
     return {'calls': []}
 
 
+
+def _parse_iso(ts: str):
+    try:
+        return datetime.fromisoformat(ts.replace("Z", "+00:00"))
+    except Exception:
+        try:
+            return datetime.fromisoformat(ts.replace("Z", ""))
+        except Exception:
+            return None
+
 @st.cache_data(ttl=3600)  # Cache 1 ora
 def calculate_api_costs() -> Dict[str, Dict[str, float]]:
     """
@@ -50,6 +63,15 @@ def calculate_api_costs() -> Dict[str, Dict[str, float]]:
     today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
     week_start = today_start - timedelta(days=today_start.weekday())
     month_start = today_start.replace(day=1)
+
+    reset_iso = get_reset_date_iso()
+    reset_dt = _parse_iso(reset_iso)
+    if reset_dt:
+        # clamp: i periodi non possono iniziare prima del reset
+        base = reset_dt.replace(tzinfo=None) if reset_dt.tzinfo else reset_dt
+        today_start = max(today_start, base)
+        week_start = max(week_start, base)
+        month_start = max(month_start, base)
     
     costs = {
         'today': {'cost': 0.0, 'calls': 0},
@@ -60,7 +82,13 @@ def calculate_api_costs() -> Dict[str, Dict[str, float]]:
     
     for call in calls:
         try:
-            call_time = datetime.fromisoformat(call['timestamp'])
+            call_time = _parse_iso(call['timestamp'])
+            if not call_time:
+                continue
+
+            # baseline filter: prima del reset NON conta mai
+            if reset_dt and call_time < reset_dt:
+                continue
             cost = (call['tokens_in'] * DEEPSEEK_INPUT_COST + 
                     call['tokens_out'] * DEEPSEEK_OUTPUT_COST)
             
@@ -114,7 +142,7 @@ def render_api_costs_section():
     
     with col4:
         st.metric(
-            "Totale", 
+            "Totale (da reset)", 
             f"€{costs['total']['cost']:.4f}",
             f"{costs['total']['calls']} chiamate"
         )

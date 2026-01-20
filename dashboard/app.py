@@ -2,12 +2,18 @@
 🎯 MITRAGLIERE - Trading Bot AI System
 Dashboard con Design NEON/Cyberpunk
 """
+import warnings
+warnings.filterwarnings("ignore", message="The keyword arguments have been deprecated*")
+warnings.filterwarnings("ignore", message="Please replace `use_container_width` with `width`*")
+
 import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
 import plotly.express as px
 import time
+import os
 from datetime import datetime, timezone
+from utils.reset_manager import get_reset_date_iso, reset_dashboard_local_data
 from bybit_client import BybitClient
 from components.fees_tracker import render_fees_section, get_trading_fees
 from components.api_costs import render_api_costs_section, calculate_api_costs
@@ -531,7 +537,7 @@ with tab1:
         
         st.dataframe(
             df_pos, 
-            use_container_width=True, 
+            width='stretch', 
             hide_index=True,
             column_config={
                 "Unrealized PnL": st.column_config.NumberColumn(format="€%.2f"),
@@ -582,19 +588,52 @@ with tab1:
                     font={'color': '#e0e0e0', 'family': 'Rajdhani'}
                 )
                 
-                st.plotly_chart(fig_gauge, use_container_width=True)
+                st.plotly_chart(fig_gauge, width='stretch')
     else:
         st.markdown('<div class="success-box">🟢 Nessuna posizione attiva al momento</div>', unsafe_allow_html=True)
 
 with tab2:
     st.markdown('<div class="section-title">📈 EQUITY CURVE</div>', unsafe_allow_html=True)
+
+    # Baseline/reset attivo
+    reset_iso = get_reset_date_iso()
+    st.caption(f"📍 Baseline attiva (reset): {reset_iso}")
+
+    with st.expander("🔒 Reset baseline (azzera e riparte da ORA)"):
+        pwd = st.text_input("Password reset", type="password")
+        if st.button("AZZERA TUTTO (dashboard)"):
+            expected = os.getenv("DASHBOARD_RESET_PASSWORD", "")
+            if not expected:
+                st.error("DASHBOARD_RESET_PASSWORD non è impostata (env).")
+            elif pwd != expected:
+                st.error("Password errata.")
+            else:
+                reset_dashboard_local_data()
+                st.cache_data.clear()
+                st.success("Reset completato. Ricarico...")
+                st.rerun()
+
     
     # Filtra dati dal 9 dicembre 2025
-    start_date = datetime(2025, 12, 18, 0, 0, 0, tzinfo=timezone.utc)
+    reset_iso = get_reset_date_iso()
+    start_date = datetime.fromisoformat(reset_iso.replace('Z', '+00:00'))
     hist = client.get_closed_pnl(limit=200, start_date=start_date)
+    st.caption(f"DEBUG closed_pnl records: {0 if not hist else len(hist)}")
     
     if hist and len(hist) > 0:
         df_hist = pd.DataFrame(hist)
+
+        # === NEW: EQUITY + PROFIT % (BASE €100) (trade chiusi) ===
+        base_equity_eur = 100.0
+        total_closed_pnl = float(df_hist['Closed PnL'].sum()) if 'Closed PnL' in df_hist.columns else 0.0
+        equity_base100 = base_equity_eur + total_closed_pnl
+        profit_pct_base100 = ((equity_base100 / base_equity_eur) - 1.0) * 100.0
+
+        m1, m2 = st.columns(2)
+        with m1:
+            st.metric("📈 EQUITY (BASE €100)", f"€{equity_base100:.2f}")
+        with m2:
+            st.metric("✅ PROFIT % (BASE €100)", f"{profit_pct_base100:+.2f}%")
         
         # === 4.1 EQUITY CURVE MIGLIORATO ===
         df_chart = df_hist.iloc[::-1].copy()
@@ -684,7 +723,7 @@ with tab2:
             showlegend=False
         )
         
-        st.plotly_chart(fig_equity, use_container_width=True)
+        st.plotly_chart(fig_equity, width='stretch')
         
         # === 4.2 GRAFICO PNL GIORNALIERO ===
         st.markdown('<div class="section-title">📊 PNL GIORNALIERO</div>', unsafe_allow_html=True)
@@ -758,7 +797,7 @@ with tab2:
             )
         )
         
-        st.plotly_chart(fig_daily, use_container_width=True)
+        st.plotly_chart(fig_daily, width='stretch')
         
         # === 4.3 HEATMAP PERFORMANCE PER ORA ===
         st.markdown('<div class="section-title">🔥 HEATMAP PERFORMANCE PER ORA</div>', unsafe_allow_html=True)
@@ -825,7 +864,7 @@ with tab2:
             font={'color': '#e0e0e0', 'family': 'Rajdhani'}
         )
         
-        st.plotly_chart(fig_heatmap, use_container_width=True)
+        st.plotly_chart(fig_heatmap, width='stretch')
         
         # === 4.4 & 4.5 STATISTICHE AVANZATE + GAUGE METERS ===
         st.markdown('<div class="section-title">📊 STATISTICHE PERFORMANCE AVANZATE</div>', unsafe_allow_html=True)
@@ -953,7 +992,7 @@ with tab2:
                 font={'color': '#e0e0e0', 'family': 'Rajdhani'}
             )
             
-            st.plotly_chart(fig_roi, use_container_width=True)
+            st.plotly_chart(fig_roi, width='stretch')
         
         with col2:
             # Drawdown Gauge
@@ -989,7 +1028,7 @@ with tab2:
                 font={'color': '#e0e0e0', 'family': 'Rajdhani'}
             )
             
-            st.plotly_chart(fig_dd, use_container_width=True)
+            st.plotly_chart(fig_dd, width='stretch')
         
         with col3:
             # Risk Score (Win Rate gauge)
@@ -1028,7 +1067,7 @@ with tab2:
                 font={'color': '#e0e0e0', 'family': 'Rajdhani'}
             )
             
-            st.plotly_chart(fig_risk, use_container_width=True)
+            st.plotly_chart(fig_risk, width='stretch')
         
         # Pie chart distribuzione wins/losses
         st.markdown('<div class="section-title">🥧 DISTRIBUZIONE WIN/LOSS</div>', unsafe_allow_html=True)
@@ -1066,7 +1105,7 @@ with tab2:
             )
         )
         
-        st.plotly_chart(fig_pie, use_container_width=True)
+        st.plotly_chart(fig_pie, width='stretch')
         
     else:
         st.markdown('<div class="info-box">ℹ️ Nessuno storico disponibile dal 9 dicembre 2025</div>', unsafe_allow_html=True)
@@ -1075,7 +1114,8 @@ with tab3:
     st.markdown('<div class="section-title">📜 STORICO POSIZIONI CHIUSE</div>', unsafe_allow_html=True)
     
     # Filtra dati dal 9 dicembre 2025
-    start_date = datetime(2025, 12, 18, 0, 0, 0, tzinfo=timezone.utc)
+    reset_iso = get_reset_date_iso()
+    start_date = datetime.fromisoformat(reset_iso.replace('Z', '+00:00'))
     hist = client.get_closed_pnl(limit=50, start_date=start_date)
     
     if hist:
@@ -1091,7 +1131,7 @@ with tab3:
         
         st.dataframe(
             df_display,
-            use_container_width=True,
+            width='stretch',
             hide_index=True,
             column_config={
                 "Closed PnL": st.column_config.NumberColumn(format="€%.2f"),

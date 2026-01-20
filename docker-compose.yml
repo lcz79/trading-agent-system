@@ -107,6 +107,7 @@ services:
     container_name: orchestrator
     environment:
       - PYTHONUNBUFFERED=1
+      - DASHBOARD_RESET_PASSWORD=181279
     env_file: .env
     restart: always
     volumes:
