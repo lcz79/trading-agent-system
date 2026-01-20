@@ -20,9 +20,14 @@ All decisions are deterministic, logged, and return clear reasons.
 
 from typing import Dict, Optional, Tuple, Literal, List
 from datetime import datetime
+import os
 
 # Hard block thresholds
-MIN_CONFLUENCE_THRESHOLD = 40
+MIN_CONFLUENCE_THRESHOLD_LONG = int(os.getenv('MIN_CONFLUENCE_THRESHOLD_LONG', '40'))
+MIN_CONFLUENCE_THRESHOLD_SHORT = int(os.getenv('MIN_CONFLUENCE_THRESHOLD_SHORT', '40'))
+
+# Backward-compatible alias used by degradation logic
+MIN_CONFLUENCE_THRESHOLD = min(MIN_CONFLUENCE_THRESHOLD_LONG, MIN_CONFLUENCE_THRESHOLD_SHORT)
 MIN_LIMIT_TTL_SEC = 60
 MAX_LIMIT_TTL_SEC = 600
 
@@ -37,7 +42,7 @@ MIN_SL_PCT = 0.005  # 0.5%
 MAX_SL_PCT = 0.05   # 5%
 
 # Degrade thresholds
-MEDIUM_CONFLUENCE_THRESHOLD = 60
+MEDIUM_CONFLUENCE_THRESHOLD = int(os.getenv('MEDIUM_CONFLUENCE_THRESHOLD', '60'))
 DEGRADE_SIZE_MULTIPLIER = 0.6  # Reduce size by 40%
 
 
@@ -82,8 +87,10 @@ def verify_confluence(
     Returns:
         Tuple of (passes, reason)
     """
-    if confluence_score < MIN_CONFLUENCE_THRESHOLD:
-        return False, f"Confluence too low: {confluence_score} < {MIN_CONFLUENCE_THRESHOLD}"
+    d = (direction or "").upper()
+    min_thr = MIN_CONFLUENCE_THRESHOLD_LONG if d == "LONG" else MIN_CONFLUENCE_THRESHOLD_SHORT
+    if confluence_score < min_thr:
+        return False, f"Confluence too low: {confluence_score} < {min_thr}"
     return True, None
 
 

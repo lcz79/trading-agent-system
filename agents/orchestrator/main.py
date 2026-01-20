@@ -1,4 +1,4 @@
-import asyncio, httpx, json, os, uuid
+import asyncio, httpx, json, os, uuid as uuidlib
 from datetime import datetime
 import re
 from datetime import timedelta
@@ -718,19 +718,56 @@ async def analysis_cycle():
                 if equity > 0:
                     drawdown_pct = (total_pnl / equity) * 100
                     enhanced_global_data['drawdown_pct'] = drawdown_pct
-            
-            # Call FAST endpoint with configurable timeout (reduced from 120s)
-            resp = await async_post_with_retry(c, f"{URLS['ai']}/decide_batch_fast", json_payload={
-                    "learning_params": learning_params,
-                "global_data": enhanced_global_data,
-                "assets_data": assets_data
-            }, timeout=FAST_DECISION_CALL_TIMEOUT_SEC)  # Configurable timeout (default 35s)
-            
-            dec_data = resp.json()
-            decisions_list = dec_data.get('decisions', [])
-            meta = dec_data.get('meta', {})
+
+            # Call FAST endpoint in chunks (3+3+4) to reduce per-request latency/timeouts
+            symbols_all = list(assets_data.keys())
+            CHUNK_SIZE = int(os.getenv("FAST_CHUNK_SIZE", "2"))
+            chunks = [symbols_all[i:i+CHUNK_SIZE] for i in range(0, len(symbols_all), CHUNK_SIZE)]
+            chunks = [c for c in chunks if c]
+            FAST_CHUNK_DELAY_SEC = float(os.getenv("FAST_CHUNK_DELAY_SEC", "1.0"))
+
+            decisions_list = []
+            meta = {"processing_time_ms": 0, "chunks": len(chunks)}
+
+            for i, sym_chunk in enumerate(chunks, start=1):
+                assets_data_chunk = {k: assets_data[k] for k in sym_chunk if k in assets_data}
+                print(f"        🧩 Fast chunk {i}/{len(chunks)}: {list(assets_data_chunk.keys())}")
+
+                resp = await async_post_with_retry(
+                    c,
+                    f"{URLS['ai']}/decide_batch_fast",
+                    json_payload={
+                        "learning_params": learning_params,
+                        "global_data": enhanced_global_data,
+                        "assets_data": assets_data_chunk
+                    },
+                    timeout=FAST_DECISION_CALL_TIMEOUT_SEC
+                )
+
+                dec_data = resp.json()
+                try:
+                    _decisions = dec_data.get("decisions", []) or []
+                    _sample = _decisions[0] if _decisions else None
+                    print(f"        🧪 FAST endpoint debug: status={resp.status_code} keys={list(dec_data.keys())} decisions_n={len(_decisions)} sample={_sample}")
+                except Exception as _e:
+                    print(f"        🧪 FAST endpoint debug: could not inspect response: {_e}")
+                chunk_decisions = dec_data.get("decisions", []) or []
+                chunk_meta = dec_data.get("meta", {}) or {}
+                meta["processing_time_ms"] += int(chunk_meta.get("processing_time_ms", 0) or 0)
+
+                decisions_list.extend(chunk_decisions)
+
+                if i < len(chunks) and FAST_CHUNK_DELAY_SEC > 0:
+                    await asyncio.sleep(FAST_CHUNK_DELAY_SEC)
             
             print(f"        ⚡ Fast response: {len(decisions_list)} decisions in {meta.get('processing_time_ms', 0)}ms")
+            try:
+                from collections import Counter
+                _ac = Counter([str(d.get("action")) for d in decisions_list])
+                print(f"        🎬 Fast actions: {_ac}")
+            except Exception as _e:
+                print(f"        ⚠️ Could not summarize actions: {_e}")
+
             
             # Log fast response event
             append_ai_decision_event({
@@ -858,8 +895,7 @@ async def analysis_cycle():
                             continue
                         
                         # Generate intent_id for idempotency
-                        import uuid
-                        intent_id = str(uuid.uuid4())
+                        intent_id = str(uuidlib.uuid4())
                         
                         print(f"        🔥 EXECUTING opportunistic LIMIT {opp_side} on {sym} [intent:{intent_id[:8]}]...")
                         
@@ -914,9 +950,18 @@ async def analysis_cycle():
                     if blocked_by:
                         print(f"        🧱 SKIP {action} on {sym}: blocked_by={blocked_by}")
                         continue
-                    if confidence < 70:
-                        print(f"        🧱 SKIP {action} on {sym}: low confidence ({confidence} < 70)")
-                        continue                    # Always fetch open positions before opening (fail-closed).
+                    # Confidence gate (configurable; LIMIT can be lower than MARKET)
+                    entry_type = (d.get('entry_type') or 'MARKET').upper()
+                    try:
+                        min_conf_market = float(os.getenv('FAST_MIN_CONF_MARKET', '70'))
+                        min_conf_limit = float(os.getenv('FAST_MIN_CONF_LIMIT', '60'))
+                    except Exception:
+                        min_conf_market = 70.0
+                        min_conf_limit = 60.0
+                    min_conf = min_conf_limit if entry_type == 'LIMIT' else min_conf_market
+                    if confidence < min_conf:
+                        print(f"        🧱 SKIP {action} on {sym}: low confidence ({confidence:.1f} < {min_conf:.1f})")
+                        continue
                     open_positions = []  # default to avoid NameError if fetch fails
                     try:
                         _rpos = await c.get(f"{URLS['pos']}/get_open_positions")
@@ -1188,7 +1233,7 @@ async def analysis_cycle():
                         print(f"        ✅ Safety gates passed for {action} on {sym}")
                     
                     # Generate intent_id for idempotency
-                    intent_id = str(uuid.uuid4())
+                    intent_id = str(uuidlib.uuid4())
                     
                     print(f"        🔥 EXECUTING {action} on {sym} [intent:{intent_id[:8]}]...")
                     if tp_pct:
