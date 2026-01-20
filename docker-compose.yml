@@ -53,6 +53,7 @@ services:
 
   07_position_manager:
     environment:
+      MIN_SL_MOVE_DEFAULT: "0.001"
       POSITION_MANAGER_ENABLE_REVERSE: "true"
       POSITION_MANAGER_MANUAL_ONLY: "true"
       DEBUG_SYMBOLS:  "BTCUSDT,ETHUSDT,SOLUSDT"
@@ -65,7 +66,7 @@ services:
       BREAKEVEN_ACTIVATION_RAW_PCT: "0.008"   # 0.8% raw
 
       # clamp distanza trailing (raw)
-      TRAIL_MIN_DIST_RAW_PCT: "0.010"         # 1.0% min: non troppo vicino
+      TRAIL_MIN_DIST_RAW_PCT: "0.004"
       TRAIL_MAX_DIST_RAW_PCT: "0.025"         # 2.5% max: evita trailing troppo largo (BE-blocco)
 
       # dwell-time tightening (stringe solo dopo consolidamento)

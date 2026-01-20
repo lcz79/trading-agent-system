@@ -42,7 +42,7 @@ DEFAULT_INITIAL_SL_PCT = float(os.getenv("DEFAULT_INITIAL_SL_PCT", "0.04"))  # 4
 MIN_SL_MOVE_BTC = float(os.getenv("MIN_SL_MOVE_BTC", "15.0"))
 MIN_SL_MOVE_ETH = float(os.getenv("MIN_SL_MOVE_ETH", "0.8"))
 MIN_SL_MOVE_SOL = float(os.getenv("MIN_SL_MOVE_SOL", "0.05"))
-MIN_SL_MOVE_DEFAULT = float(os.getenv("MIN_SL_MOVE_DEFAULT", "0.5"))
+MIN_SL_MOVE_DEFAULT = float(os.getenv("MIN_SL_MOVE_DEFAULT", "0.001"))
 # --- BREAK-EVEN PROTECTION ---
 BREAKEVEN_ACTIVATION_RAW_PCT = float(os.getenv("BREAKEVEN_ACTIVATION_RAW_PCT", "0.015"))  # 1.5% ROI (leveraged)
 BREAKEVEN_MARGIN_PCT = float(os.getenv("BREAKEVEN_MARGIN_PCT", "0.001"))  # 0.1% margin
@@ -1468,6 +1468,32 @@ def check_and_update_trailing_stops():
                             )
                         continue
 
+                # USE_TRAILING_EXIT_ORDER: Bybit does not allow stopLoss for short below MarkPrice.
+                # For profit-lock trailing we use a reduce-only conditional StopOrder (Market).
+                use_exit = False
+                try:
+                    if side.lower() == "short" and float(new_sl_price) < float(mark_price):
+                        use_exit = True
+                    if side.lower() == "long" and float(new_sl_price) > float(mark_price):
+                        use_exit = True
+                except Exception:
+                    use_exit = False
+
+                if use_exit:
+                    try:
+                        _upsert_trailing_exit_order(
+                            exchange,
+                            symbol=symbol,
+                            position_side=side,
+                            position_idx=position_idx,
+                            qty=float(size),
+                            trigger_price=float(new_sl_price),
+                            trigger_by="MarkPrice",
+                        )
+                    except Exception as e:
+                        print(f"⚠️ Trailing-exit order error for {symbol}: {e}")
+                    continue
+
                 req = {
                     "category": "linear",
                     "symbol": bybit_symbol_id(symbol),
@@ -2765,3 +2791,68 @@ def manage():
     check_and_update_trailing_stops()
     check_smart_reverse()
     return {"status": "ok"}
+
+# =========================================================
+# TRAILING EXIT (reduce-only conditional StopOrder)
+# =========================================================
+def _trail_exit_order_link_id(symbol: str, side: str, position_idx: int) -> str:
+    sid = bybit_symbol_id(symbol).upper()
+    sd = str(side).lower()
+    if sd not in ("long", "short"):
+        sd = "unk"
+    return f"TRLEX_{sid}_{position_idx}_{sd}".replace(":", "").replace("/", "")
+
+def _cancel_trailing_exit(exchange, symbol: str, order_link_id: str) -> None:
+    try:
+        resp = exchange.private_post_v5_order_cancel({
+            "category": "linear",
+            "symbol": bybit_symbol_id(symbol),
+            "orderLinkId": order_link_id,
+        })
+        # Bybit: 110001 = "order not exists or too late to cancel" (benigno in upsert flow)
+        if isinstance(resp, dict) and str(resp.get("retCode")) == "110001":
+            return
+        print(f"🧹 Cancel trailing-exit orderLinkId={order_link_id} resp={resp}")
+    except Exception as e:
+        # keep warnings for real exceptions (network/auth/etc.)
+        print(f"⚠️ Cancel trailing-exit failed orderLinkId={order_link_id}: {e}")
+
+def _upsert_trailing_exit_order(exchange, symbol: str, position_side: str, position_idx: int, qty: float, trigger_price: float, trigger_by: str = "MarkPrice") -> None:
+    if qty <= 0:
+        return
+    side_norm = str(position_side).lower()
+    if side_norm == "short":
+        order_side = "Buy"
+        trigger_dir = 1  # rises to trigger
+    else:
+        order_side = "Sell"
+        trigger_dir = 2  # falls to trigger
+
+    order_link_id = _trail_exit_order_link_id(symbol, side_norm, int(position_idx))
+    _cancel_trailing_exit(exchange, symbol, order_link_id)
+
+    try:
+        qty_str = exchange.amount_to_precision(symbol, float(qty))
+    except Exception:
+        qty_str = str(qty)
+    try:
+        trig_str = exchange.price_to_precision(symbol, float(trigger_price))
+    except Exception:
+        trig_str = str(trigger_price)
+
+    req = {
+        "category": "linear",
+        "symbol": bybit_symbol_id(symbol),
+        "side": order_side,
+        "orderType": "Market",
+        "qty": qty_str,
+        "reduceOnly": True,
+        "orderFilter": "StopOrder",
+        "triggerPrice": trig_str,
+        "triggerBy": trigger_by,
+        "triggerDirection": trigger_dir,
+        "orderLinkId": order_link_id,
+    }
+    resp = exchange.private_post_v5_order_create(req)
+    print(f"🧷 Trailing-exit upsert {symbol} side={side_norm} idx={position_idx} qty={qty_str} trigger={trig_str} triggerBy={trigger_by} resp={resp}")
+
