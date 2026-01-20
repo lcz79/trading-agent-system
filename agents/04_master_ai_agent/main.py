@@ -47,6 +47,8 @@ from openai import OpenAI
 from threading import Lock
 
 logging.basicConfig(level=logging.INFO)
+FAST_PATH_TIMEOUT_SECONDS = float(os.getenv('FAST_PATH_TIMEOUT_SECONDS', '60'))
+
 logger = logging.getLogger("MasterAI")
 
 app = FastAPI()
@@ -124,7 +126,10 @@ OPP_LIMIT_MAX_ENTRY_DISTANCE_PCT = float(os.getenv("OPP_LIMIT_MAX_ENTRY_DISTANCE
 OPP_LIMIT_MIN_EDGE_SCORE = float(os.getenv("OPP_LIMIT_MIN_EDGE_SCORE", "60"))  # Minimum edge score
 
 # Fast decision path timeouts (to avoid DeepSeek truncation/timeout issues)
-FAST_DECISION_TIMEOUT_SEC = float(os.getenv("FAST_DECISION_TIMEOUT_SEC", "25.0"))  # Hard timeout for fast decisions
+FAST_DECISION_TIMEOUT_SEC = float(os.getenv("FAST_DECISION_TIMEOUT_SEC", "60.0"))  # Hard timeout for fast decisions
+FAST_OPEN_CONFLUENCE_THRESHOLD = int(os.getenv('FAST_OPEN_CONFLUENCE_THRESHOLD', '67'))
+FAST_LIMIT_CONFLUENCE_THRESHOLD = int(os.getenv('FAST_LIMIT_CONFLUENCE_THRESHOLD', '60'))
+
 FAST_DECISION_MAX_TOKENS = int(os.getenv("FAST_DECISION_MAX_TOKENS", "2000"))  # Limit LLM output to prevent truncation
 EXPLANATION_TIMEOUT_SEC = float(os.getenv("EXPLANATION_TIMEOUT_SEC", "60.0"))  # Timeout for verbose explanations
 
@@ -2357,6 +2362,71 @@ async def decide_batch(payload: AnalysisPayload):
         return {"analysis": "Error", "decisions": []}
 
 
+
+def _extract_first_json_object(text: str):
+    """
+    Best-effort extraction of the first top-level JSON object from arbitrary text.
+    Handles extra leading/trailing text and tries to avoid breaking on braces inside strings.
+    """
+    if not text:
+        return None
+
+    # fast path: already starts with '{'
+    start = text.find("{")
+    if start == -1:
+        return None
+
+    in_str = False
+    esc = False
+    depth = 0
+    end = None
+
+    for i in range(start, len(text)):
+        ch = text[i]
+        if in_str:
+            if esc:
+                esc = False
+                continue
+            if ch == "\\":
+                esc = True
+                continue
+            if ch == '"':
+                in_str = False
+            continue
+        else:
+            if ch == '"':
+                in_str = True
+                continue
+            if ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    end = i + 1
+                    break
+
+    if end is None:
+        return None
+    return text[start:end]
+
+
+def _safe_fast_json_loads(content: str):
+    """
+    Fast endpoint JSON parser:
+    - extracts first JSON object
+    - loads it with json.loads
+    Returns {} on failure.
+    """
+    import json as _json
+    try:
+        extracted = _extract_first_json_object(content)
+        if not extracted:
+            return {}
+        return _json.loads(extracted)
+    except Exception:
+        return {}
+
+
 @app.post("/decide_batch_fast")
 async def decide_batch_fast(payload: AnalysisPayload):
     """
@@ -2433,47 +2503,108 @@ async def decide_batch_fast(payload: AnalysisPayload):
         # Compact system prompt for fast response
         fast_system_prompt = """You are a crypto trading AI making FAST decisions with MINIMAL output.
 
-RESPOND WITH COMPACT JSON ONLY - NO MARKDOWN, NO EXPLANATIONS, NO EXTRA TEXT.
+RESPOND WITH VALID JSON ONLY. NO MARKDOWN. NO COMMENTS. NO TRAILING TEXT.
 
-For each symbol, return:
-{
-  "decisions": [
-    {
-      "symbol": "BTCUSDT",
-      "action": "OPEN_LONG|OPEN_SHORT|HOLD",
-      "entry_type": "MARKET|LIMIT",
-      "entry_price": 42000.0,  // if LIMIT
-      "leverage": 5.0,
-      "size_pct": 0.15,
-      "tp_pct": 0.02,
-      "sl_pct": 0.015,
-      "time_in_trade_limit_sec": 3600,
-      "cooldown_sec": 600,
-      "entry_expires_sec": 240,  // if LIMIT
-      "confidence": 75,
-      "reason_code": "STRONG_LONG"  // short code
-    }
-  ]
-}
+You will receive per-symbol facts including confluence long/short and current_price.
 
-REASON CODES: Use short codes like:
-- "STRONG_LONG", "STRONG_SHORT" (high confidence setup)
-- "LOW_VOL" (volatility too low)
-- "NO_MARGIN" (insufficient balance)
-- "HOLD_WAIT" (no clear setup)
-- "CRASH_GUARD" (extreme momentum against)
+CRITICAL OUTPUT RULES (hard):
+1) Return decisions ONLY for symbols you want to OPEN (OPEN_LONG or OPEN_SHORT). DO NOT return HOLD decisions.
+   - If nothing to open, return: {"decisions":[]}
+2) Keep each decision minimal. Only include fields required for execution.
+3) If entry_type="LIMIT", you MUST include entry_price and entry_expires_sec (60..600).
+   If entry_type="MARKET", OMIT entry_price and entry_expires_sec entirely.
+4) Use thresholds OPEN_THR and LIMIT_THR from user input:
+   - strength=max(cl,cs)
+   - if strength>=OPEN_THR => OPEN with MARKET
+   - else if strength>=LIMIT_THR => OPEN with LIMIT
+   - else => no decision for that symbol (omit)
+5) Direction MUST follow confluence: cs>cl => OPEN_SHORT else OPEN_LONG.
+6) Never open if already_open=true or can_open_new_positions=false (omit the symbol).
 
-RULES:
-1. Use MARKET for urgent setups, LIMIT for precise entries at support/resistance
-2. If can_open_new_positions=false, all actions must be HOLD with reason_code="NO_MARGIN"
-3. Never open same symbol that's already_open
-4. Keep confidence realistic: 70-85 for OPEN, 40-60 for HOLD
-5. COMPACT OUTPUT ONLY - every extra character increases truncation risk"""
+Return JSON:
+{"decisions":[
+  {"symbol":"BTCUSDT","action":"OPEN_SHORT","entry_type":"MARKET","leverage":5.0,"size_pct":0.15,"tp_pct":0.02,"sl_pct":0.015,"time_in_trade_limit_sec":3600,"cooldown_sec":600,"confidence":80,"reason_code":"STRONG_SHORT"},
+  {"symbol":"BNBUSDT","action":"OPEN_SHORT","entry_type":"LIMIT","entry_price":905.1,"entry_expires_sec":180,"leverage":4.0,"size_pct":0.10,"tp_pct":0.018,"sl_pct":0.012,"time_in_trade_limit_sec":3600,"cooldown_sec":600,"confidence":72,"reason_code":"LIMIT_SHORT"}
+]}
+"""
+        # Build compact facts for fast path (force the model to use key analyses)
+        assets = payload.assets_data or {}
+        assets_upper = {str(k).upper(): v for k, v in (assets or {}).items()}
+        already_open_set = set(x.upper() for x in prompt_data.get("already_open", []) if isinstance(x, str))
 
-        user_prompt = f"FAST DECISION FOR: {json.dumps(prompt_data, separators=(',', ':'))}"
+        fast_symbols = {}
+        for sym, data in assets.items():
+            try:
+                enhanced = (data or {}).get("enhanced", {}) or {}
+                conf = enhanced.get("confluence", {}) or {}
+                cl = int((conf.get("long", {}) or {}).get("score", 0) or 0)
+                cs = int((conf.get("short", {}) or {}).get("score", 0) or 0)
+
+                # Reliable current price for LIMIT (prefer minimal_market_data, fallback to tech if present)
+                current_price = None
+                try:
+                    current_price = (minimal_market_data.get(str(sym), {}) or {}).get("price")
+                except Exception:
+                    current_price = None
+
+                if not current_price:
+                    tech = (data or {}).get("tech", {}) or {}
+                    if isinstance(tech, dict):
+                        current_price = tech.get("current_price") or tech.get("price") or tech.get("last_price")
+
+                fast_symbols[str(sym).upper()] = {
+                    "regime": enhanced.get("regime", "UNKNOWN"),
+                    "vol": enhanced.get("volatility_bucket", "MEDIUM"),
+                    "cl": cl,
+                    "cs": cs,
+                    "current_price": current_price,
+                    "already_open": str(sym).upper() in already_open_set
+                }
+            except Exception:
+                # If anything fails, still include the symbol so the model can HOLD
+                fast_symbols[str(sym).upper()] = {"regime": "UNKNOWN", "vol": "UNKNOWN", "cl": 0, "cs": 0, "current_price": None, "already_open": str(sym).upper() in already_open_set}
+
+        fast_payload = {
+            "can_open_new_positions": prompt_data.get("can_open_new_positions", True),
+            "max_positions": prompt_data.get("max_positions"),
+            "positions_open": prompt_data.get("positions_open"),
+            "already_open": list(already_open_set),
+            "OPEN_THR": FAST_OPEN_CONFLUENCE_THRESHOLD,
+            "LIMIT_THR": FAST_LIMIT_CONFLUENCE_THRESHOLD,
+            "symbols": fast_symbols
+        }
+
+        try:
+            b = fast_payload.get("symbols", {}).get("BTCUSDT")
+            e = fast_payload.get("symbols", {}).get("ETHUSDT")
+            logger.info(f"FAST_PAYLOAD sample BTCUSDT={b} ETHUSDT={e} OPEN_THR={fast_payload.get('OPEN_THR')} LIMIT_THR={fast_payload.get('LIMIT_THR')}")
+        except Exception:
+            pass
+
+        user_prompt = f"FAST DECISION FOR: {json.dumps(fast_payload, separators=(',', ':'))}"
         
         # 5. Call DeepSeek with tight timeout
-        try:
+        try:            # DEBUG (prints to docker logs): show compact facts + symbol keys sample
+            try:
+                fp = locals().get("fast_payload", None)
+                if isinstance(fp, dict):
+                    syms = fp.get("symbols", {}) or {}
+                    keys = list(syms.keys())
+                    b = syms.get("BTCUSDT")
+                    e = syms.get("ETHUSDT")
+                    print(f"[FAST_DEBUG] OPEN_THR={fp.get('OPEN_THR')} LIMIT_THR={fp.get('LIMIT_THR')} symbols_n={len(keys)} keys_sample={keys[:15]} BTC={b} ETH={e}", flush=True)
+            except Exception:
+                pass
+
+            # DEBUG: show prompt previews (to confirm LLM sees confluence thresholds/facts)
+            try:
+                sp = locals().get("fast_system_prompt", "")
+                up = locals().get("user_prompt", "")
+                print(f"[FAST_PROMPT_DEBUG] system_preview={sp[:220]!r}", flush=True)
+                print(f"[FAST_PROMPT_DEBUG] user_preview={up[:260]!r}", flush=True)
+            except Exception:
+                pass
+
             response = await asyncio.wait_for(
                 asyncio.to_thread(
                     lambda: client.chat.completions.create(
@@ -2500,10 +2631,19 @@ RULES:
             content = response.choices[0].message.content
             logger.info(f"Fast AI Response ({len(content)} chars): {content[:200]}...")
             
-            decision_json = safe_json_loads(content, context_label="decide_batch_fast")
+            # DEBUG: inspect raw LLM response (truncation / invalid JSON)
+            try:
+                print(f"[FAST_LLM_RAW] {content[:900]!r}", flush=True)
+            except Exception:
+                pass
+
+            decision_json = _safe_fast_json_loads(content)
+            if not isinstance(decision_json, dict):
+                decision_json = {}
+
             
         except asyncio.TimeoutError:
-            logger.error("⏱️ Fast path timeout (25s) - returning all HOLD")
+            logger.error("⏱️ Fast path timeout (60s) - returning all HOLD")
             decision_json = {}
         except Exception as e:
             logger.error(f"❌ Fast path LLM error: {e} - returning all HOLD")
@@ -2527,7 +2667,41 @@ RULES:
             for d_raw in decisions_raw:
                 try:
                     # Validate and normalize
-                    d = DecisionFast(**d_raw)
+                    d = DecisionFast(**d_raw)                    # Deterministic direction selection from confluence (aligns with orchestrator verification):
+                    # - If both confluence scores are low => HOLD
+                    # - If one side is clearly stronger => force direction
+                    # This ensures shorts/longs are always confirmed by analyses, not model bias.
+                    try:
+                        sym = (d.symbol or "").upper()
+                        enhanced = (assets_upper.get(sym, {}) or {}).get("enhanced", {})
+                        conf = enhanced.get("confluence", {})
+                        long_score = int(conf.get("long", {}).get("score", 0) or 0)
+                        short_score = int(conf.get("short", {}).get("score", 0) or 0)
+
+                        MIN_THR = 40
+                        STRONG_THR = 70
+
+                        preferred = None
+                        if long_score < MIN_THR and short_score < MIN_THR:
+                            preferred = None  # force HOLD
+                        elif short_score >= STRONG_THR and long_score < MIN_THR:
+                            preferred = "SHORT"
+                        elif long_score >= STRONG_THR and short_score < MIN_THR:
+                            preferred = "LONG"
+                        else:
+                            preferred = "LONG" if long_score >= short_score else "SHORT"
+
+                        if preferred is None:
+                            if d.action in ("OPEN_LONG", "OPEN_SHORT"):
+                                d.action = "HOLD"
+                                d.reason_code = "LOW_CONFLUENCE"
+                                d.confidence = min(int(d.confidence or 0), 50)
+                        else:
+                            if d.action in ("OPEN_LONG", "OPEN_SHORT"):
+                                d.action = "OPEN_LONG" if preferred == "LONG" else "OPEN_SHORT"
+                    except Exception:
+                        pass
+
                     valid_decisions.append(d)
                 except Exception as e:
                     logger.warning(f"Invalid fast decision: {e}")
