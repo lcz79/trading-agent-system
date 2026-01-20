@@ -750,7 +750,8 @@ async def analysis_cycle():
                     # Fire and forget - don't wait for explanation
                     async def fetch_explanations():
                         try:
-                            exp_resp = await c.post(
+                            async with httpx.AsyncClient() as c2:
+                                exp_resp = await c2.post(
                                 f"{URLS['ai']}/explain_batch",
                                 json={
                                     "fast_decisions": decisions_list,
