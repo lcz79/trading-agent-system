@@ -954,7 +954,8 @@ def record_closed_trade(
     leverage: float,
     size_pct: float,
     duration_minutes: int,
-    market_conditions: Optional[dict] = None
+    market_conditions: Optional[dict] = None,
+    intent_id: Optional[str] = None,
 ):
     try:
         with httpx.Client(timeout=5.0) as client:
@@ -971,6 +972,7 @@ def record_closed_trade(
                     "size_pct": size_pct,
                     "duration_minutes": duration_minutes,
                     "market_conditions": market_conditions or {},
+                    "intent_id": intent_id,
                 },
             )
             if r.status_code == 200:
