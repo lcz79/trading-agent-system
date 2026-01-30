@@ -938,6 +938,7 @@ class OrderRequest(BaseModel):
     features: Optional[dict] = None  # Market features snapshot
 class CloseRequest(BaseModel):
     symbol: str
+    exit_reason: str = "manual"
 class ReverseRequest(BaseModel):
     symbol: str
     recovery_size_pct: float = 0.25
@@ -1624,7 +1625,13 @@ def log_trade_to_equity_history(
 def execute_close_position(symbol: str, exit_reason: str = "manual") -> bool:
     # POLICY: positions must close ONLY via exchange SL/trailing.
     # Exception: allow software close only for emergency kill switch.
-    allowed = {"emergency", "kill_switch"}
+    # Allowed software-driven close reasons.
+    # We still keep a policy gate to avoid accidental closes, but critical/risk exits must be permitted.
+    allowed = {
+        "emergency", "kill_switch",
+        "critical", "critical_mgmt_close", "risk", "stop_loss", "sl", "tp", "trail",
+        "time_exit", "reverse", "ai", "signal", "cooldown_exit"
+    }
     if (exit_reason or "manual") not in allowed:
         print(f"⛔ CLOSE BLOCKED by policy: symbol={symbol} exit_reason={exit_reason}")
         return False

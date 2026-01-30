@@ -57,6 +57,37 @@ MAX_POSITIONS = int(os.getenv("MAX_OPEN_POSITIONS", "10"))
 REVERSE_THRESHOLD = float(os.getenv("REVERSE_THRESHOLD", "2.0"))  # Percentuale perdita per trigger reverse analysis
 CRITICAL_LOSS_PCT_LEV = float(os.getenv("CRITICAL_LOSS_PCT_LEV", "12.0"))  # % perdita (con leva) per trigger gestione critica
 CYCLE_INTERVAL = 60  # Secondi tra ogni ciclo di controllo (era 900)
+
+# --- AI WAKE (INTERVAL) ---
+AI_INTERVAL_MIN = int(os.getenv("AI_INTERVAL_MIN", "15"))
+AI_INTERVAL_WINDOW_SEC = int(os.getenv("AI_INTERVAL_WINDOW_SEC", "90"))
+LAST_AI_SLOT = None  # type: str | None
+
+def should_call_ai_now_interval() -> bool:
+    """Call AI only once per interval (e.g., every 15 min) within a small window."""
+    global LAST_AI_SLOT
+    try:
+        interval = int(AI_INTERVAL_MIN) if AI_INTERVAL_MIN else 15
+    except Exception:
+        interval = 15
+    try:
+        window = int(AI_INTERVAL_WINDOW_SEC) if AI_INTERVAL_WINDOW_SEC else 90
+    except Exception:
+        window = 90
+    if interval <= 0:
+        return True  # disabled gate
+    now = datetime.utcnow()
+    # slot id: YYYYMMDD-HH:MM of the interval boundary
+    minute_bucket = (now.minute // interval) * interval
+    slot = now.replace(minute=minute_bucket, second=0, microsecond=0)
+    slot_id = slot.strftime("%Y%m%d-%H%M")
+    delta = abs((now - slot).total_seconds())
+    if delta <= window:
+        if LAST_AI_SLOT == slot_id:
+            return False
+        LAST_AI_SLOT = slot_id
+        return True
+    return False
 DRY_RUN = os.getenv("DRY_RUN", "false").lower() == "true"  # Se true, logga solo azioni senza eseguirle
 
 # --- HEDGE MODE & SCALE-IN CONFIGURATION ---
@@ -232,6 +263,25 @@ def save_monitoring_decision(positions_count: int, max_positions: int, positions
             
     except Exception as e:
         print(f"⚠️ Error saving monitoring decision: {e}")
+
+
+
+def _get_mark_from_decision(d: dict):
+    try:
+        for k in ("mark_price","mark","price","last_price","last","close"):
+            if isinstance(d, dict) and d.get(k) is not None:
+                return float(d.get(k))
+    except Exception:
+        return None
+    return None
+
+
+def _sniper_price_v1(mark: float, direction: str, buffer_pct: float):
+    if not mark or mark <= 0:
+        return None
+    if direction == "LONG":
+        return round(mark * (1.0 - buffer_pct), 6)
+    return round(mark * (1.0 + buffer_pct), 6)
 
 
 def append_ai_decision_event(event: dict) -> None:
@@ -462,7 +512,7 @@ async def analysis_cycle():
                                     try:
                                         close_resp = await c.post(
                                             f"{URLS['pos']}/close_position",
-                                            json={"symbol": symbol, "exit_reason": "critical_mgmt_close"},
+                                            json={"symbol": symbol, "exit_reason": "critical"},
                                             timeout=20.0
                                         )
                                         close_json = close_resp.json()
@@ -475,7 +525,7 @@ async def analysis_cycle():
                                             print(f"        ⚠️ Close returned status={close_json.get('status')}, retrying once...")
                                             close_resp2 = await c.post(
                                                 f"{URLS['pos']}/close_position",
-                                                json={"symbol": symbol, "exit_reason": "critical_mgmt_close"},
+                                                json={"symbol": symbol, "exit_reason": "critical"},
                                                 timeout=20.0
                                             )
                                             close_json2 = close_resp2.json()
@@ -498,7 +548,7 @@ async def analysis_cycle():
                                     try:
                                         close_resp = await c.post(
                                             f"{URLS['pos']}/close_position",
-                                            json={"symbol": symbol, "exit_reason": "critical_mgmt_close"},
+                                            json={"symbol": symbol, "exit_reason": "critical"},
                                             timeout=20.0
                                         )
                                         close_json = close_resp.json()
@@ -566,6 +616,11 @@ async def analysis_cycle():
 
         # CASO 2: Almeno uno slot libero (< 3 posizioni)
         print(f"        🔍 Slot libero - Chiamo DeepSeek per nuove opportunità")
+        # === AI INTERVAL GATE (e.g., every 15 minutes) ===
+        if not should_call_ai_now_interval():
+            print(f"        💤 Fuori slot AI_INTERVAL_MIN={AI_INTERVAL_MIN}m: skip DeepSeek (solo gestione posizioni)")
+            return
+
         
         # 3. FILTER - Solo asset senza posizione aperta
         scan_list = [s for s in SYMBOLS if s not in active_symbols]
@@ -585,13 +640,32 @@ async def analysis_cycle():
             print("        ⚠️ Nessun asset disponibile per scan")
             return
 
-        # 4. TECH ANALYSIS
+        # 4. TECH ANALYSIS (PARALLEL)
         assets_data = {}
-        for s in scan_list:
-            try:
-                t = (await c.post(f"{URLS['tech']}/analyze_multi_tf_full", json={"symbol": s})).json()
-                assets_data[s] = {"tech": t}
-            except: pass
+
+        TECH_ANALYSIS_CONCURRENCY = int(os.getenv("TECH_ANALYSIS_CONCURRENCY", "4"))
+        TECH_ANALYSIS_TIMEOUT_SEC = float(os.getenv("TECH_ANALYSIS_TIMEOUT_SEC", "20"))
+
+        sem = asyncio.Semaphore(max(1, TECH_ANALYSIS_CONCURRENCY))
+
+        async def _fetch_tech(symbol: str):
+            async with sem:
+                try:
+                    r = await c.post(
+                        f"{URLS['tech']}/analyze_multi_tf_full",
+                        json={"symbol": symbol},
+                        timeout=TECH_ANALYSIS_TIMEOUT_SEC
+                    )
+                    return symbol, r.json()
+                except Exception:
+                    return symbol, None
+
+        tasks = [_fetch_tech(s) for s in scan_list]
+        results = await asyncio.gather(*tasks, return_exceptions=False)
+
+        for symbol, tech in results:
+            if tech:
+                assets_data[symbol] = {"tech": tech}
         
         if not assets_data: 
             print("        ⚠️ Nessun dato tecnico disponibile")
@@ -653,6 +727,7 @@ async def analysis_cycle():
                 asset_dict["enhanced"] = {
                     "regime": regime,
                     "regime_metadata": regime_meta,
+                    "price": price,
                     "volatility_bucket": volatility_bucket,
                     "confluence": {
                         "long": {
@@ -925,6 +1000,7 @@ async def analysis_cycle():
                             payload["sl_pct"] = opp_sl_pct
                         
                         try:
+                            print(f"           📤 open_position payload: entry_type={payload.get('entry_type')} entry_price={payload.get('entry_price')} ttl={payload.get('entry_ttl_sec')}")
                             res = await c.post(f"{URLS['pos']}/open_position", json=payload)
                             print(f"        ✅ Opportunistic LIMIT result: {res.json()}")
                         except Exception as opp_exec_err:
@@ -958,6 +1034,10 @@ async def analysis_cycle():
                     except Exception:
                         min_conf_market = 70.0
                         min_conf_limit = 60.0
+                    # Ensure entry_type is defined before confidence gates
+                    entry_type = d.get('entry_type', 'MARKET')
+                    if os.getenv("FORCE_LIMIT_ONLY", "false").lower() == "true":
+                        entry_type = "LIMIT"
                     min_conf = min_conf_limit if entry_type == 'LIMIT' else min_conf_market
                     if confidence < min_conf:
                         print(f"        🧱 SKIP {action} on {sym}: low confidence ({confidence:.1f} < {min_conf:.1f})")
@@ -977,8 +1057,59 @@ async def analysis_cycle():
                     # Cancel+replace logic for pending LIMIT orders
                     # Check if there's a pending LIMIT entry for this symbol+direction
                     entry_type = d.get('entry_type', 'MARKET')
+                    # Enforce limit-only early (before confidence gates)
+                    if os.getenv("FORCE_LIMIT_ONLY", "false").lower() == "true":
+                        entry_type = "LIMIT"
                     entry_price = d.get('entry_price')
                     entry_expires_sec = d.get('entry_expires_sec', 240)
+                    # --- LIMIT-ONLY / SNIPER MODE (deterministic) ---
+                    try:
+                        _ttl_env = int(os.getenv("ENTRY_TTL_SEC", "240"))
+                    except Exception:
+                        _ttl_env = 240
+                    if (entry_expires_sec is None) or (isinstance(entry_expires_sec, (int,float)) and int(entry_expires_sec) <= 0):
+                        entry_expires_sec = _ttl_env
+                    
+                    if (entry_type or "").upper() == "LIMIT":
+                        try:
+                            if entry_price is not None:
+                                entry_price = float(entry_price)
+                        except Exception:
+                            entry_price = None
+                    
+                        if entry_price is None or entry_price <= 0:
+                            mark = _get_mark_from_decision(d)
+                            # Fallback: take mark from preprocessed technical data (assets_data) if not present in decision
+                            if (mark is None) or (isinstance(mark, (int,float)) and mark <= 0):
+                                try:
+                                    _ad = None
+                                    if isinstance(locals().get('assets_data'), dict):
+                                        _ad = assets_data.get(sym) or assets_data.get(sym.upper())
+                                    _enh = None
+                                    if isinstance(_ad, dict):
+                                        _enh = _ad.get('enhanced') if isinstance(_ad.get('enhanced'), dict) else _ad
+                                    if isinstance(_enh, dict):
+                                        for _k in ('mark_price','mark','price','last_price','last','close'):
+                                            if _enh.get(_k) is not None:
+                                                mark = float(_enh.get(_k))
+                                                break
+                                except Exception:
+                                    pass
+                            try:
+                                buffer_pct = float(os.getenv("SNIPER_BUFFER_PCT", "0.0008"))
+                            except Exception:
+                                buffer_pct = 0.0008
+                            direction = "LONG" if action == "OPEN_LONG" else "SHORT"
+                            entry_price = _sniper_price_v1(mark, direction, buffer_pct)
+                            if entry_price and entry_price > 0:
+                                print(f"           🎯 Sniper LIMIT price (v1) computed: mark={mark} → entry={entry_price} (buffer={buffer_pct})")
+                            else:
+                                print(f"           🧯 LIMIT-ONLY: missing mark/price for sniper computation → SKIP open")
+                                continue
+                    
+                        if entry_price is None or entry_price <= 0:
+                            print(f"           🧯 LIMIT-ONLY: invalid entry_price → SKIP open")
+                            continue
                     
                     if entry_type == 'LIMIT' and entry_price:
                         try:
@@ -1240,9 +1371,6 @@ async def analysis_cycle():
                         print(f"           Scalping: TP={tp_pct*100:.1f}%, SL={sl_pct*100:.1f}%, MaxTime={time_in_trade_limit_sec}s")
                     
                     # Extract LIMIT entry parameters if present
-                    entry_type = d.get('entry_type', 'MARKET')
-                    entry_price = d.get('entry_price')
-                    entry_expires_sec = d.get('entry_expires_sec', 240)
                     
                     if entry_type == 'LIMIT':
                         if entry_price and entry_price > 0:
@@ -1273,13 +1401,28 @@ async def analysis_cycle():
                     if trail_activation_roi is not None:
                         payload["trail_activation_roi"] = trail_activation_roi
                     
-                    # Add LIMIT entry params if present
-                    if entry_type and entry_type != "MARKET":
-                        payload["entry_type"] = entry_type
-                    if entry_price is not None:
-                        payload["entry_price"] = entry_price
-                    if entry_expires_sec is not None:
-                        payload["entry_ttl_sec"] = entry_expires_sec  # Note: position manager uses entry_ttl_sec
+                    # Add entry params (hard LIMIT-only if FORCE_LIMIT_ONLY=true)
+                    _force_limit_only = os.getenv("FORCE_LIMIT_ONLY", "false").lower() == "true"
+
+                    if _force_limit_only:
+                        # Never send MARKET when force mode is enabled
+                        try:
+                            _ep = float(entry_price) if entry_price is not None else 0.0
+                        except Exception:
+                            _ep = 0.0
+                        if _ep <= 0:
+                            print(f"           🧯 LIMIT-ONLY: cannot execute without valid entry_price → SKIP open")
+                            continue
+                        payload["entry_type"] = "LIMIT"
+                        payload["entry_price"] = _ep
+                        payload["entry_ttl_sec"] = int(entry_expires_sec) if entry_expires_sec is not None else 240
+                    else:
+                        if (entry_type or "").upper() == "LIMIT":
+                            payload["entry_type"] = "LIMIT"
+                            payload["entry_price"] = float(entry_price)
+                            payload["entry_ttl_sec"] = int(entry_expires_sec) if entry_expires_sec is not None else 240
+                        else:
+                            payload["entry_type"] = "MARKET"
                     
                     res = await c.post(f"{URLS['pos']}/open_position", json=payload)
                     print(f"        ✅ Result: {res.json()}")
