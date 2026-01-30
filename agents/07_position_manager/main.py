@@ -984,7 +984,8 @@ def record_trade_for_learning(
     exit_price: float,
     leverage: float,
     duration_minutes: int,
-    market_conditions: Optional[dict] = None
+    market_conditions: Optional[dict] = None,
+    intent_id: Optional[str] = None,
 ):
     try:
         side_dir = normalize_position_side(side_raw) or "long"
@@ -1006,6 +1007,7 @@ def record_trade_for_learning(
             size_pct=DEFAULT_SIZE_PCT,
             duration_minutes=duration_minutes,
             market_conditions=market_conditions or {},
+            intent_id=intent_id,
         )
     except Exception as e:
         print(f"⚠️ Errore in record_trade_for_learning: {e}")
