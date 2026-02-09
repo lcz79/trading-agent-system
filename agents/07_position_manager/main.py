@@ -399,6 +399,58 @@ def check_pending_entry_orders():
                         print(f"   ⚠️ Query by orderId failed for {_truncate_id(intent_id)}: {e}")
                 
                 if not order_data:
+                    # === FALLBACK: order not found, but position may be open (Bybit realtime order can disappear) ===
+                    try:
+                        sym_ccxt_f = ccxt_symbol_from_id(exchange, sym_id) or sym_id
+                        pos_list = exchange.fetch_positions([sym_ccxt_f], params={"category": "linear"})
+                        # Find matching position with contracts > 0
+                        for p in pos_list or []:
+                            contracts = to_float(p.get("contracts"), 0.0)
+                            if contracts <= 0:
+                                continue
+                            p_side = normalize_position_side(p.get("side", "")) or "long"
+                            if p_side != intent.side:
+                                continue
+                            entry = to_float(p.get("entryPrice") or (p.get("info", {}) or {}).get("avgPrice"), 0.0)
+                            if entry <= 0:
+                                entry = to_float(exchange.fetch_ticker(sym_ccxt_f).get("last"), 0.0)
+                            sl_pct = intent.sl_pct or compute_entry_sl_pct(sym_id, intent)
+                            sl_price = entry * (1 - sl_pct) if p_side == "long" else entry * (1 + sl_pct)
+                            sl_str = exchange.price_to_precision(sym_ccxt_f, sl_price)
+                            pos_idx = side_to_position_idx(p_side)
+                            req = {
+                                "category": "linear",
+                                "symbol": sym_id,
+                                "tpslMode": "Full",
+                                "stopLoss": sl_str,
+                                "slTriggerBy": "MarkPrice",
+                            }
+                            if HEDGE_MODE:
+                                req["positionIdx"] = pos_idx
+                            resp = exchange.private_post_v5_position_trading_stop(req)
+                            if isinstance(resp, dict) and str(resp.get("retCode")) == "0":
+                                print(f"   ✅ Fallback SL set (order not found): {sym_id} {p_side} SL={sl_str} trigger=MarkPrice")
+                                trading_state.update_intent_status(intent_id, OrderStatus.EXECUTED, exchange_order_id=intent.exchange_order_id)
+                                position_metadata = PositionMetadata(
+                                    symbol=sym_id,
+                                    side=p_side,
+                                    opened_at=datetime.now().isoformat(),
+                                    intent_id=intent_id,
+                                    features=intent.features or {},
+                                    time_in_trade_limit_sec=intent.time_in_trade_limit_sec,
+                                    entry_price=entry,
+                                    size=contracts,
+                                    leverage=intent.leverage,
+                                    cooldown_sec=intent.cooldown_sec,
+                                    entry_type=intent.entry_type,
+                                )
+                                trading_state.add_position(position_metadata)
+                            else:
+                                print(f"   ⚠️ Fallback SL not set (order not found): resp={resp}")
+                            break
+                    except Exception as _e:
+                        print(f"   ⚠️ Fallback position-check failed for {_truncate_id(intent_id)}: {_e}")
+
                     print(f"   ⚠️ Order not found for intent {_truncate_id(intent_id)}, may have been filled/cancelled")
                     # Check if expired based on TTL
                     if intent.entry_expires_at:
