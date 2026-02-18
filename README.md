@@ -67,13 +67,19 @@ echo "DEFAULT_TIME_IN_TRADE_LIMIT_SEC=2400" >> .env  # 40 min
 echo "POSITION_MANAGER_ENABLE_REVERSE=false" >> .env
 echo "BYBIT_HEDGE_MODE=false" >> .env
 
-# 2. Avvia
+# 2. Run quality checks (optional but recommended)
+make check
+# or: ./scripts/check.sh
+
+# 3. Avvia
 docker-compose up -d
+# or: make docker-up
 
-# 3. Monitora
+# 4. Monitora
 docker-compose logs -f orchestrator
+# or: make docker-logs
 
-# 4. Test scalping features
+# 5. Test scalping features
 python3 test_scalping_features.py
 ```
 
@@ -90,6 +96,25 @@ python3 test_scalping_features.py
 | Position Manager | http://localhost:8006/get_open_positions |
 
 ## 🧪 Testing & Quality Control
+
+### Quick Commands (Makefile)
+
+```bash
+# Show all available commands
+make help
+
+# Run all quality checks (syntax + tests)
+make check
+
+# Run only new tests
+make test-new
+
+# Check Python syntax
+make syntax
+
+# Clean cache files
+make clean
+```
 
 ### Run Automated Checks
 
@@ -139,6 +164,14 @@ HYPERLIQUID_API_KEY=your_hyperliquid_key_here
 HYPERLIQUID_API_SECRET=your_hyperliquid_secret_here
 HYPERLIQUID_TESTNET=false
 ```
+
+**Important Notes:**
+- Hyperliquid integration is implemented using ccxt but requires verification before production use
+- Please verify with ccxt documentation:
+  - Correct API parameter names
+  - Testnet/sandbox mode configuration
+  - Market loading and symbol format
+- Test thoroughly on testnet before using with real funds
 
 **Note**: The system uses a pluggable exchange factory. To switch exchanges:
 1. Update the `EXCHANGE` variable in `.env`

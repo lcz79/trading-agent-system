@@ -102,6 +102,9 @@ def test_trailing_stop_doesnt_move_down():
 @pytest.mark.unit
 def test_breakeven_activation():
     """Test breakeven protection activation."""
+    # Precision tolerance for floating point comparisons
+    PRICE_PRECISION_TOLERANCE = 0.01
+    
     entry_price = 50000.0
     breakeven_activation_pct = 0.015  # 1.5% ROI
     breakeven_margin_pct = 0.001  # 0.1% margin above entry
@@ -122,7 +125,7 @@ def test_breakeven_activation():
         breakeven_stop = None
     
     assert should_activate is True
-    assert abs(breakeven_stop - 50050.0) < 0.01  # Entry + 0.1% (within precision)
+    assert abs(breakeven_stop - 50050.0) < PRICE_PRECISION_TOLERANCE  # Entry + 0.1% (within precision)
 
 
 @pytest.mark.unit

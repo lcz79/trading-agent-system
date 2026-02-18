@@ -370,8 +370,13 @@ def create_exchange(provider: str = None):
                 print("⚠️ HYPERLIQUID_API_KEY/HYPERLIQUID_API_SECRET missing: exchange not initialized")
                 return None
             
+            # TODO: Verify Hyperliquid ccxt integration
             # Note: ccxt.hyperliquid may have different initialization parameters
-            # This is a placeholder implementation that should be verified
+            # This is a placeholder implementation that should be verified with ccxt documentation
+            # before production use. Specifically check:
+            # 1. Correct API parameter names (apiKey vs api_key)
+            # 2. Testnet/sandbox mode configuration
+            # 3. Market loading and symbol format
             exchange_instance = ccxt.hyperliquid({
                 "apiKey": HYPERLIQUID_API_KEY,
                 "secret": HYPERLIQUID_API_SECRET,
