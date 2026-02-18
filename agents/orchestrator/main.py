@@ -162,6 +162,46 @@ async def fetch_learning_params(c: httpx.AsyncClient) -> dict:
     return {}
 
 
+async def log_active_strategy():
+    """
+    Log the active strategy configuration at startup.
+    Shows which parameters are being used and their source.
+    """
+    print("\n" + "="*80)
+    print(" 🎯 ACTIVE STRATEGY CONFIGURATION")
+    print("="*80)
+    
+    try:
+        # Try to fetch learning params
+        async with httpx.AsyncClient() as client:
+            learning_params = await fetch_learning_params(client)
+        
+        if learning_params:
+            print("✅ Strategy Source: Learning Agent (evolved_params.json)")
+            print(f"   Version: {learning_params.get('version', 'N/A')}")
+            print(f"   Last Updated: {learning_params.get('timestamp', 'N/A')}")
+            
+            params = learning_params.get('params', {})
+            if params:
+                print("\n📊 Active Parameters:")
+                print(f"   • Leverage: {params.get('default_leverage', 'N/A')}")
+                print(f"   • Size %: {params.get('size_pct', 'N/A')}")
+                print(f"   • RSI Overbought: {params.get('rsi_overbought', 'N/A')}")
+                print(f"   • RSI Oversold: {params.get('rsi_oversold', 'N/A')}")
+                print(f"   • Reverse Threshold: {params.get('reverse_threshold', 'N/A')}")
+                print(f"   • ATR Multiplier SL: {params.get('atr_multiplier_sl', 'N/A')}")
+                print(f"   • ATR Multiplier TP: {params.get('atr_multiplier_tp', 'N/A')}")
+        else:
+            print("⚠️  Strategy Source: Defaults (evolved_params.json not found)")
+            print("   Using Master AI default parameters")
+            
+    except Exception as e:
+        print(f"⚠️  Could not load strategy configuration: {e}")
+        print("   Will use Master AI defaults")
+    
+    print("="*80 + "\n")
+
+
 # --- HTTP helper: retry su errori di rete/DNS (Temporary failure in name resolution) ---
 import time
 import random
@@ -1431,6 +1471,9 @@ async def analysis_cycle():
             print(f"        ❌ AI/Exec Error: {e}")
 
 async def main_loop():
+    # Log active strategy configuration
+    await log_active_strategy()
+    
     # Startup logging
     print("\n" + "="*80)
     print(" TRADING ORCHESTRATOR - STARTUP CONFIGURATION")
