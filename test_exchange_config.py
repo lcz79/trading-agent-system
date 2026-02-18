@@ -41,6 +41,7 @@ def test_bybit_env_vars_present(mock_env_vars):
 
 
 @pytest.mark.unit
+@pytest.mark.exchange
 def test_exchange_factory_bybit(mock_env_vars):
     """Test exchange factory creates Bybit exchange correctly."""
     with patch('ccxt.bybit') as mock_bybit:
@@ -72,6 +73,7 @@ def test_exchange_factory_bybit(mock_env_vars):
 
 
 @pytest.mark.unit
+@pytest.mark.exchange
 def test_exchange_factory_hyperliquid(mock_env_vars, monkeypatch):
     """Test exchange factory creates Hyperliquid exchange correctly."""
     monkeypatch.setenv("EXCHANGE", "hyperliquid")
@@ -141,6 +143,7 @@ def test_testnet_mode_configuration(mock_env_vars):
 
 
 @pytest.mark.integration
+@pytest.mark.exchange
 def test_exchange_initialization_with_config(mock_env_vars, mock_bybit_exchange):
     """Test that exchange initializes correctly with configuration."""
     with patch('ccxt.bybit', return_value=mock_bybit_exchange):

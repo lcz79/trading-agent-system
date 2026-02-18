@@ -122,7 +122,7 @@ def test_breakeven_activation():
         breakeven_stop = None
     
     assert should_activate is True
-    assert breakeven_stop == 50050.0  # Entry + 0.1%
+    assert abs(breakeven_stop - 50050.0) < 0.01  # Entry + 0.1% (within precision)
 
 
 @pytest.mark.unit
@@ -232,6 +232,7 @@ def test_atr_based_trailing_calculation():
 
 
 @pytest.mark.integration
+@pytest.mark.exchange
 def test_position_manager_stop_loss_consistency(mock_bybit_exchange):
     """Test that position manager maintains stop loss consistency."""
     with patch('ccxt.bybit', return_value=mock_bybit_exchange):
