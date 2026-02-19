@@ -1,0 +1,4536 @@
+[
+  {
+    "timestamp": "2025-12-29T15:49:52.172970",
+    "event_type": "time_exit_extended",
+    "symbol": "SOLUSDT",
+    "side": "short",
+    "reason": "Strong trend (ADX=42.3), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 23721,
+      "original_limit_sec": 23700,
+      "new_limit_sec": 24900,
+      "adx": 42.27
+    }
+  },
+  {
+    "timestamp": "2025-12-29T15:57:03.972769",
+    "event_type": "time_exit_extended",
+    "symbol": "ETHUSDT",
+    "side": "short",
+    "reason": "Strong trend (ADX=39.1), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 6610,
+      "original_limit_sec": 6600,
+      "new_limit_sec": 7800,
+      "adx": 39.11
+    }
+  },
+  {
+    "timestamp": "2025-12-29T16:06:20.266923",
+    "event_type": "time_exit_extended",
+    "symbol": "BTCUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=34.7), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 13805,
+      "original_limit_sec": 13800,
+      "new_limit_sec": 15000,
+      "adx": 34.66
+    }
+  },
+  {
+    "timestamp": "2025-12-29T16:09:26.132600",
+    "event_type": "time_exit_extended",
+    "symbol": "SOLUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=41.8), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 2425,
+      "original_limit_sec": 2400,
+      "new_limit_sec": 3600,
+      "adx": 41.81
+    }
+  },
+  {
+    "timestamp": "2025-12-29T16:09:58.046851",
+    "event_type": "time_exit_extended",
+    "symbol": "SOLUSDT",
+    "side": "short",
+    "reason": "Strong trend (ADX=41.8), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 24926,
+      "original_limit_sec": 24900,
+      "new_limit_sec": 26100,
+      "adx": 41.81
+    }
+  },
+  {
+    "timestamp": "2025-12-29T16:12:33.131134",
+    "event_type": "time_exit_extended",
+    "symbol": "ETHUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=37.6), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 2406,
+      "original_limit_sec": 2400,
+      "new_limit_sec": 3600,
+      "adx": 37.59
+    }
+  },
+  {
+    "timestamp": "2025-12-29T16:16:53.780263",
+    "event_type": "time_exit_extended",
+    "symbol": "ETHUSDT",
+    "side": "short",
+    "reason": "Strong trend (ADX=36.2), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 7800,
+      "original_limit_sec": 7800,
+      "new_limit_sec": 9000,
+      "adx": 36.22
+    }
+  },
+  {
+    "timestamp": "2025-12-29T16:23:37.027225",
+    "event_type": "time_exit_extended",
+    "symbol": "BTCUSDT",
+    "side": "short",
+    "reason": "Strong trend (ADX=32.7), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 1826,
+      "original_limit_sec": 1800,
+      "new_limit_sec": 3000,
+      "adx": 32.68
+    }
+  },
+  {
+    "timestamp": "2025-12-29T16:26:38.598390",
+    "event_type": "time_exit_extended",
+    "symbol": "BTCUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=32.8), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 15023,
+      "original_limit_sec": 15000,
+      "new_limit_sec": 16200,
+      "adx": 32.79
+    }
+  },
+  {
+    "timestamp": "2025-12-29T16:29:08.202293",
+    "event_type": "time_exit_extended",
+    "symbol": "SOLUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=41.9), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 3607,
+      "original_limit_sec": 3600,
+      "new_limit_sec": 4800,
+      "adx": 41.88
+    }
+  },
+  {
+    "timestamp": "2025-12-29T16:29:54.559391",
+    "event_type": "time_exit_extended",
+    "symbol": "SOLUSDT",
+    "side": "short",
+    "reason": "Strong trend (ADX=41.9), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 26123,
+      "original_limit_sec": 26100,
+      "new_limit_sec": 27300,
+      "adx": 41.88
+    }
+  },
+  {
+    "timestamp": "2025-12-29T16:33:03.210408",
+    "event_type": "time_exit_extended",
+    "symbol": "ETHUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=35.8), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 3636,
+      "original_limit_sec": 3600,
+      "new_limit_sec": 4800,
+      "adx": 35.84
+    }
+  },
+  {
+    "timestamp": "2025-12-29T16:37:26.035512",
+    "event_type": "time_exit_extended",
+    "symbol": "ETHUSDT",
+    "side": "short",
+    "reason": "Strong trend (ADX=35.8), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 9032,
+      "original_limit_sec": 9000,
+      "new_limit_sec": 10200,
+      "adx": 35.84
+    }
+  },
+  {
+    "timestamp": "2025-12-29T16:43:16.049574",
+    "event_type": "time_exit_extended",
+    "symbol": "BTCUSDT",
+    "side": "short",
+    "reason": "Strong trend (ADX=32.0), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 3005,
+      "original_limit_sec": 3000,
+      "new_limit_sec": 4200,
+      "adx": 31.98
+    }
+  },
+  {
+    "timestamp": "2025-12-29T16:46:22.275395",
+    "event_type": "time_exit_extended",
+    "symbol": "BTCUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=30.7), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 16207,
+      "original_limit_sec": 16200,
+      "new_limit_sec": 17400,
+      "adx": 30.69
+    }
+  },
+  {
+    "timestamp": "2025-12-29T16:49:27.945775",
+    "event_type": "time_exit_extended",
+    "symbol": "SOLUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=41.1), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 4827,
+      "original_limit_sec": 4800,
+      "new_limit_sec": 6000,
+      "adx": 41.08
+    }
+  },
+  {
+    "timestamp": "2025-12-29T16:50:00.470672",
+    "event_type": "time_exit_extended",
+    "symbol": "SOLUSDT",
+    "side": "short",
+    "reason": "Strong trend (ADX=41.1), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 27329,
+      "original_limit_sec": 27300,
+      "new_limit_sec": 28500,
+      "adx": 41.08
+    }
+  },
+  {
+    "timestamp": "2025-12-29T16:52:35.355918",
+    "event_type": "time_exit_extended",
+    "symbol": "ETHUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=34.4), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 4808,
+      "original_limit_sec": 4800,
+      "new_limit_sec": 6000,
+      "adx": 34.41
+    }
+  },
+  {
+    "timestamp": "2025-12-29T16:57:14.321552",
+    "event_type": "time_exit_extended",
+    "symbol": "ETHUSDT",
+    "side": "short",
+    "reason": "Strong trend (ADX=34.4), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 10221,
+      "original_limit_sec": 10200,
+      "new_limit_sec": 11400,
+      "adx": 34.41
+    }
+  },
+  {
+    "timestamp": "2025-12-29T17:03:24.351240",
+    "event_type": "time_exit_extended",
+    "symbol": "BTCUSDT",
+    "side": "short",
+    "reason": "Strong trend (ADX=29.2), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 4213,
+      "original_limit_sec": 4200,
+      "new_limit_sec": 5400,
+      "adx": 29.23
+    }
+  },
+  {
+    "timestamp": "2025-12-29T17:06:30.014354",
+    "event_type": "time_exit_extended",
+    "symbol": "BTCUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=29.2), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 17415,
+      "original_limit_sec": 17400,
+      "new_limit_sec": 18600,
+      "adx": 29.23
+    }
+  },
+  {
+    "timestamp": "2025-12-29T17:09:04.998433",
+    "event_type": "time_exit_extended",
+    "symbol": "SOLUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=39.9), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 6004,
+      "original_limit_sec": 6000,
+      "new_limit_sec": 7200,
+      "adx": 39.88
+    }
+  },
+  {
+    "timestamp": "2025-12-29T17:09:36.906458",
+    "event_type": "time_exit_extended",
+    "symbol": "SOLUSDT",
+    "side": "short",
+    "reason": "Strong trend (ADX=39.9), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 28505,
+      "original_limit_sec": 28500,
+      "new_limit_sec": 29700,
+      "adx": 39.88
+    }
+  },
+  {
+    "timestamp": "2025-12-29T17:12:42.552531",
+    "event_type": "time_exit_extended",
+    "symbol": "ETHUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=33.1), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 6015,
+      "original_limit_sec": 6000,
+      "new_limit_sec": 7200,
+      "adx": 33.1
+    }
+  },
+  {
+    "timestamp": "2025-12-29T17:17:20.934346",
+    "event_type": "time_exit_extended",
+    "symbol": "ETHUSDT",
+    "side": "short",
+    "reason": "Strong trend (ADX=32.0), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 11427,
+      "original_limit_sec": 11400,
+      "new_limit_sec": 12600,
+      "adx": 32.04
+    }
+  },
+  {
+    "timestamp": "2025-12-29T17:23:33.206681",
+    "event_type": "time_exit_extended",
+    "symbol": "BTCUSDT",
+    "side": "short",
+    "reason": "Strong trend (ADX=28.1), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 5421,
+      "original_limit_sec": 5400,
+      "new_limit_sec": 6600,
+      "adx": 28.08
+    }
+  },
+  {
+    "timestamp": "2025-12-29T17:26:41.570536",
+    "event_type": "time_exit_extended",
+    "symbol": "BTCUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=28.3), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 18626,
+      "original_limit_sec": 18600,
+      "new_limit_sec": 19800,
+      "adx": 28.31
+    }
+  },
+  {
+    "timestamp": "2025-12-29T17:29:22.112699",
+    "event_type": "time_exit_extended",
+    "symbol": "SOLUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=39.2), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 7221,
+      "original_limit_sec": 7200,
+      "new_limit_sec": 8400,
+      "adx": 39.21
+    }
+  },
+  {
+    "timestamp": "2025-12-29T17:29:55.511165",
+    "event_type": "time_exit_extended",
+    "symbol": "SOLUSDT",
+    "side": "short",
+    "reason": "Strong trend (ADX=39.2), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 29724,
+      "original_limit_sec": 29700,
+      "new_limit_sec": 30900,
+      "adx": 39.21
+    }
+  },
+  {
+    "timestamp": "2025-12-29T17:32:36.233293",
+    "event_type": "time_exit_extended",
+    "symbol": "ETHUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=32.0), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 7209,
+      "original_limit_sec": 7200,
+      "new_limit_sec": 8400,
+      "adx": 31.97
+    }
+  },
+  {
+    "timestamp": "2025-12-29T17:36:55.644489",
+    "event_type": "time_exit_extended",
+    "symbol": "ETHUSDT",
+    "side": "short",
+    "reason": "Strong trend (ADX=32.0), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 12602,
+      "original_limit_sec": 12600,
+      "new_limit_sec": 13800,
+      "adx": 31.97
+    }
+  },
+  {
+    "timestamp": "2025-12-29T17:43:15.516576",
+    "event_type": "time_exit_extended",
+    "symbol": "BTCUSDT",
+    "side": "short",
+    "reason": "Strong trend (ADX=28.4), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 6604,
+      "original_limit_sec": 6600,
+      "new_limit_sec": 7800,
+      "adx": 28.42
+    }
+  },
+  {
+    "timestamp": "2025-12-29T17:46:24.539433",
+    "event_type": "time_exit_extended",
+    "symbol": "BTCUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=27.8), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 19809,
+      "original_limit_sec": 19800,
+      "new_limit_sec": 21000,
+      "adx": 27.79
+    }
+  },
+  {
+    "timestamp": "2025-12-29T17:49:38.912085",
+    "event_type": "time_exit_extended",
+    "symbol": "SOLUSDT",
+    "side": "short",
+    "reason": "Strong trend (ADX=37.6), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 30907,
+      "original_limit_sec": 30900,
+      "new_limit_sec": 32100,
+      "adx": 37.56
+    }
+  },
+  {
+    "timestamp": "2025-12-29T17:52:51.424420",
+    "event_type": "time_exit_extended",
+    "symbol": "ETHUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=30.8), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 8424,
+      "original_limit_sec": 8400,
+      "new_limit_sec": 9600,
+      "adx": 30.77
+    }
+  },
+  {
+    "timestamp": "2025-12-29T17:57:10.175089",
+    "event_type": "time_exit_extended",
+    "symbol": "ETHUSDT",
+    "side": "short",
+    "reason": "Strong trend (ADX=30.5), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 13816,
+      "original_limit_sec": 13800,
+      "new_limit_sec": 15000,
+      "adx": 30.5
+    }
+  },
+  {
+    "timestamp": "2025-12-29T18:03:40.864695",
+    "event_type": "time_exit_extended",
+    "symbol": "BTCUSDT",
+    "side": "short",
+    "reason": "Strong trend (ADX=25.1), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 7830,
+      "original_limit_sec": 7800,
+      "new_limit_sec": 9000,
+      "adx": 25.07
+    }
+  },
+  {
+    "timestamp": "2025-12-29T18:06:23.841108",
+    "event_type": "time_exit_extended",
+    "symbol": "BTCUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=25.1), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 21009,
+      "original_limit_sec": 21000,
+      "new_limit_sec": 22200,
+      "adx": 25.07
+    }
+  },
+  {
+    "timestamp": "2025-12-29T18:09:37.883434",
+    "event_type": "time_exit_extended",
+    "symbol": "SOLUSDT",
+    "side": "short",
+    "reason": "Strong trend (ADX=35.6), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 32106,
+      "original_limit_sec": 32100,
+      "new_limit_sec": 33300,
+      "adx": 35.63
+    }
+  },
+  {
+    "timestamp": "2025-12-29T18:12:18.598772",
+    "event_type": "time_exit_extended",
+    "symbol": "SOLUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=35.6), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 2401,
+      "original_limit_sec": 2400,
+      "new_limit_sec": 3600,
+      "adx": 35.63
+    }
+  },
+  {
+    "timestamp": "2025-12-29T18:12:51.632808",
+    "event_type": "time_exit_extended",
+    "symbol": "ETHUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=28.9), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 9624,
+      "original_limit_sec": 9600,
+      "new_limit_sec": 10800,
+      "adx": 28.87
+    }
+  },
+  {
+    "timestamp": "2025-12-29T18:17:08.039327",
+    "event_type": "time_exit_extended",
+    "symbol": "ETHUSDT",
+    "side": "short",
+    "reason": "Strong trend (ADX=27.3), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 15014,
+      "original_limit_sec": 15000,
+      "new_limit_sec": 16200,
+      "adx": 27.32
+    }
+  },
+  {
+    "timestamp": "2025-12-29T18:23:33.637470",
+    "event_type": "time_based_exit",
+    "symbol": "BTCUSDT",
+    "side": "short",
+    "reason": "Position exceeded max holding time (time_exit_flat)",
+    "data": {
+      "time_in_trade_sec": 9022,
+      "limit_sec": 9000,
+      "exit_reason": "time_exit_flat",
+      "adx": 23.5
+    }
+  },
+  {
+    "timestamp": "2025-12-29T18:29:47.653147",
+    "event_type": "time_exit_extended",
+    "symbol": "SOLUSDT",
+    "side": "short",
+    "reason": "Strong trend (ADX=34.1), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 33316,
+      "original_limit_sec": 33300,
+      "new_limit_sec": 34500,
+      "adx": 34.06
+    }
+  },
+  {
+    "timestamp": "2025-12-29T18:32:45.395633",
+    "event_type": "time_exit_extended",
+    "symbol": "ETHUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=26.0), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 10818,
+      "original_limit_sec": 10800,
+      "new_limit_sec": 12000,
+      "adx": 25.98
+    }
+  },
+  {
+    "timestamp": "2025-12-29T18:32:46.520498",
+    "event_type": "time_exit_extended",
+    "symbol": "SOLUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=32.6), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 3629,
+      "original_limit_sec": 3600,
+      "new_limit_sec": 4800,
+      "adx": 32.59
+    }
+  },
+  {
+    "timestamp": "2025-12-29T18:37:23.828814",
+    "event_type": "time_exit_extended",
+    "symbol": "ETHUSDT",
+    "side": "short",
+    "reason": "Strong trend (ADX=26.0), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 16230,
+      "original_limit_sec": 16200,
+      "new_limit_sec": 17400,
+      "adx": 25.98
+    }
+  },
+  {
+    "timestamp": "2025-12-29T18:38:00.143918",
+    "event_type": "time_based_exit",
+    "symbol": "BTCUSDT",
+    "side": "long",
+    "reason": "Position exceeded max holding time (time_exit_flat)",
+    "data": {
+      "time_in_trade_sec": 22905,
+      "limit_sec": 22200,
+      "exit_reason": "time_exit_flat",
+      "adx": 21.94
+    }
+  },
+  {
+    "timestamp": "2025-12-29T18:49:55.835946",
+    "event_type": "time_exit_extended",
+    "symbol": "SOLUSDT",
+    "side": "short",
+    "reason": "Strong trend (ADX=32.2), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 34524,
+      "original_limit_sec": 34500,
+      "new_limit_sec": 35700,
+      "adx": 32.19
+    }
+  },
+  {
+    "timestamp": "2025-12-29T18:52:39.598062",
+    "event_type": "time_exit_extended",
+    "symbol": "ETHUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=25.6), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 12012,
+      "original_limit_sec": 12000,
+      "new_limit_sec": 13200,
+      "adx": 25.6
+    }
+  },
+  {
+    "timestamp": "2025-12-29T18:52:40.693028",
+    "event_type": "time_exit_extended",
+    "symbol": "SOLUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=32.2), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 4823,
+      "original_limit_sec": 4800,
+      "new_limit_sec": 6000,
+      "adx": 32.19
+    }
+  },
+  {
+    "timestamp": "2025-12-29T18:53:44.937328",
+    "event_type": "time_based_exit",
+    "symbol": "BTCUSDT",
+    "side": "long",
+    "reason": "Position exceeded max holding time (time_exit_flat)",
+    "data": {
+      "time_in_trade_sec": 23850,
+      "limit_sec": 22200,
+      "exit_reason": "time_exit_flat",
+      "adx": 21.37
+    }
+  },
+  {
+    "timestamp": "2025-12-29T18:57:13.757651",
+    "event_type": "time_exit_extended",
+    "symbol": "ETHUSDT",
+    "side": "short",
+    "reason": "Strong trend (ADX=26.8), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 17420,
+      "original_limit_sec": 17400,
+      "new_limit_sec": 18600,
+      "adx": 26.76
+    }
+  },
+  {
+    "timestamp": "2025-12-29T19:09:51.344301",
+    "event_type": "time_exit_extended",
+    "symbol": "SOLUSDT",
+    "side": "short",
+    "reason": "Strong trend (ADX=32.4), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 35720,
+      "original_limit_sec": 35700,
+      "new_limit_sec": 36900,
+      "adx": 32.35
+    }
+  },
+  {
+    "timestamp": "2025-12-29T19:12:36.910063",
+    "event_type": "time_exit_extended",
+    "symbol": "ETHUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=26.1), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 13209,
+      "original_limit_sec": 13200,
+      "new_limit_sec": 14400,
+      "adx": 26.14
+    }
+  },
+  {
+    "timestamp": "2025-12-29T19:12:38.078768",
+    "event_type": "time_exit_extended",
+    "symbol": "SOLUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=31.9), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 6020,
+      "original_limit_sec": 6000,
+      "new_limit_sec": 7200,
+      "adx": 31.94
+    }
+  },
+  {
+    "timestamp": "2025-12-29T19:16:54.674433",
+    "event_type": "time_exit_extended",
+    "symbol": "ETHUSDT",
+    "side": "short",
+    "reason": "Strong trend (ADX=25.5), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 18601,
+      "original_limit_sec": 18600,
+      "new_limit_sec": 19800,
+      "adx": 25.53
+    }
+  },
+  {
+    "timestamp": "2025-12-29T19:23:46.798131",
+    "event_type": "time_based_exit",
+    "symbol": "BTCUSDT",
+    "side": "short",
+    "reason": "Position exceeded max holding time (time_exit_flat)",
+    "data": {
+      "time_in_trade_sec": 1819,
+      "limit_sec": 1800,
+      "exit_reason": "time_exit_flat",
+      "adx": 20.47
+    }
+  },
+  {
+    "timestamp": "2025-12-29T19:29:40.680685",
+    "event_type": "time_exit_extended",
+    "symbol": "SOLUSDT",
+    "side": "short",
+    "reason": "Strong trend (ADX=31.3), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 36909,
+      "original_limit_sec": 36900,
+      "new_limit_sec": 38100,
+      "adx": 31.27
+    }
+  },
+  {
+    "timestamp": "2025-12-29T19:32:33.612225",
+    "event_type": "time_exit_extended",
+    "symbol": "SOLUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=30.7), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 7216,
+      "original_limit_sec": 7200,
+      "new_limit_sec": 8400,
+      "adx": 30.74
+    }
+  },
+  {
+    "timestamp": "2025-12-29T19:38:57.068335",
+    "event_type": "time_exit_extended",
+    "symbol": "ETHUSDT",
+    "side": "short",
+    "reason": "Strong trend (ADX=25.3), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 19923,
+      "original_limit_sec": 19800,
+      "new_limit_sec": 21000,
+      "adx": 25.3
+    }
+  },
+  {
+    "timestamp": "2025-12-29T19:39:01.127116",
+    "event_type": "time_exit_extended",
+    "symbol": "ETHUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=25.4), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 14794,
+      "original_limit_sec": 14400,
+      "new_limit_sec": 15600,
+      "adx": 25.42
+    }
+  },
+  {
+    "timestamp": "2025-12-29T19:49:37.346864",
+    "event_type": "time_exit_extended",
+    "symbol": "SOLUSDT",
+    "side": "short",
+    "reason": "Strong trend (ADX=30.6), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 38106,
+      "original_limit_sec": 38100,
+      "new_limit_sec": 39300,
+      "adx": 30.64
+    }
+  },
+  {
+    "timestamp": "2025-12-29T19:52:30.153021",
+    "event_type": "time_exit_extended",
+    "symbol": "ETHUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=25.3), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 15603,
+      "original_limit_sec": 15600,
+      "new_limit_sec": 16800,
+      "adx": 25.29
+    }
+  },
+  {
+    "timestamp": "2025-12-29T19:52:31.319510",
+    "event_type": "time_exit_extended",
+    "symbol": "SOLUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=30.8), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 8414,
+      "original_limit_sec": 8400,
+      "new_limit_sec": 9600,
+      "adx": 30.84
+    }
+  },
+  {
+    "timestamp": "2025-12-29T19:56:57.419340",
+    "event_type": "time_exit_extended",
+    "symbol": "ETHUSDT",
+    "side": "short",
+    "reason": "Strong trend (ADX=25.3), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 21004,
+      "original_limit_sec": 21000,
+      "new_limit_sec": 22200,
+      "adx": 25.29
+    }
+  },
+  {
+    "timestamp": "2025-12-29T20:09:52.056763",
+    "event_type": "time_exit_extended",
+    "symbol": "SOLUSDT",
+    "side": "short",
+    "reason": "Strong trend (ADX=29.9), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 39321,
+      "original_limit_sec": 39300,
+      "new_limit_sec": 40500,
+      "adx": 29.89
+    }
+  },
+  {
+    "timestamp": "2025-12-29T20:12:45.339770",
+    "event_type": "time_exit_extended",
+    "symbol": "ETHUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=25.3), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 16818,
+      "original_limit_sec": 16800,
+      "new_limit_sec": 18000,
+      "adx": 25.31
+    }
+  },
+  {
+    "timestamp": "2025-12-29T20:12:46.465189",
+    "event_type": "time_exit_extended",
+    "symbol": "SOLUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=29.7), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 9629,
+      "original_limit_sec": 9600,
+      "new_limit_sec": 10800,
+      "adx": 29.72
+    }
+  },
+  {
+    "timestamp": "2025-12-29T20:29:40.000710",
+    "event_type": "time_exit_extended",
+    "symbol": "SOLUSDT",
+    "side": "short",
+    "reason": "Strong trend (ADX=28.2), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 40508,
+      "original_limit_sec": 40500,
+      "new_limit_sec": 41700,
+      "adx": 28.19
+    }
+  },
+  {
+    "timestamp": "2025-12-29T20:32:31.473104",
+    "event_type": "time_based_exit",
+    "symbol": "ETHUSDT",
+    "side": "long",
+    "reason": "Position exceeded max holding time (time_exit_flat)",
+    "data": {
+      "time_in_trade_sec": 18004,
+      "limit_sec": 18000,
+      "exit_reason": "time_exit_flat",
+      "adx": 24.55
+    }
+  },
+  {
+    "timestamp": "2025-12-29T20:32:32.619680",
+    "event_type": "time_exit_extended",
+    "symbol": "SOLUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=26.8), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 10815,
+      "original_limit_sec": 10800,
+      "new_limit_sec": 12000,
+      "adx": 26.83
+    }
+  },
+  {
+    "timestamp": "2025-12-29T20:50:07.511297",
+    "event_type": "time_exit_extended",
+    "symbol": "SOLUSDT",
+    "side": "short",
+    "reason": "Strong trend (ADX=26.6), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 41736,
+      "original_limit_sec": 41700,
+      "new_limit_sec": 42900,
+      "adx": 26.56
+    }
+  },
+  {
+    "timestamp": "2025-12-29T20:51:24.345450",
+    "event_type": "time_exit_extended",
+    "symbol": "ETHUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=25.0), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 19137,
+      "original_limit_sec": 18000,
+      "new_limit_sec": 19200,
+      "adx": 25.03
+    }
+  },
+  {
+    "timestamp": "2025-12-29T20:51:56.193005",
+    "event_type": "time_exit_extended",
+    "symbol": "ETHUSDT",
+    "side": "short",
+    "reason": "Strong trend (ADX=25.1), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 2646,
+      "original_limit_sec": 2400,
+      "new_limit_sec": 3600,
+      "adx": 25.1
+    }
+  },
+  {
+    "timestamp": "2025-12-29T20:52:33.533515",
+    "event_type": "time_exit_extended",
+    "symbol": "ETHUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=25.1), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 19206,
+      "original_limit_sec": 19200,
+      "new_limit_sec": 20400,
+      "adx": 25.1
+    }
+  },
+  {
+    "timestamp": "2025-12-29T20:52:34.667215",
+    "event_type": "time_exit_extended",
+    "symbol": "SOLUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=26.6), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 12017,
+      "original_limit_sec": 12000,
+      "new_limit_sec": 13200,
+      "adx": 26.56
+    }
+  },
+  {
+    "timestamp": "2025-12-29T21:08:13.926108",
+    "event_type": "time_exit_extended",
+    "symbol": "ETHUSDT",
+    "side": "short",
+    "reason": "Strong trend (ADX=25.1), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 3623,
+      "original_limit_sec": 3600,
+      "new_limit_sec": 4800,
+      "adx": 25.1
+    }
+  },
+  {
+    "timestamp": "2025-12-29T21:09:56.868873",
+    "event_type": "time_based_exit",
+    "symbol": "SOLUSDT",
+    "side": "short",
+    "reason": "Position exceeded max holding time (time_exit_flat)",
+    "data": {
+      "time_in_trade_sec": 42924,
+      "limit_sec": 42900,
+      "exit_reason": "time_exit_flat",
+      "adx": 24.4
+    }
+  },
+  {
+    "timestamp": "2025-12-29T21:12:55.997779",
+    "event_type": "time_exit_extended",
+    "symbol": "ETHUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=25.0), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 20429,
+      "original_limit_sec": 20400,
+      "new_limit_sec": 21600,
+      "adx": 25.04
+    }
+  },
+  {
+    "timestamp": "2025-12-29T21:32:58.324748",
+    "event_type": "time_based_exit",
+    "symbol": "BTCUSDT",
+    "side": "short",
+    "reason": "Position exceeded max holding time (time_exit_flat)",
+    "data": {
+      "time_in_trade_sec": 9571,
+      "limit_sec": 1800,
+      "exit_reason": "time_exit_flat",
+      "adx": 17.98
+    }
+  },
+  {
+    "timestamp": "2025-12-29T21:33:01.115397",
+    "event_type": "time_based_exit",
+    "symbol": "ETHUSDT",
+    "side": "long",
+    "reason": "Position exceeded max holding time (time_exit_flat)",
+    "data": {
+      "time_in_trade_sec": 21633,
+      "limit_sec": 21600,
+      "exit_reason": "time_exit_flat",
+      "adx": 23.61
+    }
+  },
+  {
+    "timestamp": "2025-12-29T21:33:02.661754",
+    "event_type": "time_based_exit",
+    "symbol": "SOLUSDT",
+    "side": "long",
+    "reason": "Position exceeded max holding time (time_exit_flat)",
+    "data": {
+      "time_in_trade_sec": 14445,
+      "limit_sec": 13200,
+      "exit_reason": "time_exit_flat",
+      "adx": 21.08
+    }
+  },
+  {
+    "timestamp": "2025-12-29T21:40:33.266429",
+    "event_type": "time_based_exit",
+    "symbol": "BTCUSDT",
+    "side": "long",
+    "reason": "Position exceeded max holding time (time_exit_flat)",
+    "data": {
+      "time_in_trade_sec": 9623,
+      "limit_sec": 1800,
+      "exit_reason": "time_exit_flat",
+      "adx": 17.98
+    }
+  },
+  {
+    "timestamp": "2025-12-29T21:57:21.797071",
+    "event_type": "time_based_exit",
+    "symbol": "ETHUSDT",
+    "side": "long",
+    "reason": "Position exceeded max holding time (time_exit_flat)",
+    "data": {
+      "time_in_trade_sec": 23094,
+      "limit_sec": 21600,
+      "exit_reason": "time_exit_flat",
+      "adx": 22.69
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:21:46.549204",
+    "event_type": "time_exit_extended",
+    "symbol": "ETHUSDT",
+    "side": "short",
+    "reason": "Strong trend (ADX=33.1), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 41082,
+      "original_limit_sec": 1800,
+      "new_limit_sec": 3000,
+      "adx": 33.11
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:21:47.729730",
+    "event_type": "time_exit_extended",
+    "symbol": "SOLUSDT",
+    "side": "short",
+    "reason": "Strong trend (ADX=26.1), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 42528,
+      "original_limit_sec": 1800,
+      "new_limit_sec": 3000,
+      "adx": 26.06
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:21:48.852194",
+    "event_type": "time_exit_extended",
+    "symbol": "BTCUSDT",
+    "side": "short",
+    "reason": "Strong trend (ADX=30.6), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 42084,
+      "original_limit_sec": 2400,
+      "new_limit_sec": 3600,
+      "adx": 30.59
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:21:50.075578",
+    "event_type": "time_exit_extended",
+    "symbol": "BTCUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=30.6), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 51700,
+      "original_limit_sec": 1800,
+      "new_limit_sec": 3000,
+      "adx": 30.59
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:21:51.322775",
+    "event_type": "time_exit_extended",
+    "symbol": "ETHUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=33.1), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 64164,
+      "original_limit_sec": 21600,
+      "new_limit_sec": 22800,
+      "adx": 33.11
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:21:52.482337",
+    "event_type": "time_exit_extended",
+    "symbol": "SOLUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=26.1), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 56975,
+      "original_limit_sec": 13200,
+      "new_limit_sec": 14400,
+      "adx": 26.06
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:22:24.467052",
+    "event_type": "time_exit_extended",
+    "symbol": "ETHUSDT",
+    "side": "short",
+    "reason": "Strong trend (ADX=33.1), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 41120,
+      "original_limit_sec": 3000,
+      "new_limit_sec": 4200,
+      "adx": 33.11
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:22:25.820474",
+    "event_type": "time_exit_extended",
+    "symbol": "SOLUSDT",
+    "side": "short",
+    "reason": "Strong trend (ADX=26.1), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 42566,
+      "original_limit_sec": 3000,
+      "new_limit_sec": 4200,
+      "adx": 26.06
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:22:26.994827",
+    "event_type": "time_exit_extended",
+    "symbol": "BTCUSDT",
+    "side": "short",
+    "reason": "Strong trend (ADX=30.6), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 42122,
+      "original_limit_sec": 3600,
+      "new_limit_sec": 4800,
+      "adx": 30.59
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:22:28.170624",
+    "event_type": "time_exit_extended",
+    "symbol": "BTCUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=30.6), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 51738,
+      "original_limit_sec": 3000,
+      "new_limit_sec": 4200,
+      "adx": 30.59
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:22:29.380866",
+    "event_type": "time_exit_extended",
+    "symbol": "ETHUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=33.1), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 64202,
+      "original_limit_sec": 22800,
+      "new_limit_sec": 24000,
+      "adx": 33.11
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:22:30.536173",
+    "event_type": "time_exit_extended",
+    "symbol": "SOLUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=26.1), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 57013,
+      "original_limit_sec": 14400,
+      "new_limit_sec": 15600,
+      "adx": 26.06
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:23:02.802988",
+    "event_type": "time_exit_extended",
+    "symbol": "ETHUSDT",
+    "side": "short",
+    "reason": "Strong trend (ADX=33.1), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 41158,
+      "original_limit_sec": 4200,
+      "new_limit_sec": 5400,
+      "adx": 33.11
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:23:04.946870",
+    "event_type": "time_exit_extended",
+    "symbol": "SOLUSDT",
+    "side": "short",
+    "reason": "Strong trend (ADX=26.1), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 42605,
+      "original_limit_sec": 4200,
+      "new_limit_sec": 5400,
+      "adx": 26.06
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:23:06.177558",
+    "event_type": "time_exit_extended",
+    "symbol": "BTCUSDT",
+    "side": "short",
+    "reason": "Strong trend (ADX=30.6), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 42161,
+      "original_limit_sec": 4800,
+      "new_limit_sec": 6000,
+      "adx": 30.59
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:23:07.748126",
+    "event_type": "time_exit_extended",
+    "symbol": "BTCUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=30.6), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 51777,
+      "original_limit_sec": 4200,
+      "new_limit_sec": 5400,
+      "adx": 30.59
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:23:08.893073",
+    "event_type": "time_exit_extended",
+    "symbol": "ETHUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=33.1), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 64241,
+      "original_limit_sec": 24000,
+      "new_limit_sec": 25200,
+      "adx": 33.11
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:23:10.043739",
+    "event_type": "time_exit_extended",
+    "symbol": "SOLUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=26.1), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 57052,
+      "original_limit_sec": 15600,
+      "new_limit_sec": 16800,
+      "adx": 26.06
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:23:41.985554",
+    "event_type": "time_exit_extended",
+    "symbol": "BTCUSDT",
+    "side": "short",
+    "reason": "Strong trend (ADX=30.6), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 42197,
+      "original_limit_sec": 6000,
+      "new_limit_sec": 7200,
+      "adx": 30.59
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:23:43.130016",
+    "event_type": "time_exit_extended",
+    "symbol": "BTCUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=30.6), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 51813,
+      "original_limit_sec": 5400,
+      "new_limit_sec": 6600,
+      "adx": 30.59
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:23:44.278892",
+    "event_type": "time_exit_extended",
+    "symbol": "ETHUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=33.1), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 64277,
+      "original_limit_sec": 25200,
+      "new_limit_sec": 26400,
+      "adx": 33.11
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:23:45.787317",
+    "event_type": "time_exit_extended",
+    "symbol": "SOLUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=26.1), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 57088,
+      "original_limit_sec": 16800,
+      "new_limit_sec": 18000,
+      "adx": 26.06
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:24:20.053371",
+    "event_type": "time_exit_extended",
+    "symbol": "BTCUSDT",
+    "side": "short",
+    "reason": "Strong trend (ADX=30.6), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 42235,
+      "original_limit_sec": 7200,
+      "new_limit_sec": 8400,
+      "adx": 30.59
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:24:21.322426",
+    "event_type": "time_exit_extended",
+    "symbol": "BTCUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=30.6), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 51851,
+      "original_limit_sec": 6600,
+      "new_limit_sec": 7800,
+      "adx": 30.59
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:24:22.510313",
+    "event_type": "time_exit_extended",
+    "symbol": "ETHUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=32.9), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 64315,
+      "original_limit_sec": 26400,
+      "new_limit_sec": 27600,
+      "adx": 32.85
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:24:23.679937",
+    "event_type": "time_exit_extended",
+    "symbol": "SOLUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=25.9), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 57126,
+      "original_limit_sec": 18000,
+      "new_limit_sec": 19200,
+      "adx": 25.92
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:24:57.865455",
+    "event_type": "time_exit_extended",
+    "symbol": "BTCUSDT",
+    "side": "short",
+    "reason": "Strong trend (ADX=30.3), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 42273,
+      "original_limit_sec": 8400,
+      "new_limit_sec": 9600,
+      "adx": 30.34
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:24:59.039816",
+    "event_type": "time_exit_extended",
+    "symbol": "BTCUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=30.3), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 51889,
+      "original_limit_sec": 7800,
+      "new_limit_sec": 9000,
+      "adx": 30.34
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:25:00.229860",
+    "event_type": "time_exit_extended",
+    "symbol": "ETHUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=32.6), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 64353,
+      "original_limit_sec": 27600,
+      "new_limit_sec": 28800,
+      "adx": 32.62
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:25:01.821458",
+    "event_type": "time_exit_extended",
+    "symbol": "SOLUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=25.6), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 57164,
+      "original_limit_sec": 19200,
+      "new_limit_sec": 20400,
+      "adx": 25.58
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:25:35.960406",
+    "event_type": "time_exit_extended",
+    "symbol": "BTCUSDT",
+    "side": "short",
+    "reason": "Strong trend (ADX=30.3), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 42311,
+      "original_limit_sec": 9600,
+      "new_limit_sec": 10800,
+      "adx": 30.34
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:25:37.126939",
+    "event_type": "time_exit_extended",
+    "symbol": "BTCUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=30.3), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 51927,
+      "original_limit_sec": 9000,
+      "new_limit_sec": 10200,
+      "adx": 30.34
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:25:38.280937",
+    "event_type": "time_exit_extended",
+    "symbol": "ETHUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=32.6), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 64391,
+      "original_limit_sec": 28800,
+      "new_limit_sec": 30000,
+      "adx": 32.62
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:25:39.426335",
+    "event_type": "time_exit_extended",
+    "symbol": "SOLUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=25.6), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 57202,
+      "original_limit_sec": 20400,
+      "new_limit_sec": 21600,
+      "adx": 25.58
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:26:12.497943",
+    "event_type": "time_exit_extended",
+    "symbol": "BTCUSDT",
+    "side": "short",
+    "reason": "Strong trend (ADX=30.3), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 42348,
+      "original_limit_sec": 10800,
+      "new_limit_sec": 12000,
+      "adx": 30.34
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:26:13.658953",
+    "event_type": "time_exit_extended",
+    "symbol": "BTCUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=30.3), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 51964,
+      "original_limit_sec": 10200,
+      "new_limit_sec": 11400,
+      "adx": 30.34
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:26:14.803461",
+    "event_type": "time_exit_extended",
+    "symbol": "ETHUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=32.6), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 64427,
+      "original_limit_sec": 30000,
+      "new_limit_sec": 31200,
+      "adx": 32.62
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:26:15.937580",
+    "event_type": "time_exit_extended",
+    "symbol": "SOLUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=25.6), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 57238,
+      "original_limit_sec": 21600,
+      "new_limit_sec": 22800,
+      "adx": 25.58
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:26:48.961632",
+    "event_type": "time_exit_extended",
+    "symbol": "BTCUSDT",
+    "side": "short",
+    "reason": "Strong trend (ADX=30.3), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 42384,
+      "original_limit_sec": 12000,
+      "new_limit_sec": 13200,
+      "adx": 30.34
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:26:50.092827",
+    "event_type": "time_exit_extended",
+    "symbol": "BTCUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=30.3), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 52000,
+      "original_limit_sec": 11400,
+      "new_limit_sec": 12600,
+      "adx": 30.34
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:26:51.227066",
+    "event_type": "time_exit_extended",
+    "symbol": "ETHUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=32.6), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 64464,
+      "original_limit_sec": 31200,
+      "new_limit_sec": 32400,
+      "adx": 32.62
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:26:52.404460",
+    "event_type": "time_exit_extended",
+    "symbol": "SOLUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=25.6), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 57275,
+      "original_limit_sec": 22800,
+      "new_limit_sec": 24000,
+      "adx": 25.58
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:27:25.494865",
+    "event_type": "time_exit_extended",
+    "symbol": "BTCUSDT",
+    "side": "short",
+    "reason": "Strong trend (ADX=30.3), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 42421,
+      "original_limit_sec": 13200,
+      "new_limit_sec": 14400,
+      "adx": 30.34
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:27:26.680035",
+    "event_type": "time_exit_extended",
+    "symbol": "BTCUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=30.3), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 52037,
+      "original_limit_sec": 12600,
+      "new_limit_sec": 13800,
+      "adx": 30.34
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:27:27.817023",
+    "event_type": "time_exit_extended",
+    "symbol": "ETHUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=32.6), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 64500,
+      "original_limit_sec": 32400,
+      "new_limit_sec": 33600,
+      "adx": 32.62
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:27:28.945506",
+    "event_type": "time_exit_extended",
+    "symbol": "SOLUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=25.6), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 57311,
+      "original_limit_sec": 24000,
+      "new_limit_sec": 25200,
+      "adx": 25.58
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:28:03.600460",
+    "event_type": "time_exit_extended",
+    "symbol": "BTCUSDT",
+    "side": "short",
+    "reason": "Strong trend (ADX=30.3), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 42458,
+      "original_limit_sec": 14400,
+      "new_limit_sec": 15600,
+      "adx": 30.34
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:28:05.440076",
+    "event_type": "time_exit_extended",
+    "symbol": "BTCUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=30.3), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 52075,
+      "original_limit_sec": 13800,
+      "new_limit_sec": 15000,
+      "adx": 30.34
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:28:06.589771",
+    "event_type": "time_exit_extended",
+    "symbol": "ETHUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=32.6), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 64539,
+      "original_limit_sec": 33600,
+      "new_limit_sec": 34800,
+      "adx": 32.62
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:28:07.715449",
+    "event_type": "time_exit_extended",
+    "symbol": "SOLUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=25.6), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 57350,
+      "original_limit_sec": 25200,
+      "new_limit_sec": 26400,
+      "adx": 25.58
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:28:40.854318",
+    "event_type": "time_exit_extended",
+    "symbol": "BTCUSDT",
+    "side": "short",
+    "reason": "Strong trend (ADX=30.3), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 42496,
+      "original_limit_sec": 15600,
+      "new_limit_sec": 16800,
+      "adx": 30.34
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:28:41.999258",
+    "event_type": "time_exit_extended",
+    "symbol": "BTCUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=30.3), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 52112,
+      "original_limit_sec": 15000,
+      "new_limit_sec": 16200,
+      "adx": 30.34
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:28:43.145112",
+    "event_type": "time_exit_extended",
+    "symbol": "ETHUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=32.6), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 64576,
+      "original_limit_sec": 34800,
+      "new_limit_sec": 36000,
+      "adx": 32.62
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:28:44.332021",
+    "event_type": "time_exit_extended",
+    "symbol": "SOLUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=25.6), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 57387,
+      "original_limit_sec": 26400,
+      "new_limit_sec": 27600,
+      "adx": 25.58
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:29:17.486597",
+    "event_type": "time_exit_extended",
+    "symbol": "BTCUSDT",
+    "side": "short",
+    "reason": "Strong trend (ADX=30.3), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 42533,
+      "original_limit_sec": 16800,
+      "new_limit_sec": 18000,
+      "adx": 30.34
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:29:18.637223",
+    "event_type": "time_exit_extended",
+    "symbol": "BTCUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=30.3), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 52149,
+      "original_limit_sec": 16200,
+      "new_limit_sec": 17400,
+      "adx": 30.34
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:29:19.872905",
+    "event_type": "time_exit_extended",
+    "symbol": "ETHUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=32.6), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 64612,
+      "original_limit_sec": 36000,
+      "new_limit_sec": 37200,
+      "adx": 32.62
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:29:22.015574",
+    "event_type": "time_exit_extended",
+    "symbol": "SOLUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=25.6), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 57424,
+      "original_limit_sec": 27600,
+      "new_limit_sec": 28800,
+      "adx": 25.58
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:29:55.361477",
+    "event_type": "time_exit_extended",
+    "symbol": "BTCUSDT",
+    "side": "short",
+    "reason": "Strong trend (ADX=30.3), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 42570,
+      "original_limit_sec": 18000,
+      "new_limit_sec": 19200,
+      "adx": 30.34
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:29:56.563320",
+    "event_type": "time_exit_extended",
+    "symbol": "BTCUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=30.3), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 52187,
+      "original_limit_sec": 17400,
+      "new_limit_sec": 18600,
+      "adx": 30.34
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:29:57.687920",
+    "event_type": "time_exit_extended",
+    "symbol": "ETHUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=32.6), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 64650,
+      "original_limit_sec": 37200,
+      "new_limit_sec": 38400,
+      "adx": 32.62
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:29:58.819054",
+    "event_type": "time_exit_extended",
+    "symbol": "SOLUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=25.6), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 57461,
+      "original_limit_sec": 28800,
+      "new_limit_sec": 30000,
+      "adx": 25.58
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:30:32.644713",
+    "event_type": "time_exit_extended",
+    "symbol": "BTCUSDT",
+    "side": "short",
+    "reason": "Strong trend (ADX=30.6), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 42607,
+      "original_limit_sec": 19200,
+      "new_limit_sec": 20400,
+      "adx": 30.63
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:30:34.416100",
+    "event_type": "time_exit_extended",
+    "symbol": "BTCUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=30.6), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 52224,
+      "original_limit_sec": 18600,
+      "new_limit_sec": 19800,
+      "adx": 30.63
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:30:35.946693",
+    "event_type": "time_exit_extended",
+    "symbol": "ETHUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=34.0), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 64688,
+      "original_limit_sec": 38400,
+      "new_limit_sec": 39600,
+      "adx": 34.03
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:30:37.151141",
+    "event_type": "time_exit_extended",
+    "symbol": "SOLUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=25.6), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 57500,
+      "original_limit_sec": 30000,
+      "new_limit_sec": 31200,
+      "adx": 25.62
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:31:10.260052",
+    "event_type": "time_exit_extended",
+    "symbol": "BTCUSDT",
+    "side": "short",
+    "reason": "Strong trend (ADX=30.6), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 42645,
+      "original_limit_sec": 20400,
+      "new_limit_sec": 21600,
+      "adx": 30.63
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:31:11.464082",
+    "event_type": "time_exit_extended",
+    "symbol": "BTCUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=30.6), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 52261,
+      "original_limit_sec": 19800,
+      "new_limit_sec": 21000,
+      "adx": 30.63
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:31:12.685610",
+    "event_type": "time_exit_extended",
+    "symbol": "ETHUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=34.0), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 64725,
+      "original_limit_sec": 39600,
+      "new_limit_sec": 40800,
+      "adx": 34.03
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:31:13.796549",
+    "event_type": "time_exit_extended",
+    "symbol": "SOLUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=25.6), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 57536,
+      "original_limit_sec": 31200,
+      "new_limit_sec": 32400,
+      "adx": 25.62
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:31:46.808246",
+    "event_type": "time_exit_extended",
+    "symbol": "BTCUSDT",
+    "side": "short",
+    "reason": "Strong trend (ADX=30.6), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 42682,
+      "original_limit_sec": 21600,
+      "new_limit_sec": 22800,
+      "adx": 30.63
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:31:47.962901",
+    "event_type": "time_exit_extended",
+    "symbol": "BTCUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=30.6), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 52298,
+      "original_limit_sec": 21000,
+      "new_limit_sec": 22200,
+      "adx": 30.63
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:31:49.398935",
+    "event_type": "time_exit_extended",
+    "symbol": "ETHUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=34.0), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 64762,
+      "original_limit_sec": 40800,
+      "new_limit_sec": 42000,
+      "adx": 34.03
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:31:50.586400",
+    "event_type": "time_exit_extended",
+    "symbol": "SOLUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=25.6), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 57573,
+      "original_limit_sec": 32400,
+      "new_limit_sec": 33600,
+      "adx": 25.62
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:32:23.674240",
+    "event_type": "time_exit_extended",
+    "symbol": "BTCUSDT",
+    "side": "short",
+    "reason": "Strong trend (ADX=30.6), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 42719,
+      "original_limit_sec": 22800,
+      "new_limit_sec": 24000,
+      "adx": 30.63
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:32:24.821906",
+    "event_type": "time_exit_extended",
+    "symbol": "BTCUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=30.6), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 52335,
+      "original_limit_sec": 22200,
+      "new_limit_sec": 23400,
+      "adx": 30.63
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:32:25.962687",
+    "event_type": "time_exit_extended",
+    "symbol": "ETHUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=34.0), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 64798,
+      "original_limit_sec": 42000,
+      "new_limit_sec": 43200,
+      "adx": 34.03
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:32:27.487831",
+    "event_type": "time_exit_extended",
+    "symbol": "SOLUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=25.6), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 57610,
+      "original_limit_sec": 33600,
+      "new_limit_sec": 34800,
+      "adx": 25.62
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:33:00.555703",
+    "event_type": "time_exit_extended",
+    "symbol": "BTCUSDT",
+    "side": "short",
+    "reason": "Strong trend (ADX=30.6), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 42756,
+      "original_limit_sec": 24000,
+      "new_limit_sec": 25200,
+      "adx": 30.63
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:33:01.761495",
+    "event_type": "time_exit_extended",
+    "symbol": "BTCUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=30.6), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 52372,
+      "original_limit_sec": 23400,
+      "new_limit_sec": 24600,
+      "adx": 30.63
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:33:02.937121",
+    "event_type": "time_exit_extended",
+    "symbol": "ETHUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=34.0), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 64835,
+      "original_limit_sec": 43200,
+      "new_limit_sec": 44400,
+      "adx": 34.03
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:33:04.380691",
+    "event_type": "time_exit_extended",
+    "symbol": "SOLUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=25.6), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 57647,
+      "original_limit_sec": 34800,
+      "new_limit_sec": 36000,
+      "adx": 25.62
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:33:36.278615",
+    "event_type": "time_exit_extended",
+    "symbol": "BTCUSDT",
+    "side": "short",
+    "reason": "Strong trend (ADX=30.6), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 42791,
+      "original_limit_sec": 25200,
+      "new_limit_sec": 26400,
+      "adx": 30.63
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:33:37.486266",
+    "event_type": "time_exit_extended",
+    "symbol": "BTCUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=30.6), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 52407,
+      "original_limit_sec": 24600,
+      "new_limit_sec": 25800,
+      "adx": 30.63
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:33:38.632061",
+    "event_type": "time_exit_extended",
+    "symbol": "ETHUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=34.0), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 64871,
+      "original_limit_sec": 44400,
+      "new_limit_sec": 45600,
+      "adx": 34.03
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:33:39.860158",
+    "event_type": "time_exit_extended",
+    "symbol": "SOLUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=25.6), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 57682,
+      "original_limit_sec": 36000,
+      "new_limit_sec": 37200,
+      "adx": 25.62
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:34:12.909131",
+    "event_type": "time_exit_extended",
+    "symbol": "BTCUSDT",
+    "side": "short",
+    "reason": "Strong trend (ADX=30.6), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 42828,
+      "original_limit_sec": 26400,
+      "new_limit_sec": 27600,
+      "adx": 30.63
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:34:14.027571",
+    "event_type": "time_exit_extended",
+    "symbol": "BTCUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=30.6), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 52444,
+      "original_limit_sec": 25800,
+      "new_limit_sec": 27000,
+      "adx": 30.63
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:34:15.264514",
+    "event_type": "time_exit_extended",
+    "symbol": "ETHUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=34.0), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 64908,
+      "original_limit_sec": 45600,
+      "new_limit_sec": 46800,
+      "adx": 34.03
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:34:16.432095",
+    "event_type": "time_exit_extended",
+    "symbol": "SOLUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=25.6), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 57719,
+      "original_limit_sec": 37200,
+      "new_limit_sec": 38400,
+      "adx": 25.62
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:34:48.258450",
+    "event_type": "time_exit_extended",
+    "symbol": "BTCUSDT",
+    "side": "short",
+    "reason": "Strong trend (ADX=30.6), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 42863,
+      "original_limit_sec": 27600,
+      "new_limit_sec": 28800,
+      "adx": 30.63
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:34:49.360276",
+    "event_type": "time_exit_extended",
+    "symbol": "BTCUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=30.6), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 52479,
+      "original_limit_sec": 27000,
+      "new_limit_sec": 28200,
+      "adx": 30.63
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:34:50.500357",
+    "event_type": "time_exit_extended",
+    "symbol": "ETHUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=34.0), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 64943,
+      "original_limit_sec": 46800,
+      "new_limit_sec": 48000,
+      "adx": 34.03
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:34:51.677767",
+    "event_type": "time_exit_extended",
+    "symbol": "SOLUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=25.6), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 57754,
+      "original_limit_sec": 38400,
+      "new_limit_sec": 39600,
+      "adx": 25.62
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:35:23.561988",
+    "event_type": "time_exit_extended",
+    "symbol": "BTCUSDT",
+    "side": "short",
+    "reason": "Strong trend (ADX=30.6), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 42899,
+      "original_limit_sec": 28800,
+      "new_limit_sec": 30000,
+      "adx": 30.63
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:35:24.786955",
+    "event_type": "time_exit_extended",
+    "symbol": "BTCUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=30.6), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 52515,
+      "original_limit_sec": 28200,
+      "new_limit_sec": 29400,
+      "adx": 30.63
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:35:25.896394",
+    "event_type": "time_exit_extended",
+    "symbol": "ETHUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=34.0), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 64978,
+      "original_limit_sec": 48000,
+      "new_limit_sec": 49200,
+      "adx": 34.03
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:35:27.005627",
+    "event_type": "time_exit_extended",
+    "symbol": "SOLUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=25.6), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 57789,
+      "original_limit_sec": 39600,
+      "new_limit_sec": 40800,
+      "adx": 25.62
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:35:58.871430",
+    "event_type": "time_exit_extended",
+    "symbol": "BTCUSDT",
+    "side": "short",
+    "reason": "Strong trend (ADX=30.6), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 42934,
+      "original_limit_sec": 30000,
+      "new_limit_sec": 31200,
+      "adx": 30.63
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:35:59.993998",
+    "event_type": "time_exit_extended",
+    "symbol": "BTCUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=30.6), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 52550,
+      "original_limit_sec": 29400,
+      "new_limit_sec": 30600,
+      "adx": 30.63
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:36:01.173629",
+    "event_type": "time_exit_extended",
+    "symbol": "ETHUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=34.1), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 65014,
+      "original_limit_sec": 49200,
+      "new_limit_sec": 50400,
+      "adx": 34.06
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:36:02.328308",
+    "event_type": "time_exit_extended",
+    "symbol": "SOLUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=25.6), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 57825,
+      "original_limit_sec": 40800,
+      "new_limit_sec": 42000,
+      "adx": 25.62
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:36:34.202248",
+    "event_type": "time_exit_extended",
+    "symbol": "BTCUSDT",
+    "side": "short",
+    "reason": "Strong trend (ADX=30.6), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 42969,
+      "original_limit_sec": 31200,
+      "new_limit_sec": 32400,
+      "adx": 30.63
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:36:35.313969",
+    "event_type": "time_exit_extended",
+    "symbol": "BTCUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=30.6), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 52585,
+      "original_limit_sec": 30600,
+      "new_limit_sec": 31800,
+      "adx": 30.63
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:36:36.460413",
+    "event_type": "time_exit_extended",
+    "symbol": "ETHUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=34.1), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 65049,
+      "original_limit_sec": 50400,
+      "new_limit_sec": 51600,
+      "adx": 34.06
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:36:37.582306",
+    "event_type": "time_exit_extended",
+    "symbol": "SOLUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=25.6), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 57860,
+      "original_limit_sec": 42000,
+      "new_limit_sec": 43200,
+      "adx": 25.62
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:37:10.104228",
+    "event_type": "time_exit_extended",
+    "symbol": "BTCUSDT",
+    "side": "short",
+    "reason": "Strong trend (ADX=30.6), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 43005,
+      "original_limit_sec": 32400,
+      "new_limit_sec": 33600,
+      "adx": 30.63
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:37:11.227912",
+    "event_type": "time_exit_extended",
+    "symbol": "BTCUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=30.6), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 52621,
+      "original_limit_sec": 31800,
+      "new_limit_sec": 33000,
+      "adx": 30.63
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:37:12.399520",
+    "event_type": "time_exit_extended",
+    "symbol": "ETHUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=34.1), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 65085,
+      "original_limit_sec": 51600,
+      "new_limit_sec": 52800,
+      "adx": 34.06
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:37:13.510585",
+    "event_type": "time_exit_extended",
+    "symbol": "SOLUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=25.6), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 57896,
+      "original_limit_sec": 43200,
+      "new_limit_sec": 44400,
+      "adx": 25.62
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:37:45.346159",
+    "event_type": "time_exit_extended",
+    "symbol": "BTCUSDT",
+    "side": "short",
+    "reason": "Strong trend (ADX=30.6), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 43040,
+      "original_limit_sec": 33600,
+      "new_limit_sec": 34800,
+      "adx": 30.63
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:37:46.487430",
+    "event_type": "time_exit_extended",
+    "symbol": "BTCUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=30.6), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 52657,
+      "original_limit_sec": 33000,
+      "new_limit_sec": 34200,
+      "adx": 30.63
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:37:47.907603",
+    "event_type": "time_exit_extended",
+    "symbol": "ETHUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=34.1), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 65120,
+      "original_limit_sec": 52800,
+      "new_limit_sec": 54000,
+      "adx": 34.06
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:37:49.051719",
+    "event_type": "time_exit_extended",
+    "symbol": "SOLUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=25.6), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 57931,
+      "original_limit_sec": 44400,
+      "new_limit_sec": 45600,
+      "adx": 25.62
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:38:20.912673",
+    "event_type": "time_exit_extended",
+    "symbol": "BTCUSDT",
+    "side": "short",
+    "reason": "Strong trend (ADX=30.6), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 43076,
+      "original_limit_sec": 34800,
+      "new_limit_sec": 36000,
+      "adx": 30.63
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:38:22.104872",
+    "event_type": "time_exit_extended",
+    "symbol": "BTCUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=30.6), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 52692,
+      "original_limit_sec": 34200,
+      "new_limit_sec": 35400,
+      "adx": 30.63
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:38:23.232453",
+    "event_type": "time_exit_extended",
+    "symbol": "ETHUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=34.1), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 65156,
+      "original_limit_sec": 54000,
+      "new_limit_sec": 55200,
+      "adx": 34.06
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:38:24.357193",
+    "event_type": "time_exit_extended",
+    "symbol": "SOLUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=25.6), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 57967,
+      "original_limit_sec": 45600,
+      "new_limit_sec": 46800,
+      "adx": 25.62
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:38:56.225751",
+    "event_type": "time_exit_extended",
+    "symbol": "BTCUSDT",
+    "side": "short",
+    "reason": "Strong trend (ADX=30.6), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 43111,
+      "original_limit_sec": 36000,
+      "new_limit_sec": 37200,
+      "adx": 30.63
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:38:57.325016",
+    "event_type": "time_exit_extended",
+    "symbol": "BTCUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=30.6), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 52727,
+      "original_limit_sec": 35400,
+      "new_limit_sec": 36600,
+      "adx": 30.63
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:38:58.431408",
+    "event_type": "time_exit_extended",
+    "symbol": "ETHUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=34.1), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 65191,
+      "original_limit_sec": 55200,
+      "new_limit_sec": 56400,
+      "adx": 34.06
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:38:59.552601",
+    "event_type": "time_exit_extended",
+    "symbol": "SOLUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=25.6), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 58002,
+      "original_limit_sec": 46800,
+      "new_limit_sec": 48000,
+      "adx": 25.62
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:39:33.279795",
+    "event_type": "time_exit_extended",
+    "symbol": "BTCUSDT",
+    "side": "short",
+    "reason": "Strong trend (ADX=30.6), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 43148,
+      "original_limit_sec": 37200,
+      "new_limit_sec": 38400,
+      "adx": 30.63
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:39:34.450435",
+    "event_type": "time_exit_extended",
+    "symbol": "BTCUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=30.6), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 52764,
+      "original_limit_sec": 36600,
+      "new_limit_sec": 37800,
+      "adx": 30.63
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:39:36.056589",
+    "event_type": "time_exit_extended",
+    "symbol": "ETHUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=34.1), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 65228,
+      "original_limit_sec": 56400,
+      "new_limit_sec": 57600,
+      "adx": 34.06
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:39:37.302907",
+    "event_type": "time_exit_extended",
+    "symbol": "SOLUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=25.6), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 58040,
+      "original_limit_sec": 48000,
+      "new_limit_sec": 49200,
+      "adx": 25.62
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:40:11.089207",
+    "event_type": "time_exit_extended",
+    "symbol": "BTCUSDT",
+    "side": "short",
+    "reason": "Strong trend (ADX=30.6), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 43185,
+      "original_limit_sec": 38400,
+      "new_limit_sec": 39600,
+      "adx": 30.63
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:40:12.570802",
+    "event_type": "time_exit_extended",
+    "symbol": "BTCUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=30.6), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 52802,
+      "original_limit_sec": 37800,
+      "new_limit_sec": 39000,
+      "adx": 30.63
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:40:13.789134",
+    "event_type": "time_exit_extended",
+    "symbol": "ETHUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=34.1), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 65266,
+      "original_limit_sec": 57600,
+      "new_limit_sec": 58800,
+      "adx": 34.06
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:40:14.927735",
+    "event_type": "time_exit_extended",
+    "symbol": "SOLUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=25.6), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 58077,
+      "original_limit_sec": 49200,
+      "new_limit_sec": 50400,
+      "adx": 25.62
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:40:47.964406",
+    "event_type": "time_exit_extended",
+    "symbol": "BTCUSDT",
+    "side": "short",
+    "reason": "Strong trend (ADX=30.6), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 43223,
+      "original_limit_sec": 39600,
+      "new_limit_sec": 40800,
+      "adx": 30.63
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:40:49.118446",
+    "event_type": "time_exit_extended",
+    "symbol": "BTCUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=30.6), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 52839,
+      "original_limit_sec": 39000,
+      "new_limit_sec": 40200,
+      "adx": 30.63
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:40:50.259364",
+    "event_type": "time_exit_extended",
+    "symbol": "ETHUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=34.1), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 65303,
+      "original_limit_sec": 58800,
+      "new_limit_sec": 60000,
+      "adx": 34.06
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:40:51.741730",
+    "event_type": "time_exit_extended",
+    "symbol": "SOLUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=25.5), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 58114,
+      "original_limit_sec": 50400,
+      "new_limit_sec": 51600,
+      "adx": 25.53
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:41:24.732667",
+    "event_type": "time_exit_extended",
+    "symbol": "BTCUSDT",
+    "side": "short",
+    "reason": "Strong trend (ADX=30.6), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 43260,
+      "original_limit_sec": 40800,
+      "new_limit_sec": 42000,
+      "adx": 30.63
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:41:26.276715",
+    "event_type": "time_exit_extended",
+    "symbol": "BTCUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=30.6), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 52876,
+      "original_limit_sec": 40200,
+      "new_limit_sec": 41400,
+      "adx": 30.63
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:41:27.410053",
+    "event_type": "time_exit_extended",
+    "symbol": "ETHUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=34.1), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 65340,
+      "original_limit_sec": 60000,
+      "new_limit_sec": 61200,
+      "adx": 34.06
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:41:28.538062",
+    "event_type": "time_exit_extended",
+    "symbol": "SOLUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=25.5), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 58151,
+      "original_limit_sec": 51600,
+      "new_limit_sec": 52800,
+      "adx": 25.53
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:42:01.612701",
+    "event_type": "time_exit_extended",
+    "symbol": "BTCUSDT",
+    "side": "short",
+    "reason": "Strong trend (ADX=30.6), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 43297,
+      "original_limit_sec": 42000,
+      "new_limit_sec": 43200,
+      "adx": 30.63
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:42:02.797382",
+    "event_type": "time_exit_extended",
+    "symbol": "BTCUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=30.6), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 52913,
+      "original_limit_sec": 41400,
+      "new_limit_sec": 42600,
+      "adx": 30.63
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:42:03.947301",
+    "event_type": "time_exit_extended",
+    "symbol": "ETHUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=34.1), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 65376,
+      "original_limit_sec": 61200,
+      "new_limit_sec": 62400,
+      "adx": 34.06
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:42:05.120814",
+    "event_type": "time_exit_extended",
+    "symbol": "SOLUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=25.5), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 58188,
+      "original_limit_sec": 52800,
+      "new_limit_sec": 54000,
+      "adx": 25.53
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:42:37.113001",
+    "event_type": "time_exit_extended",
+    "symbol": "BTCUSDT",
+    "side": "short",
+    "reason": "Strong trend (ADX=30.6), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 43332,
+      "original_limit_sec": 43200,
+      "new_limit_sec": 44400,
+      "adx": 30.63
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:42:38.278865",
+    "event_type": "time_exit_extended",
+    "symbol": "BTCUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=30.6), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 52948,
+      "original_limit_sec": 42600,
+      "new_limit_sec": 43800,
+      "adx": 30.63
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:42:39.393892",
+    "event_type": "time_exit_extended",
+    "symbol": "ETHUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=34.1), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 65412,
+      "original_limit_sec": 62400,
+      "new_limit_sec": 63600,
+      "adx": 34.06
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:42:40.556468",
+    "event_type": "time_exit_extended",
+    "symbol": "SOLUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=25.5), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 58223,
+      "original_limit_sec": 54000,
+      "new_limit_sec": 55200,
+      "adx": 25.53
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:43:12.771248",
+    "event_type": "time_exit_extended",
+    "symbol": "BTCUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=30.7), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 52983,
+      "original_limit_sec": 43800,
+      "new_limit_sec": 45000,
+      "adx": 30.7
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:43:14.947047",
+    "event_type": "time_exit_extended",
+    "symbol": "ETHUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=34.1), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 65446,
+      "original_limit_sec": 63600,
+      "new_limit_sec": 64800,
+      "adx": 34.06
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:43:16.466102",
+    "event_type": "time_exit_extended",
+    "symbol": "SOLUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=25.5), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 58259,
+      "original_limit_sec": 55200,
+      "new_limit_sec": 56400,
+      "adx": 25.53
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:43:48.370824",
+    "event_type": "time_exit_extended",
+    "symbol": "BTCUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=30.8), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 53018,
+      "original_limit_sec": 45000,
+      "new_limit_sec": 46200,
+      "adx": 30.8
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:43:49.520462",
+    "event_type": "time_exit_extended",
+    "symbol": "ETHUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=34.1), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 65482,
+      "original_limit_sec": 64800,
+      "new_limit_sec": 66000,
+      "adx": 34.06
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:43:50.669309",
+    "event_type": "time_exit_extended",
+    "symbol": "SOLUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=25.5), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 58293,
+      "original_limit_sec": 56400,
+      "new_limit_sec": 57600,
+      "adx": 25.53
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:44:22.884801",
+    "event_type": "time_exit_extended",
+    "symbol": "BTCUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=30.9), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 53053,
+      "original_limit_sec": 46200,
+      "new_limit_sec": 47400,
+      "adx": 30.93
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:44:23.995593",
+    "event_type": "time_exit_extended",
+    "symbol": "SOLUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=25.5), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 58326,
+      "original_limit_sec": 57600,
+      "new_limit_sec": 58800,
+      "adx": 25.53
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:44:55.973244",
+    "event_type": "time_exit_extended",
+    "symbol": "BTCUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=30.9), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 53086,
+      "original_limit_sec": 47400,
+      "new_limit_sec": 48600,
+      "adx": 30.93
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:45:27.920344",
+    "event_type": "time_exit_extended",
+    "symbol": "BTCUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=31.5), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 53118,
+      "original_limit_sec": 48600,
+      "new_limit_sec": 49800,
+      "adx": 31.51
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:45:59.814798",
+    "event_type": "time_exit_extended",
+    "symbol": "BTCUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=31.5), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 53150,
+      "original_limit_sec": 49800,
+      "new_limit_sec": 51000,
+      "adx": 31.51
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:46:31.734784",
+    "event_type": "time_exit_extended",
+    "symbol": "BTCUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=31.5), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 53182,
+      "original_limit_sec": 51000,
+      "new_limit_sec": 52200,
+      "adx": 31.51
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:47:03.642204",
+    "event_type": "time_exit_extended",
+    "symbol": "BTCUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=31.5), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 53214,
+      "original_limit_sec": 52200,
+      "new_limit_sec": 53400,
+      "adx": 31.51
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:50:40.560351",
+    "event_type": "time_exit_extended",
+    "symbol": "BTCUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=31.8), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 53430,
+      "original_limit_sec": 53400,
+      "new_limit_sec": 54600,
+      "adx": 31.75
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:52:53.132125",
+    "event_type": "time_exit_extended",
+    "symbol": "ETHUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=35.9), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 66026,
+      "original_limit_sec": 66000,
+      "new_limit_sec": 67200,
+      "adx": 35.94
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:52:54.229422",
+    "event_type": "time_exit_extended",
+    "symbol": "SOLUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=26.5), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 58837,
+      "original_limit_sec": 58800,
+      "new_limit_sec": 60000,
+      "adx": 26.46
+    }
+  },
+  {
+    "timestamp": "2025-12-30T09:54:01.595680",
+    "event_type": "time_exit_extended",
+    "symbol": "ETHUSDT",
+    "side": "short",
+    "reason": "Strong trend (ADX=35.9), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 1828,
+      "original_limit_sec": 1800,
+      "new_limit_sec": 3000,
+      "adx": 35.94
+    }
+  },
+  {
+    "timestamp": "2025-12-30T10:00:42.543766",
+    "event_type": "time_exit_extended",
+    "symbol": "BTCUSDT",
+    "side": "short",
+    "reason": "Strong trend (ADX=33.1), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 44418,
+      "original_limit_sec": 44400,
+      "new_limit_sec": 45600,
+      "adx": 33.14
+    }
+  },
+  {
+    "timestamp": "2025-12-30T10:03:48.510206",
+    "event_type": "time_exit_extended",
+    "symbol": "SOLUSDT",
+    "side": "short",
+    "reason": "Strong trend (ADX=27.3), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 2415,
+      "original_limit_sec": 2400,
+      "new_limit_sec": 3600,
+      "adx": 27.3
+    }
+  },
+  {
+    "timestamp": "2025-12-30T10:10:32.376522",
+    "event_type": "time_exit_extended",
+    "symbol": "BTCUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=33.4), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 54622,
+      "original_limit_sec": 54600,
+      "new_limit_sec": 55800,
+      "adx": 33.37
+    }
+  },
+  {
+    "timestamp": "2025-12-30T10:12:38.703320",
+    "event_type": "time_exit_extended",
+    "symbol": "ETHUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=37.6), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 67211,
+      "original_limit_sec": 67200,
+      "new_limit_sec": 68400,
+      "adx": 37.63
+    }
+  },
+  {
+    "timestamp": "2025-12-30T10:12:39.932216",
+    "event_type": "time_exit_extended",
+    "symbol": "SOLUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=27.3), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 60022,
+      "original_limit_sec": 60000,
+      "new_limit_sec": 61200,
+      "adx": 27.3
+    }
+  },
+  {
+    "timestamp": "2025-12-30T10:20:31.280576",
+    "event_type": "time_exit_extended",
+    "symbol": "BTCUSDT",
+    "side": "short",
+    "reason": "Strong trend (ADX=34.3), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 45606,
+      "original_limit_sec": 45600,
+      "new_limit_sec": 46800,
+      "adx": 34.29
+    }
+  },
+  {
+    "timestamp": "2025-12-30T10:23:44.793613",
+    "event_type": "time_exit_extended",
+    "symbol": "SOLUSDT",
+    "side": "short",
+    "reason": "Strong trend (ADX=27.9), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 3611,
+      "original_limit_sec": 3600,
+      "new_limit_sec": 4800,
+      "adx": 27.88
+    }
+  },
+  {
+    "timestamp": "2025-12-30T10:29:05.376355",
+    "event_type": "time_exit_extended",
+    "symbol": "ETHUSDT",
+    "side": "short",
+    "reason": "Strong trend (ADX=38.5), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 1820,
+      "original_limit_sec": 1800,
+      "new_limit_sec": 3000,
+      "adx": 38.47
+    }
+  },
+  {
+    "timestamp": "2025-12-30T10:30:10.480540",
+    "event_type": "time_exit_extended",
+    "symbol": "BTCUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=35.3), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 55800,
+      "original_limit_sec": 55800,
+      "new_limit_sec": 57000,
+      "adx": 35.32
+    }
+  },
+  {
+    "timestamp": "2025-12-30T10:32:21.604011",
+    "event_type": "time_exit_extended",
+    "symbol": "SOLUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=27.7), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 61204,
+      "original_limit_sec": 61200,
+      "new_limit_sec": 62400,
+      "adx": 27.7
+    }
+  },
+  {
+    "timestamp": "2025-12-30T10:32:54.625735",
+    "event_type": "time_exit_extended",
+    "symbol": "ETHUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=39.1), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 68427,
+      "original_limit_sec": 68400,
+      "new_limit_sec": 69600,
+      "adx": 39.15
+    }
+  },
+  {
+    "timestamp": "2025-12-30T10:40:56.139687",
+    "event_type": "time_exit_extended",
+    "symbol": "BTCUSDT",
+    "side": "short",
+    "reason": "Strong trend (ADX=35.0), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 46831,
+      "original_limit_sec": 46800,
+      "new_limit_sec": 48000,
+      "adx": 34.99
+    }
+  },
+  {
+    "timestamp": "2025-12-30T10:43:37.440579",
+    "event_type": "time_exit_extended",
+    "symbol": "SOLUSDT",
+    "side": "short",
+    "reason": "Strong trend (ADX=27.7), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 4803,
+      "original_limit_sec": 4800,
+      "new_limit_sec": 6000,
+      "adx": 27.7
+    }
+  },
+  {
+    "timestamp": "2025-12-30T10:48:57.293604",
+    "event_type": "time_exit_extended",
+    "symbol": "ETHUSDT",
+    "side": "short",
+    "reason": "Strong trend (ADX=40.0), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 3012,
+      "original_limit_sec": 3000,
+      "new_limit_sec": 4200,
+      "adx": 39.97
+    }
+  },
+  {
+    "timestamp": "2025-12-30T10:50:34.050984",
+    "event_type": "time_exit_extended",
+    "symbol": "BTCUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=36.9), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 57024,
+      "original_limit_sec": 57000,
+      "new_limit_sec": 58200,
+      "adx": 36.94
+    }
+  },
+  {
+    "timestamp": "2025-12-30T10:52:42.910244",
+    "event_type": "time_exit_extended",
+    "symbol": "ETHUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=40.0), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 69615,
+      "original_limit_sec": 69600,
+      "new_limit_sec": 70800,
+      "adx": 39.97
+    }
+  },
+  {
+    "timestamp": "2025-12-30T10:52:44.124642",
+    "event_type": "time_exit_extended",
+    "symbol": "SOLUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=27.8), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 62427,
+      "original_limit_sec": 62400,
+      "new_limit_sec": 63600,
+      "adx": 27.78
+    }
+  },
+  {
+    "timestamp": "2025-12-30T11:00:47.686639",
+    "event_type": "time_exit_extended",
+    "symbol": "BTCUSDT",
+    "side": "short",
+    "reason": "Strong trend (ADX=38.2), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 48022,
+      "original_limit_sec": 48000,
+      "new_limit_sec": 49200,
+      "adx": 38.18
+    }
+  },
+  {
+    "timestamp": "2025-12-30T11:03:35.582510",
+    "event_type": "time_exit_extended",
+    "symbol": "SOLUSDT",
+    "side": "short",
+    "reason": "Strong trend (ADX=27.7), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 6002,
+      "original_limit_sec": 6000,
+      "new_limit_sec": 7200,
+      "adx": 27.68
+    }
+  },
+  {
+    "timestamp": "2025-12-30T11:09:03.971402",
+    "event_type": "time_exit_extended",
+    "symbol": "ETHUSDT",
+    "side": "short",
+    "reason": "Strong trend (ADX=39.0), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 4218,
+      "original_limit_sec": 4200,
+      "new_limit_sec": 5400,
+      "adx": 39.05
+    }
+  },
+  {
+    "timestamp": "2025-12-30T11:10:41.228638",
+    "event_type": "time_exit_extended",
+    "symbol": "BTCUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=37.9), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 58231,
+      "original_limit_sec": 58200,
+      "new_limit_sec": 59400,
+      "adx": 37.92
+    }
+  },
+  {
+    "timestamp": "2025-12-30T11:12:18.692288",
+    "event_type": "time_exit_extended",
+    "symbol": "SOLUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=27.5), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 63601,
+      "original_limit_sec": 63600,
+      "new_limit_sec": 64800,
+      "adx": 27.53
+    }
+  },
+  {
+    "timestamp": "2025-12-30T11:12:51.922919",
+    "event_type": "time_exit_extended",
+    "symbol": "ETHUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=39.0), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 70824,
+      "original_limit_sec": 70800,
+      "new_limit_sec": 72000,
+      "adx": 39.05
+    }
+  },
+  {
+    "timestamp": "2025-12-30T11:20:27.466471",
+    "event_type": "time_exit_extended",
+    "symbol": "BTCUSDT",
+    "side": "short",
+    "reason": "Strong trend (ADX=38.8), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 49203,
+      "original_limit_sec": 49200,
+      "new_limit_sec": 50400,
+      "adx": 38.81
+    }
+  },
+  {
+    "timestamp": "2025-12-30T11:23:49.045595",
+    "event_type": "time_exit_extended",
+    "symbol": "SOLUSDT",
+    "side": "short",
+    "reason": "Strong trend (ADX=26.9), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 7215,
+      "original_limit_sec": 7200,
+      "new_limit_sec": 8400,
+      "adx": 26.9
+    }
+  },
+  {
+    "timestamp": "2025-12-30T11:28:49.648073",
+    "event_type": "time_exit_extended",
+    "symbol": "ETHUSDT",
+    "side": "short",
+    "reason": "Strong trend (ADX=39.0), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 5404,
+      "original_limit_sec": 5400,
+      "new_limit_sec": 6600,
+      "adx": 38.98
+    }
+  },
+  {
+    "timestamp": "2025-12-30T11:30:30.742647",
+    "event_type": "time_exit_extended",
+    "symbol": "BTCUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=39.6), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 59421,
+      "original_limit_sec": 59400,
+      "new_limit_sec": 60600,
+      "adx": 39.59
+    }
+  },
+  {
+    "timestamp": "2025-12-30T11:32:44.723527",
+    "event_type": "time_exit_extended",
+    "symbol": "ETHUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=38.9), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 72017,
+      "original_limit_sec": 72000,
+      "new_limit_sec": 73200,
+      "adx": 38.91
+    }
+  },
+  {
+    "timestamp": "2025-12-30T11:32:45.960746",
+    "event_type": "time_exit_extended",
+    "symbol": "SOLUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=25.6), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 64828,
+      "original_limit_sec": 64800,
+      "new_limit_sec": 66000,
+      "adx": 25.59
+    }
+  },
+  {
+    "timestamp": "2025-12-30T11:40:35.373079",
+    "event_type": "time_exit_extended",
+    "symbol": "BTCUSDT",
+    "side": "short",
+    "reason": "Strong trend (ADX=39.6), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 50410,
+      "original_limit_sec": 50400,
+      "new_limit_sec": 51600,
+      "adx": 39.59
+    }
+  },
+  {
+    "timestamp": "2025-12-30T11:43:55.445604",
+    "event_type": "time_exit_extended",
+    "symbol": "SOLUSDT",
+    "side": "short",
+    "reason": "Strong trend (ADX=25.2), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 8422,
+      "original_limit_sec": 8400,
+      "new_limit_sec": 9600,
+      "adx": 25.23
+    }
+  },
+  {
+    "timestamp": "2025-12-30T11:48:53.420055",
+    "event_type": "time_exit_extended",
+    "symbol": "ETHUSDT",
+    "side": "short",
+    "reason": "Strong trend (ADX=39.6), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 6608,
+      "original_limit_sec": 6600,
+      "new_limit_sec": 7800,
+      "adx": 39.59
+    }
+  },
+  {
+    "timestamp": "2025-12-30T11:50:33.789435",
+    "event_type": "time_exit_extended",
+    "symbol": "BTCUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=39.6), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 60623,
+      "original_limit_sec": 60600,
+      "new_limit_sec": 61800,
+      "adx": 39.64
+    }
+  },
+  {
+    "timestamp": "2025-12-30T11:52:47.754478",
+    "event_type": "time_exit_extended",
+    "symbol": "ETHUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=39.6), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 73220,
+      "original_limit_sec": 73200,
+      "new_limit_sec": 74400,
+      "adx": 39.59
+    }
+  },
+  {
+    "timestamp": "2025-12-30T11:52:49.341259",
+    "event_type": "time_based_exit",
+    "symbol": "SOLUSDT",
+    "side": "long",
+    "reason": "Position exceeded max holding time (time_exit_flat)",
+    "data": {
+      "time_in_trade_sec": 66031,
+      "limit_sec": 66000,
+      "exit_reason": "time_exit_flat",
+      "adx": 24.02
+    }
+  },
+  {
+    "timestamp": "2025-12-30T12:00:38.210075",
+    "event_type": "time_exit_extended",
+    "symbol": "BTCUSDT",
+    "side": "short",
+    "reason": "Strong trend (ADX=37.7), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 51613,
+      "original_limit_sec": 51600,
+      "new_limit_sec": 52800,
+      "adx": 37.74
+    }
+  },
+  {
+    "timestamp": "2025-12-30T12:09:14.527004",
+    "event_type": "time_exit_extended",
+    "symbol": "ETHUSDT",
+    "side": "short",
+    "reason": "Strong trend (ADX=40.0), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 7829,
+      "original_limit_sec": 7800,
+      "new_limit_sec": 9000,
+      "adx": 39.96
+    }
+  },
+  {
+    "timestamp": "2025-12-30T12:10:27.899101",
+    "event_type": "time_exit_extended",
+    "symbol": "BTCUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=38.0), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 61818,
+      "original_limit_sec": 61800,
+      "new_limit_sec": 63000,
+      "adx": 38.03
+    }
+  },
+  {
+    "timestamp": "2025-12-30T12:12:44.268569",
+    "event_type": "time_exit_extended",
+    "symbol": "ETHUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=40.0), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 74417,
+      "original_limit_sec": 74400,
+      "new_limit_sec": 75600,
+      "adx": 39.96
+    }
+  },
+  {
+    "timestamp": "2025-12-30T12:20:39.057295",
+    "event_type": "time_exit_extended",
+    "symbol": "BTCUSDT",
+    "side": "short",
+    "reason": "Strong trend (ADX=38.6), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 52814,
+      "original_limit_sec": 52800,
+      "new_limit_sec": 54000,
+      "adx": 38.58
+    }
+  },
+  {
+    "timestamp": "2025-12-30T12:30:11.560510",
+    "event_type": "time_exit_extended",
+    "symbol": "BTCUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=38.6), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 63001,
+      "original_limit_sec": 63000,
+      "new_limit_sec": 64200,
+      "adx": 38.65
+    }
+  },
+  {
+    "timestamp": "2025-12-30T12:32:59.919644",
+    "event_type": "time_exit_extended",
+    "symbol": "ETHUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=40.9), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 75632,
+      "original_limit_sec": 75600,
+      "new_limit_sec": 76800,
+      "adx": 40.93
+    }
+  },
+  {
+    "timestamp": "2025-12-30T12:40:29.729741",
+    "event_type": "time_exit_extended",
+    "symbol": "BTCUSDT",
+    "side": "short",
+    "reason": "Strong trend (ADX=38.3), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 54005,
+      "original_limit_sec": 54000,
+      "new_limit_sec": 55200,
+      "adx": 38.28
+    }
+  },
+  {
+    "timestamp": "2025-12-30T12:50:21.146261",
+    "event_type": "time_exit_extended",
+    "symbol": "BTCUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=38.1), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 64211,
+      "original_limit_sec": 64200,
+      "new_limit_sec": 65400,
+      "adx": 38.13
+    }
+  },
+  {
+    "timestamp": "2025-12-30T12:52:41.438104",
+    "event_type": "time_exit_extended",
+    "symbol": "ETHUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=39.5), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 76814,
+      "original_limit_sec": 76800,
+      "new_limit_sec": 78000,
+      "adx": 39.49
+    }
+  },
+  {
+    "timestamp": "2025-12-30T12:55:00.632307",
+    "event_type": "time_exit_extended",
+    "symbol": "ETHUSDT",
+    "side": "short",
+    "reason": "Strong trend (ADX=39.5), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 1811,
+      "original_limit_sec": 1800,
+      "new_limit_sec": 3000,
+      "adx": 39.49
+    }
+  },
+  {
+    "timestamp": "2025-12-30T13:00:48.991650",
+    "event_type": "time_exit_extended",
+    "symbol": "BTCUSDT",
+    "side": "short",
+    "reason": "Strong trend (ADX=37.9), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 55224,
+      "original_limit_sec": 55200,
+      "new_limit_sec": 56400,
+      "adx": 37.9
+    }
+  },
+  {
+    "timestamp": "2025-12-30T13:10:44.235111",
+    "event_type": "time_exit_extended",
+    "symbol": "BTCUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=37.6), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 65434,
+      "original_limit_sec": 65400,
+      "new_limit_sec": 66600,
+      "adx": 37.56
+    }
+  },
+  {
+    "timestamp": "2025-12-30T13:12:59.631478",
+    "event_type": "time_exit_extended",
+    "symbol": "ETHUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=39.5), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 78032,
+      "original_limit_sec": 78000,
+      "new_limit_sec": 79200,
+      "adx": 39.54
+    }
+  },
+  {
+    "timestamp": "2025-12-30T13:15:05.218320",
+    "event_type": "time_exit_extended",
+    "symbol": "ETHUSDT",
+    "side": "short",
+    "reason": "Strong trend (ADX=39.5), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 3015,
+      "original_limit_sec": 3000,
+      "new_limit_sec": 4200,
+      "adx": 39.53
+    }
+  },
+  {
+    "timestamp": "2025-12-30T13:20:52.179289",
+    "event_type": "time_exit_extended",
+    "symbol": "BTCUSDT",
+    "side": "short",
+    "reason": "Strong trend (ADX=36.9), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 56427,
+      "original_limit_sec": 56400,
+      "new_limit_sec": 57600,
+      "adx": 36.89
+    }
+  },
+  {
+    "timestamp": "2025-12-30T13:30:12.260081",
+    "event_type": "time_exit_extended",
+    "symbol": "BTCUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=37.6), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 66602,
+      "original_limit_sec": 66600,
+      "new_limit_sec": 67800,
+      "adx": 37.59
+    }
+  },
+  {
+    "timestamp": "2025-12-30T13:33:01.602217",
+    "event_type": "time_exit_extended",
+    "symbol": "ETHUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=40.3), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 79234,
+      "original_limit_sec": 79200,
+      "new_limit_sec": 80400,
+      "adx": 40.28
+    }
+  },
+  {
+    "timestamp": "2025-12-30T13:34:42.610293",
+    "event_type": "time_based_exit",
+    "symbol": "SOLUSDT",
+    "side": "long",
+    "reason": "Position exceeded max holding time (time_exit_flat)",
+    "data": {
+      "time_in_trade_sec": 72145,
+      "limit_sec": 66000,
+      "exit_reason": "time_exit_flat",
+      "adx": 16.13
+    }
+  },
+  {
+    "timestamp": "2025-12-30T13:35:14.594442",
+    "event_type": "time_exit_extended",
+    "symbol": "ETHUSDT",
+    "side": "short",
+    "reason": "Strong trend (ADX=40.3), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 4225,
+      "original_limit_sec": 4200,
+      "new_limit_sec": 5400,
+      "adx": 40.28
+    }
+  },
+  {
+    "timestamp": "2025-12-30T13:43:41.194587",
+    "event_type": "time_exit_extended",
+    "symbol": "BTCUSDT",
+    "side": "short",
+    "reason": "Strong trend (ADX=37.6), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 57796,
+      "original_limit_sec": 57600,
+      "new_limit_sec": 58800,
+      "adx": 37.59
+    }
+  },
+  {
+    "timestamp": "2026-01-01T17:52:01.501844",
+    "event_type": "time_exit_extended_flat_roi",
+    "symbol": "ETHUSDT",
+    "side": "short",
+    "reason": "Flat ROI at time limit; extended to avoid fee-driven exit",
+    "data": {
+      "time_in_trade_sec": 1825,
+      "original_limit_sec": 1800,
+      "new_limit_sec": 3000,
+      "adx": 22.34,
+      "roi_lev_pct": -0.108548621432523
+    }
+  },
+  {
+    "timestamp": "2026-01-01T19:44:59.362832",
+    "event_type": "time_based_exit",
+    "symbol": "BTCUSDT",
+    "side": "long",
+    "reason": "Position exceeded max holding time (time_exit_profit)",
+    "data": {
+      "time_in_trade_sec": 1822,
+      "limit_sec": 1800,
+      "exit_reason": "time_exit_profit",
+      "adx": 24.95,
+      "roi_lev_pct": 1.3116611914757583
+    }
+  },
+  {
+    "timestamp": "2026-01-01T19:45:31.195234",
+    "event_type": "time_exit_extended",
+    "symbol": "BTCUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=25.6), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 1855,
+      "original_limit_sec": 1800,
+      "new_limit_sec": 3000,
+      "adx": 25.56
+    }
+  },
+  {
+    "timestamp": "2026-01-02T00:41:53.029651",
+    "event_type": "time_exit_extended",
+    "symbol": "ETHUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=31.1), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 1827,
+      "original_limit_sec": 1800,
+      "new_limit_sec": 3000,
+      "adx": 31.14
+    }
+  },
+  {
+    "timestamp": "2026-01-02T02:43:33.800660",
+    "event_type": "time_exit_extended_flat_roi",
+    "symbol": "ETHUSDT",
+    "side": "short",
+    "reason": "Flat ROI at time limit; extended to avoid fee-driven exit",
+    "data": {
+      "time_in_trade_sec": 1202,
+      "original_limit_sec": 1200,
+      "new_limit_sec": 2400,
+      "adx": 24.15,
+      "roi_lev_pct": -0.4861684247808657
+    }
+  },
+  {
+    "timestamp": "2026-01-02T08:34:10.747755",
+    "event_type": "time_exit_extended",
+    "symbol": "BTCUSDT",
+    "side": "short",
+    "reason": "Strong trend (ADX=26.1), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 1527,
+      "original_limit_sec": 1500,
+      "new_limit_sec": 2700,
+      "adx": 26.07
+    }
+  },
+  {
+    "timestamp": "2026-01-02T11:35:55.511792",
+    "event_type": "time_exit_extended",
+    "symbol": "ETHUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=46.8), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 1815,
+      "original_limit_sec": 1800,
+      "new_limit_sec": 3000,
+      "adx": 46.75
+    }
+  },
+  {
+    "timestamp": "2026-01-02T14:43:56.616290",
+    "event_type": "time_exit_extended",
+    "symbol": "BTCUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=31.4), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 1838,
+      "original_limit_sec": 1800,
+      "new_limit_sec": 3000,
+      "adx": 31.4
+    }
+  },
+  {
+    "timestamp": "2026-01-02T15:58:22.185719",
+    "event_type": "time_exit_extended",
+    "symbol": "BTCUSDT",
+    "side": "short",
+    "reason": "Strong trend (ADX=28.5), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 1826,
+      "original_limit_sec": 1800,
+      "new_limit_sec": 3000,
+      "adx": 28.5
+    }
+  },
+  {
+    "timestamp": "2026-01-02T16:03:14.772234",
+    "event_type": "time_based_exit",
+    "symbol": "SOLUSDT",
+    "side": "long",
+    "reason": "Position exceeded max holding time (time_exit_profit)",
+    "data": {
+      "time_in_trade_sec": 1824,
+      "limit_sec": 1800,
+      "exit_reason": "time_exit_profit",
+      "adx": 23.2,
+      "roi_lev_pct": 1.3236782683173847
+    }
+  },
+  {
+    "timestamp": "2026-01-02T16:18:23.381031",
+    "event_type": "time_exit_extended",
+    "symbol": "BTCUSDT",
+    "side": "short",
+    "reason": "Strong trend (ADX=28.4), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 3028,
+      "original_limit_sec": 3000,
+      "new_limit_sec": 4200,
+      "adx": 28.39
+    }
+  },
+  {
+    "timestamp": "2026-01-02T22:31:11.721728",
+    "event_type": "time_exit_extended",
+    "symbol": "SOLUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=31.1), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 1818,
+      "original_limit_sec": 1800,
+      "new_limit_sec": 3000,
+      "adx": 31.14
+    }
+  },
+  {
+    "timestamp": "2026-01-02T23:13:45.720604",
+    "event_type": "time_based_exit",
+    "symbol": "BTCUSDT",
+    "side": "short",
+    "reason": "Position exceeded max holding time (time_exit_profit)",
+    "data": {
+      "time_in_trade_sec": 1528,
+      "limit_sec": 1500,
+      "exit_reason": "time_exit_profit",
+      "adx": 19.99,
+      "roi_lev_pct": 1.5861724600647404
+    }
+  },
+  {
+    "timestamp": "2026-01-03T00:25:33.262466",
+    "event_type": "time_exit_extended",
+    "symbol": "SOLUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=32.2), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 1815,
+      "original_limit_sec": 1800,
+      "new_limit_sec": 3000,
+      "adx": 32.21
+    }
+  },
+  {
+    "timestamp": "2026-01-03T02:30:56.891776",
+    "event_type": "time_exit_extended_flat_roi",
+    "symbol": "BTCUSDT",
+    "side": "short",
+    "reason": "Flat ROI at time limit; extended to avoid fee-driven exit",
+    "data": {
+      "time_in_trade_sec": 1815,
+      "original_limit_sec": 1800,
+      "new_limit_sec": 3000,
+      "adx": 19.33,
+      "roi_lev_pct": -0.026268450261136583
+    }
+  },
+  {
+    "timestamp": "2026-01-03T17:08:14.153161",
+    "event_type": "time_exit_extended_flat_roi",
+    "symbol": "SOLUSDT",
+    "side": "long",
+    "reason": "Flat ROI at time limit; extended to avoid fee-driven exit",
+    "data": {
+      "time_in_trade_sec": 1810,
+      "original_limit_sec": 1800,
+      "new_limit_sec": 3000,
+      "adx": 14.31,
+      "roi_lev_pct": -0.6029579067121419
+    }
+  },
+  {
+    "timestamp": "2026-01-03T17:28:13.864752",
+    "event_type": "time_exit_extended_flat_roi",
+    "symbol": "SOLUSDT",
+    "side": "long",
+    "reason": "Flat ROI at time limit; extended to avoid fee-driven exit",
+    "data": {
+      "time_in_trade_sec": 3010,
+      "original_limit_sec": 3000,
+      "new_limit_sec": 4200,
+      "adx": 13.54,
+      "roi_lev_pct": -0.326128175957468
+    }
+  },
+  {
+    "timestamp": "2026-01-04T16:35:28.896299",
+    "event_type": "time_exit_extended_flat_roi",
+    "symbol": "SOLUSDT",
+    "side": "short",
+    "reason": "Flat ROI at time limit; extended to avoid fee-driven exit",
+    "data": {
+      "time_in_trade_sec": 1818,
+      "original_limit_sec": 1800,
+      "new_limit_sec": 3000,
+      "adx": 17.1,
+      "roi_lev_pct": null
+    }
+  },
+  {
+    "timestamp": "2026-01-04T17:01:37.564133",
+    "event_type": "time_exit_extended_flat_roi",
+    "symbol": "SOLUSDT",
+    "side": "short",
+    "reason": "Flat ROI at time limit; extended to avoid fee-driven exit",
+    "data": {
+      "time_in_trade_sec": 1506,
+      "original_limit_sec": 1500,
+      "new_limit_sec": 2700,
+      "adx": 17.12,
+      "roi_lev_pct": -0.037017842600204805
+    }
+  },
+  {
+    "timestamp": "2026-01-04T17:21:38.264646",
+    "event_type": "time_exit_extended_flat_roi",
+    "symbol": "SOLUSDT",
+    "side": "short",
+    "reason": "Flat ROI at time limit; extended to avoid fee-driven exit",
+    "data": {
+      "time_in_trade_sec": 2707,
+      "original_limit_sec": 2700,
+      "new_limit_sec": 3900,
+      "adx": 17.47,
+      "roi_lev_pct": -0.0740356852003044
+    }
+  },
+  {
+    "timestamp": "2026-01-05T01:16:17.318122",
+    "event_type": "time_based_exit",
+    "symbol": "SOLUSDT",
+    "side": "long",
+    "reason": "Position exceeded max holding time (time_exit_profit)",
+    "data": {
+      "time_in_trade_sec": 1514,
+      "limit_sec": 1500,
+      "exit_reason": "time_exit_profit",
+      "adx": 24.35,
+      "roi_lev_pct": 3.2829214312061468
+    }
+  },
+  {
+    "timestamp": "2026-01-05T06:20:02.593346",
+    "event_type": "time_exit_extended_flat_roi",
+    "symbol": "SOLUSDT",
+    "side": "long",
+    "reason": "Flat ROI at time limit; extended to avoid fee-driven exit",
+    "data": {
+      "time_in_trade_sec": 1506,
+      "original_limit_sec": 1500,
+      "new_limit_sec": 2700,
+      "adx": 19.99,
+      "roi_lev_pct": 0.5170630816960214
+    }
+  },
+  {
+    "timestamp": "2026-01-05T07:11:10.980573",
+    "event_type": "time_exit_extended",
+    "symbol": "ETHUSDT",
+    "side": "short",
+    "reason": "Strong trend (ADX=28.1), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 1525,
+      "original_limit_sec": 1500,
+      "new_limit_sec": 2700,
+      "adx": 28.14
+    }
+  },
+  {
+    "timestamp": "2026-01-05T07:31:11.729423",
+    "event_type": "time_exit_extended",
+    "symbol": "ETHUSDT",
+    "side": "short",
+    "reason": "Strong trend (ADX=27.1), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 2726,
+      "original_limit_sec": 2700,
+      "new_limit_sec": 3900,
+      "adx": 27.1
+    }
+  },
+  {
+    "timestamp": "2026-01-05T09:02:35.014446",
+    "event_type": "time_based_exit",
+    "symbol": "SOLUSDT",
+    "side": "long",
+    "reason": "Position exceeded max holding time (time_exit_loss)",
+    "data": {
+      "time_in_trade_sec": 1519,
+      "limit_sec": 1500,
+      "exit_reason": "time_exit_loss",
+      "adx": 12.14,
+      "roi_lev_pct": -1.7261729123635525
+    }
+  },
+  {
+    "timestamp": "2026-01-05T09:10:47.223397",
+    "event_type": "time_exit_extended_flat_roi",
+    "symbol": "BTCUSDT",
+    "side": "long",
+    "reason": "Flat ROI at time limit; extended to avoid fee-driven exit",
+    "data": {
+      "time_in_trade_sec": 1828,
+      "original_limit_sec": 1800,
+      "new_limit_sec": 3000,
+      "adx": 21.1,
+      "roi_lev_pct": -0.13516450601698315
+    }
+  },
+  {
+    "timestamp": "2026-01-05T15:37:35.446694",
+    "event_type": "time_exit_extended_flat_roi",
+    "symbol": "ETHUSDT",
+    "side": "long",
+    "reason": "Flat ROI at time limit; extended to avoid fee-driven exit",
+    "data": {
+      "time_in_trade_sec": 1827,
+      "original_limit_sec": 1800,
+      "new_limit_sec": 3000,
+      "adx": 16.76,
+      "roi_lev_pct": null
+    }
+  },
+  {
+    "timestamp": "2026-01-05T15:57:23.154248",
+    "event_type": "time_exit_extended_flat_roi",
+    "symbol": "ETHUSDT",
+    "side": "long",
+    "reason": "Flat ROI at time limit; extended to avoid fee-driven exit",
+    "data": {
+      "time_in_trade_sec": 3015,
+      "original_limit_sec": 3000,
+      "new_limit_sec": 4200,
+      "adx": 19.98,
+      "roi_lev_pct": -0.5429665432176317
+    }
+  },
+  {
+    "timestamp": "2026-01-05T18:02:58.279008",
+    "event_type": "time_exit_extended_flat_roi",
+    "symbol": "SOLUSDT",
+    "side": "short",
+    "reason": "Flat ROI at time limit; extended to avoid fee-driven exit",
+    "data": {
+      "time_in_trade_sec": 1505,
+      "original_limit_sec": 1500,
+      "new_limit_sec": 2700,
+      "adx": 15.1,
+      "roi_lev_pct": null
+    }
+  },
+  {
+    "timestamp": "2026-01-05T18:23:14.410536",
+    "event_type": "time_exit_extended_flat_roi",
+    "symbol": "SOLUSDT",
+    "side": "short",
+    "reason": "Flat ROI at time limit; extended to avoid fee-driven exit",
+    "data": {
+      "time_in_trade_sec": 2722,
+      "original_limit_sec": 2700,
+      "new_limit_sec": 3900,
+      "adx": 14.61,
+      "roi_lev_pct": null
+    }
+  },
+  {
+    "timestamp": "2026-01-06T20:49:58.782164",
+    "event_type": "time_exit_extended",
+    "symbol": "BTCUSDT",
+    "side": "short",
+    "reason": "Strong trend (ADX=28.2), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 1801,
+      "original_limit_sec": 1800,
+      "new_limit_sec": 3000,
+      "adx": 28.21
+    }
+  },
+  {
+    "timestamp": "2026-01-07T01:47:00.977080",
+    "event_type": "time_exit_extended_flat_roi",
+    "symbol": "BTCUSDT",
+    "side": "long",
+    "reason": "Flat ROI at time limit; extended to avoid fee-driven exit",
+    "data": {
+      "time_in_trade_sec": 1820,
+      "original_limit_sec": 1800,
+      "new_limit_sec": 3000,
+      "adx": 22.8,
+      "roi_lev_pct": -0.37498027841472054
+    }
+  },
+  {
+    "timestamp": "2026-01-07T06:20:35.960088",
+    "event_type": "time_exit_extended_flat_roi",
+    "symbol": "BTCUSDT",
+    "side": "short",
+    "reason": "Flat ROI at time limit; extended to avoid fee-driven exit",
+    "data": {
+      "time_in_trade_sec": 1526,
+      "original_limit_sec": 1500,
+      "new_limit_sec": 2700,
+      "adx": 13.86,
+      "roi_lev_pct": -0.7647218412124003
+    }
+  },
+  {
+    "timestamp": "2026-01-07T06:40:16.303144",
+    "event_type": "time_exit_extended_flat_roi",
+    "symbol": "BTCUSDT",
+    "side": "short",
+    "reason": "Flat ROI at time limit; extended to avoid fee-driven exit",
+    "data": {
+      "time_in_trade_sec": 2707,
+      "original_limit_sec": 2700,
+      "new_limit_sec": 3900,
+      "adx": 12.21,
+      "roi_lev_pct": -0.8484899580943238
+    }
+  },
+  {
+    "timestamp": "2026-01-07T19:30:08.157426",
+    "event_type": "time_exit_extended",
+    "symbol": "BTCUSDT",
+    "side": "short",
+    "reason": "Strong trend (ADX=29.1), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 1822,
+      "original_limit_sec": 1800,
+      "new_limit_sec": 3000,
+      "adx": 29.1
+    }
+  },
+  {
+    "timestamp": "2026-01-07T22:03:15.718618",
+    "event_type": "time_exit_extended",
+    "symbol": "BTCUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=25.1), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 1518,
+      "original_limit_sec": 1500,
+      "new_limit_sec": 2700,
+      "adx": 25.13
+    }
+  },
+  {
+    "timestamp": "2026-01-07T23:12:08.252487",
+    "event_type": "time_exit_extended",
+    "symbol": "ETHUSDT",
+    "side": "short",
+    "reason": "Strong trend (ADX=39.7), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 2401,
+      "original_limit_sec": 2400,
+      "new_limit_sec": 3600,
+      "adx": 39.71
+    }
+  },
+  {
+    "timestamp": "2026-01-08T00:56:02.964490",
+    "event_type": "time_exit_extended",
+    "symbol": "ETHUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=29.9), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 2401,
+      "original_limit_sec": 2400,
+      "new_limit_sec": 3600,
+      "adx": 29.86
+    }
+  },
+  {
+    "timestamp": "2026-01-08T05:58:33.928747",
+    "event_type": "time_exit_extended_flat_roi",
+    "symbol": "BTCUSDT",
+    "side": "long",
+    "reason": "Flat ROI at time limit; extended to avoid fee-driven exit",
+    "data": {
+      "time_in_trade_sec": 1812,
+      "original_limit_sec": 1800,
+      "new_limit_sec": 3000,
+      "adx": 11.94,
+      "roi_lev_pct": -1.2238590413342156
+    }
+  },
+  {
+    "timestamp": "2026-01-08T14:58:42.009746",
+    "event_type": "time_exit_extended",
+    "symbol": "BTCUSDT",
+    "side": "short",
+    "reason": "Strong trend (ADX=30.8), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 1813,
+      "original_limit_sec": 1800,
+      "new_limit_sec": 3000,
+      "adx": 30.82
+    }
+  },
+  {
+    "timestamp": "2026-01-08T16:10:01.826907",
+    "event_type": "time_exit_extended",
+    "symbol": "SOLUSDT",
+    "side": "long",
+    "reason": "Strong trend (ADX=27.8), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 3022,
+      "original_limit_sec": 3000,
+      "new_limit_sec": 4200,
+      "adx": 27.77
+    }
+  },
+  {
+    "timestamp": "2026-01-20T21:37:34.948712",
+    "event_type": "time_exit_extended",
+    "symbol": "BTCUSDT",
+    "side": "short",
+    "reason": "Strong trend (ADX=33.7), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 3623,
+      "original_limit_sec": 3600,
+      "new_limit_sec": 4800,
+      "adx": 33.73
+    }
+  },
+  {
+    "timestamp": "2026-01-20T21:37:36.096730",
+    "event_type": "time_exit_extended",
+    "symbol": "BNBUSDT",
+    "side": "short",
+    "reason": "Strong trend (ADX=36.1), extended by 1200s",
+    "data": {
+      "time_in_trade_sec": 3622,
+      "original_limit_sec": 3600,
+      "new_limit_sec": 4800,
+      "adx": 36.12
+    }
+  }
+]

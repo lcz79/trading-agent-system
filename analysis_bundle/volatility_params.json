@@ -1,0 +1,32 @@
+{
+  "updated_at": "2026-01-02T17:27:55Z",
+  "symbols": {
+    "BTCUSDT": {
+      "atr14_median_365d": 3226.992857142856,
+      "atr_pct_median_365d": 0.035642492496425315,
+      "recommended": {
+        "sl_pct": 0.05,
+        "trailing_distance_pct": 0.08,
+        "trailing_activation_roi": 0.03
+      }
+    },
+    "ETHUSDT": {
+      "atr14_median_365d": 172.41000000000005,
+      "atr_pct_median_365d": 0.055078843794725024,
+      "recommended": {
+        "sl_pct": 0.05,
+        "trailing_distance_pct": 0.08,
+        "trailing_activation_roi": 0.03
+      }
+    },
+    "SOLUSDT": {
+      "atr14_median_365d": 11.01142857142857,
+      "atr_pct_median_365d": 0.08381996324448938,
+      "recommended": {
+        "sl_pct": 0.05,
+        "trailing_distance_pct": 0.08,
+        "trailing_activation_roi": 0.03
+      }
+    }
+  }
+}
