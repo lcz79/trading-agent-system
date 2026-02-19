@@ -3,6 +3,7 @@ uvicorn==0.24.0
 requests==2.31.0
 httpx==0.25.1
 pydantic==2.5.0
-ccxt==4.1.48
-pandas==2.0.3
-numpy==1.24.4
+python-dotenv==1.0.1
+
+hyperliquid-python-sdk==0.22.0
+eth-account==0.13.7

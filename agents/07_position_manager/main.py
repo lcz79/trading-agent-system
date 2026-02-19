@@ -1,5 +1,9 @@
 import os
-import ccxt
+try:
+    import ccxt
+except Exception:
+    ccxt = None  # optional (Bybit only)
+
 import json
 import time
 import requests
@@ -9,11 +13,21 @@ from decimal import Decimal, ROUND_DOWN
 from datetime import datetime, timedelta
 from typing import Optional, Any, Dict, Tuple
 from fastapi import FastAPI
+from hyperliquid_trader import HyperLiquidTrader
 from pydantic import BaseModel
 from threading import Thread, Lock
 import sys
 from shared.trading_state import get_trading_state, OrderIntent, OrderStatus, PositionMetadata, Cooldown
 app = FastAPI()
+
+# =========================================================
+# EXCHANGE SWITCH (bybit | hyperliquid)
+# =========================================================
+EXCHANGE = os.getenv("EXCHANGE", "bybit").strip().lower()
+HYPERLIQUID_TESTNET = os.getenv("HYPERLIQUID_TESTNET", "true").lower() == "true"
+HYPERLIQUID_PRIVATE_KEY = os.getenv("PRIVATE_KEY")
+HYPERLIQUID_WALLET_ADDRESS = os.getenv("WALLET_ADDRESS")
+
 # =========================================================
 # CONFIG
 # =========================================================
@@ -398,12 +412,50 @@ def create_exchange(provider: str = None):
 # =========================================================
 # EXCHANGE SETUP
 # =========================================================
-exchange = create_exchange(EXCHANGE_PROVIDER)
+exchange = None
 
-if exchange:
-    print(f"✅ Exchange initialized: {EXCHANGE_PROVIDER.upper()}")
-else:
-    print(f"⚠️ Failed to initialize exchange: {EXCHANGE_PROVIDER}")
+# Bybit init only when selected and ccxt is available
+if EXCHANGE != "hyperliquid":
+    if ccxt is None:
+        print("⚠️ ccxt non disponibile: Bybit exchange disabilitato")
+    elif API_KEY and API_SECRET:
+        try:
+            exchange = ccxt.bybit({
+                "apiKey": API_KEY,
+                "secret": API_SECRET,
+                "options": {
+                    "defaultType": "swap",
+                    "adjustForTimeDifference": True,
+                },
+            })
+            if IS_TESTNET:
+                exchange.set_sandbox_mode(True)
+            exchange.load_markets()
+            print(f"🔌 Position Manager: Connesso Bybit (Testnet: {IS_TESTNET}) | HedgeMode: {HEDGE_MODE}")
+        except Exception as e:
+            print(f"⚠️ Errore Connessione Bybit: {e}")
+    else:
+        print("⚠️ BYBIT_API_KEY/BYBIT_API_SECRET mancanti: exchange non inizializzato")
+
+# =========================================================
+# HYPERLIQUID SETUP
+# =========================================================
+hl_bot = None
+if EXCHANGE == "hyperliquid":
+    if not HYPERLIQUID_PRIVATE_KEY or not HYPERLIQUID_WALLET_ADDRESS:
+        print("⚠️ PRIVATE_KEY/WALLET_ADDRESS mancanti: Hyperliquid non inizializzato")
+    else:
+        try:
+            hl_bot = HyperLiquidTrader(
+                secret_key=HYPERLIQUID_PRIVATE_KEY,
+                account_address=HYPERLIQUID_WALLET_ADDRESS,
+                testnet=HYPERLIQUID_TESTNET,
+                skip_ws=True,
+            )
+            print(f"🔌 Position Manager: Hyperliquid connesso (Testnet: {HYPERLIQUID_TESTNET})")
+        except Exception as e:
+            print(f"⚠️ Errore connessione Hyperliquid: {e}")
+
 # =========================================================
 # PENDING ENTRY ORDER MANAGEMENT
 # =========================================================
@@ -2267,6 +2319,35 @@ def get_balance():
         }
 @app.get("/get_open_positions")
 def get_positions():
+    # Hyperliquid branch
+    if EXCHANGE == "hyperliquid":
+        if not hl_bot:
+            return {"active": [], "details": []}
+        try:
+            st = hl_bot.get_account_status()
+            details = []
+            active = []
+            for pos in st.get("open_positions", []) or []:
+                sym = (pos.get("symbol") or "").upper()
+                side = (pos.get("side") or "").lower()
+                details.append({
+                    "symbol": sym,  # HL uses base coin (BTC, ETH, ...)
+                    "side": side,
+                    "size": float(pos.get("size") or 0.0),
+                    "entry_price": float(pos.get("entry_price") or 0.0),
+                    "mark_price": float(pos.get("mark_price") or 0.0),
+                    "pnl": float(pos.get("pnl_usd") or 0.0),
+                    "pnl_pct": 0.0,
+                    "leverage": pos.get("leverage") or 1,
+                    "positionIdx": 0,
+                })
+                if sym:
+                    active.append(sym)
+            return {"active": active, "details": details}
+        except Exception:
+            return {"active": [], "details": []}
+
+    # Bybit branch (legacy)
     if not exchange:
         return {"active": [], "details": []}
     try:
@@ -2492,6 +2573,32 @@ def cancel_intent_endpoint(request: dict):
         return {"status": "error", "msg": str(e)}
 @app.post("/open_position")
 def open_position(order: OrderRequest):
+    # Hyperliquid branch
+    if EXCHANGE == "hyperliquid":
+        if not hl_bot:
+            return {"status": "error", "msg": "Hyperliquid not initialized"}
+        try:
+            raw_sym = str(order.symbol).strip()
+            base = symbol_base(raw_sym)
+            is_long_request = ("buy" in order.side.lower()) or ("long" in order.side.lower())
+            requested_dir = "long" if is_long_request else "short"
+            portion = float(order.size_pct or 0.0)
+            portion = max(0.0, min(1.0, portion))
+            lev = float(order.leverage or 1.0)
+            lev = max(1.0, min(10.0, lev))
+            sig = {
+                "operation": "open",
+                "symbol": base,
+                "direction": requested_dir,
+                "target_portion_of_balance": portion,
+                "leverage": lev,
+                "stop_loss_percent": 2,
+                "reason": "PM open_position (HL)",
+            }
+            res = hl_bot.execute_signal(sig)
+            return {"status": "executed", "exchange": "hyperliquid", "symbol": base, "side": requested_dir, "result": res}
+        except Exception as e:
+            return {"status": "error", "msg": str(e), "exchange": "hyperliquid"}
     if not exchange:
         return {"status": "error", "msg": "No Exchange"}
     try:
@@ -2877,6 +2984,23 @@ def close_position(req: CloseRequest):
     manual_only = os.getenv("POSITION_MANAGER_MANUAL_ONLY", "true").lower() == "true"
     if manual_only:
         return {"status": "manual_only"}
+
+    # Hyperliquid branch
+    if EXCHANGE == "hyperliquid":
+        if not hl_bot:
+            return {"status": "error", "msg": "Hyperliquid not initialized"}
+        try:
+            ok = execute_close_position(req.symbol, exit_reason=req.exit_reason)
+            if ok:
+                return {"status": "executed"}
+            base = symbol_base(req.symbol)
+            st = hl_bot.get_account_status()
+            has_pos = any((p.get("symbol") or "").upper() == base.upper() for p in (st.get("open_positions") or []))
+            if not has_pos:
+                return {"status": "no_position", "symbol": base}
+            return {"status": "error", "msg": "close_failed_or_unknown_state", "symbol": base}
+        except Exception as e:
+            return {"status": "error", "msg": str(e), "exchange": "hyperliquid"}
     try:
         ok = execute_close_position(req.symbol, exit_reason=req.exit_reason)
         if ok:
@@ -2899,6 +3023,8 @@ def close_position(req: CloseRequest):
         return {"status": "error", "msg": str(e)}
 @app.post("/reverse_position")
 def reverse_position(req: ReverseRequest):
+    if EXCHANGE == "hyperliquid":
+        return {"status": "disabled", "exchange": "hyperliquid"}
     # Reverse è opzionale e va abilitato esplicitamente
     enable_reverse = os.getenv("POSITION_MANAGER_ENABLE_REVERSE", "false").lower() == "true"
     if not enable_reverse:
@@ -2929,6 +3055,8 @@ def reverse_position(req: ReverseRequest):
         return {"status": "error", "msg": str(e)}
 @app.post("/manage_active_positions")
 def manage():
+    if EXCHANGE == "hyperliquid":
+        return {"status": "disabled", "exchange": "hyperliquid"}
     check_recent_closes_and_save_cooldown()
     check_and_update_trailing_stops()
     check_smart_reverse()
