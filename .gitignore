@@ -51,3 +51,23 @@ pm_openapi.json
 
 # Local backup files
 *.bak_*
+
+# Local env / secrets
+.env
+env_current.txt
+analysis_bundle/
+analysis_bundle.tar.gz
+
+# Logs / outputs
+ai_decisions*.json
+orchestrator_ai_events.json
+trading_history*.json
+events_log.json
+txlog*.csv
+closed_pnl*.csv
+volatility_params.json
+
+# Datasets / backtests
+event_study/
+*.csv
+*.tar.gz
