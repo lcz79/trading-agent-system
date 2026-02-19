@@ -18,9 +18,20 @@ app = FastAPI()
 # CONFIG
 # =========================================================
 HISTORY_FILE = os.getenv("HISTORY_FILE", "equity_history.json")
+
+# Exchange Configuration
+EXCHANGE_PROVIDER = os.getenv("EXCHANGE", "bybit").lower()
+SUPPORTED_EXCHANGES = ["bybit", "hyperliquid"]
+
+# Bybit API Configuration
 API_KEY = os.getenv("BYBIT_API_KEY")
 API_SECRET = os.getenv("BYBIT_API_SECRET")
 IS_TESTNET = os.getenv("BYBIT_TESTNET", "false").lower() == "true"
+
+# Hyperliquid API Configuration
+HYPERLIQUID_API_KEY = os.getenv("HYPERLIQUID_API_KEY")
+HYPERLIQUID_API_SECRET = os.getenv("HYPERLIQUID_API_SECRET")
+HYPERLIQUID_TESTNET = os.getenv("HYPERLIQUID_TESTNET", "false").lower() == "true"
 # Se usi Hedge Mode su Bybit (posizioni long/short contemporanee),
 # metti BYBIT_HEDGE_MODE=true. Se non sei sicuro, lascialo false.
 HEDGE_MODE = os.getenv("BYBIT_HEDGE_MODE", "false").lower() == "true"
@@ -303,28 +314,96 @@ def _save_profit_lock_state(state: dict) -> None:
         print(f"⚠️ Could not save profit-lock state: {e}")
 def _trailing_key(symbol: str, side_dir: str, position_idx: int) -> str:
     return f"{bybit_symbol_id(symbol)}|{side_dir}|{int(position_idx)}"
+
+# =========================================================
+# EXCHANGE FACTORY
+# =========================================================
+def create_exchange(provider: str = None):
+    """
+    Factory function to create exchange instance based on provider.
+    
+    Args:
+        provider: Exchange provider name (bybit, hyperliquid). 
+                  If None, uses EXCHANGE_PROVIDER from env.
+    
+    Returns:
+        ccxt exchange instance or None if configuration is invalid
+    
+    Raises:
+        ValueError: If exchange provider is not supported
+    """
+    if provider is None:
+        provider = EXCHANGE_PROVIDER
+    
+    provider = provider.lower()
+    
+    if provider not in SUPPORTED_EXCHANGES:
+        raise ValueError(
+            f"Unsupported exchange: {provider}. "
+            f"Supported exchanges: {', '.join(SUPPORTED_EXCHANGES)}"
+        )
+    
+    try:
+        if provider == "bybit":
+            if not API_KEY or not API_SECRET:
+                print("⚠️ BYBIT_API_KEY/BYBIT_API_SECRET missing: exchange not initialized")
+                return None
+            
+            exchange_instance = ccxt.bybit({
+                "apiKey": API_KEY,
+                "secret": API_SECRET,
+                "options": {
+                    "defaultType": "swap",
+                    "adjustForTimeDifference": True,
+                },
+            })
+            
+            if IS_TESTNET:
+                exchange_instance.set_sandbox_mode(True)
+            
+            exchange_instance.load_markets()
+            print(f"🔌 Position Manager: Connected to Bybit (Testnet: {IS_TESTNET}) | HedgeMode: {HEDGE_MODE}")
+            return exchange_instance
+            
+        elif provider == "hyperliquid":
+            if not HYPERLIQUID_API_KEY or not HYPERLIQUID_API_SECRET:
+                print("⚠️ HYPERLIQUID_API_KEY/HYPERLIQUID_API_SECRET missing: exchange not initialized")
+                return None
+            
+            # TODO: Verify Hyperliquid ccxt integration
+            # Note: ccxt.hyperliquid may have different initialization parameters
+            # This is a placeholder implementation that should be verified with ccxt documentation
+            # before production use. Specifically check:
+            # 1. Correct API parameter names (apiKey vs api_key)
+            # 2. Testnet/sandbox mode configuration
+            # 3. Market loading and symbol format
+            exchange_instance = ccxt.hyperliquid({
+                "apiKey": HYPERLIQUID_API_KEY,
+                "secret": HYPERLIQUID_API_SECRET,
+            })
+            
+            # Hyperliquid may not support sandbox mode the same way
+            # Check ccxt documentation for proper testnet setup
+            if HYPERLIQUID_TESTNET:
+                print("⚠️ Note: Hyperliquid testnet configuration may differ from production")
+            
+            exchange_instance.load_markets()
+            print(f"🔌 Position Manager: Connected to Hyperliquid (Testnet: {HYPERLIQUID_TESTNET})")
+            return exchange_instance
+            
+    except Exception as e:
+        print(f"⚠️ Exchange connection error ({provider}): {e}")
+        return None
+
 # =========================================================
 # EXCHANGE SETUP
 # =========================================================
-exchange = None
-if API_KEY and API_SECRET:
-    try:
-        exchange = ccxt.bybit({
-            "apiKey": API_KEY,
-            "secret": API_SECRET,
-            "options": {
-                "defaultType": "swap",
-                "adjustForTimeDifference": True,
-            },
-        })
-        if IS_TESTNET:
-            exchange.set_sandbox_mode(True)
-        exchange.load_markets()
-        print(f"🔌 Position Manager: Connesso (Testnet: {IS_TESTNET}) | HedgeMode: {HEDGE_MODE}")
-    except Exception as e:
-        print(f"⚠️ Errore Connessione: {e}")
+exchange = create_exchange(EXCHANGE_PROVIDER)
+
+if exchange:
+    print(f"✅ Exchange initialized: {EXCHANGE_PROVIDER.upper()}")
 else:
-    print("⚠️ BYBIT_API_KEY/BYBIT_API_SECRET mancanti: exchange non inizializzato")
+    print(f"⚠️ Failed to initialize exchange: {EXCHANGE_PROVIDER}")
 # =========================================================
 # PENDING ENTRY ORDER MANAGEMENT
 # =========================================================
