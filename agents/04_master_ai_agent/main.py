@@ -1,41 +1,5 @@
 import os
 import json
-
-from datetime import datetime
-
-def safe_json_loads(content: str, context_label: str = "unknown") -> dict:
-    """Parse JSON robustly from model output and save raw bad responses to /data."""
-    if content is None:
-        return {}
-
-    try:
-        return json.loads(content)
-    except Exception as e:
-        try:
-            ts = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
-            path = f"/data/deepseek_bad_response_{context_label}_{ts}.txt"
-            with open(path, "w", encoding="utf-8") as f:
-                f.write(content)
-            logger.error(f"AI Critical Error ({context_label}): {repr(e)}. Saved raw response to {path}")
-        except Exception:
-            logger.error(f"AI Critical Error ({context_label}): {repr(e)} (also failed to write raw response)")
-
-    # Second attempt: extract largest JSON object
-    try:
-        s = content.strip()
-        if s.startswith("```"):
-            s = s.strip("`")
-            if s.startswith("json"):
-                s = s[4:].strip()
-        start = s.find("{")
-        end = s.rfind("}")
-        if start != -1 and end != -1 and end > start:
-            return json.loads(s[start:end+1])
-    except Exception as e2:
-        logger.error(f"AI Critical Error ({context_label}) after extraction: {repr(e2)}")
-
-    return {}
-
 import logging
 import httpx
 import asyncio
@@ -47,8 +11,6 @@ from openai import OpenAI
 from threading import Lock
 
 logging.basicConfig(level=logging.INFO)
-FAST_PATH_TIMEOUT_SECONDS = float(os.getenv('FAST_PATH_TIMEOUT_SECONDS', '60'))
-
 logger = logging.getLogger("MasterAI")
 
 app = FastAPI()
@@ -89,49 +51,15 @@ TRADING_HISTORY_FILE = "/data/trading_history.json"
 # Possono essere sovrascritti da variabili d'ambiente se necessario
 LOSS_THRESHOLD_PCT = float(os.getenv("LOSS_THRESHOLD_PCT", "-5"))  # Soglia perdita trade
 MAX_RECENT_LOSSES = int(os.getenv("MAX_RECENT_LOSSES", "10"))  # Numero max perdite recenti
-MIN_CONFIRMATIONS_REQUIRED = 2  # Numero minimo di conferme per aprire una posizione
+MIN_CONFIRMATIONS_REQUIRED = 3  # Numero minimo di conferme per aprire una posizione
 CONFIDENCE_THRESHOLD_LOW = 50  # Soglia confidenza bassa per blocco automatico
 
 # Cooldown configuration
-COOLDOWN_MINUTES = 5
+COOLDOWN_MINUTES = 15
 
 # Crash Guard configuration - momentum filters to avoid knife catching
 CRASH_GUARD_5M_LONG_BLOCK_PCT = float(os.getenv("CRASH_GUARD_5M_LONG_BLOCK_PCT", "0.6"))  # Block LONG if return_5m <= -0.6%
-CRASH_GUARD_5M_SHORT_BLOCK_PCT = float(os.getenv("CRASH_GUARD_5M_SHORT_BLOCK_PCT", "1.5"))  # Block SHORT if return_5m >= +0.6%
-
-# Risk-based sizing configuration (anti-blowup protection)
-MAX_LOSS_USDT_PER_TRADE = float(os.getenv("MAX_LOSS_USDT_PER_TRADE", "0.35"))  # Maximum loss per trade in USDT
-MAX_TOTAL_RISK_USDT = float(os.getenv("MAX_TOTAL_RISK_USDT", "1.5"))  # Maximum total risk across all positions
-MIN_SL_DISTANCE_PCT = float(os.getenv("MIN_SL_DISTANCE_PCT", "0.0025"))  # Minimum SL distance (0.25%)
-MAX_SL_DISTANCE_PCT = float(os.getenv("MAX_SL_DISTANCE_PCT", "0.025"))  # Maximum SL distance (2.5%)
-MAX_NOTIONAL_USDT = float(os.getenv("MAX_NOTIONAL_USDT", "50.0"))  # Maximum notional size per trade
-MARGIN_SAFETY_FACTOR = float(os.getenv("MARGIN_SAFETY_FACTOR", "0.85"))  # Margin safety factor
-
-# Recovery sizing configuration (martingale-like, default OFF for LIVE)
-ENABLE_RECOVERY_SIZING = os.getenv("ENABLE_RECOVERY_SIZING", "false").lower() == "true"
-
-# Leverage constraints
-MIN_LEVERAGE = float(os.getenv("MIN_LEVERAGE", "3"))  # Minimum leverage for OPEN actions
-MAX_LEVERAGE_OPEN = float(os.getenv("MAX_LEVERAGE_OPEN", "10"))  # Maximum leverage for OPEN actions
-ENABLE_CONFIDENCE_LEVERAGE_ADJUST = os.getenv("ENABLE_CONFIDENCE_LEVERAGE_ADJUST", "false").lower() == "true"
-LEVERAGE_CAP_CONFIDENCE_LOW = float(os.getenv("LEVERAGE_CAP_CONFIDENCE_LOW", "60"))
-LEVERAGE_CAP_CONFIDENCE_MED = float(os.getenv("LEVERAGE_CAP_CONFIDENCE_MED", "75"))
-LEVERAGE_MAX_CONFIDENCE_LOW = float(os.getenv("LEVERAGE_MAX_CONFIDENCE_LOW", "4"))
-LEVERAGE_MAX_CONFIDENCE_MED = float(os.getenv("LEVERAGE_MAX_CONFIDENCE_MED", "6"))
-
-# Opportunistic LIMIT configuration (conservative mode)
-OPP_LIMIT_MIN_TP_PCT = float(os.getenv("OPP_LIMIT_MIN_TP_PCT", "0.008"))  # Minimum TP 0.8%
-OPP_LIMIT_MIN_RR = float(os.getenv("OPP_LIMIT_MIN_RR", "1.5"))  # Minimum risk/reward ratio
-OPP_LIMIT_MAX_ENTRY_DISTANCE_PCT = float(os.getenv("OPP_LIMIT_MAX_ENTRY_DISTANCE_PCT", "0.006"))  # Max entry distance 0.6%
-OPP_LIMIT_MIN_EDGE_SCORE = float(os.getenv("OPP_LIMIT_MIN_EDGE_SCORE", "60"))  # Minimum edge score
-
-# Fast decision path timeouts (to avoid DeepSeek truncation/timeout issues)
-FAST_DECISION_TIMEOUT_SEC = float(os.getenv("FAST_DECISION_TIMEOUT_SEC", "60.0"))  # Hard timeout for fast decisions
-FAST_OPEN_CONFLUENCE_THRESHOLD = int(os.getenv('FAST_OPEN_CONFLUENCE_THRESHOLD', '67'))
-FAST_LIMIT_CONFLUENCE_THRESHOLD = int(os.getenv('FAST_LIMIT_CONFLUENCE_THRESHOLD', '60'))
-
-FAST_DECISION_MAX_TOKENS = int(os.getenv("FAST_DECISION_MAX_TOKENS", "2000"))  # Limit LLM output to prevent truncation
-EXPLANATION_TIMEOUT_SEC = float(os.getenv("EXPLANATION_TIMEOUT_SEC", "60.0"))  # Timeout for verbose explanations
+CRASH_GUARD_5M_SHORT_BLOCK_PCT = float(os.getenv("CRASH_GUARD_5M_SHORT_BLOCK_PCT", "0.6"))  # Block SHORT if return_5m >= +0.6%
 
 file_lock = Lock()
 
@@ -267,10 +195,9 @@ def enforce_decision_consistency(decision_dict: dict) -> dict:
     Applica guardrail per garantire coerenza nella decisione AI.
     Post-processa il JSON per:
     1. Garantire che direction_considered sia coerente con action
-    2. Separare HARD blockers (blocked_by) da SOFT flags (soft_blockers)
-    3. Garantire che HARD blockers forzino HOLD, SOFT flags no
-    4. Separare setup_confirmations da risk_factors
-    5. Validare che rationale non contenga contraddizioni
+    2. Garantire che blocked_by sia presente se action=HOLD con bassa confidence
+    3. Separare setup_confirmations da risk_factors
+    4. Validare che rationale non contenga contraddizioni
     """
     action = decision_dict.get('action', 'HOLD')
     confidence = decision_dict.get('confidence', 50)
@@ -297,49 +224,23 @@ def enforce_decision_consistency(decision_dict: dict) -> dict:
     if not decision_dict.get('setup_confirmations') and decision_dict.get('confirmations'):
         decision_dict['setup_confirmations'] = decision_dict['confirmations']
     
-    # 4. Backward compatibility: migrate legacy soft reasons from blocked_by to soft_blockers
-    blocked_by = decision_dict.get('blocked_by', [])
-    soft_blockers = decision_dict.get('soft_blockers', [])
-    
-    if blocked_by:
-        # Define soft reasons that should be migrated
-        soft_reasons = ['LOW_CONFIDENCE', 'CONFLICTING_SIGNALS']
-        hard_reasons = []
-        migrated_soft = []
-        
-        for reason in blocked_by:
-            if reason in soft_reasons:
-                migrated_soft.append(reason)
-            else:
-                hard_reasons.append(reason)
-        
-        # Update blocked_by to contain only hard reasons
-        decision_dict['blocked_by'] = hard_reasons
-        
-        # Merge migrated soft reasons into soft_blockers
-        if migrated_soft:
-            existing_soft = list(soft_blockers) if isinstance(soft_blockers, list) else []
-            combined_soft = list(set(existing_soft + migrated_soft))
-            decision_dict['soft_blockers'] = combined_soft
-            logger.info(f"✅ Migrated soft reasons from blocked_by to soft_blockers: {migrated_soft}")
-    
-    # 5. Inferisci soft_blockers se action=HOLD con bassa confidence e nessun hard blocker
-    if action == 'HOLD' and not decision_dict.get('blocked_by') and not decision_dict.get('soft_blockers'):
+    # 4. Inferisci blocked_by se action=HOLD con bassa confidence
+    if action == 'HOLD' and not decision_dict.get('blocked_by'):
         if confidence < CONFIDENCE_THRESHOLD_LOW:
-            decision_dict['soft_blockers'] = ['LOW_CONFIDENCE']
-            logger.info(f"✅ Inferito soft_blockers=['LOW_CONFIDENCE'] per HOLD con confidence={confidence}")
+            decision_dict['blocked_by'] = ['LOW_CONFIDENCE']
+            logger.info(f"✅ Inferito blocked_by=['LOW_CONFIDENCE'] per HOLD con confidence={confidence}")
         elif not decision_dict.get('setup_confirmations') or len(decision_dict.get('setup_confirmations', [])) < MIN_CONFIRMATIONS_REQUIRED:
-            decision_dict['soft_blockers'] = ['CONFLICTING_SIGNALS']
-            logger.info(f"✅ Inferito soft_blockers=['CONFLICTING_SIGNALS'] per HOLD con poche conferme")
+            decision_dict['blocked_by'] = ['CONFLICTING_SIGNALS']
+            logger.info(f"✅ Inferito blocked_by=['CONFLICTING_SIGNALS'] per HOLD con poche conferme")
     
-    # 6. Se ci sono HARD blockers (blocked_by), action DEVE essere HOLD (o CLOSE se posizione aperta)
+    # 5. Se ci sono blocked_by, action DEVE essere HOLD (o CLOSE se posizione aperta)
     if decision_dict.get('blocked_by') and action not in ['HOLD', 'CLOSE']:
-        logger.warning(f"⚠️ Incoerenza: HARD blocked_by presente ma action={action}, forzato a HOLD")
+        logger.warning(f"⚠️ Incoerenza: blocked_by presente ma action={action}, forzato a HOLD")
         decision_dict['action'] = 'HOLD'
         decision_dict['leverage'] = 1.0
         decision_dict['size_pct'] = 0.0
     
-    # 7. Valida rationale per contraddizioni comuni
+    # 6. Valida rationale per contraddizioni comuni
     rationale = decision_dict.get('rationale', '').lower()
     if action == 'OPEN_SHORT':
         # Non dovrebbe menzionare "long setup" o "buy" come setup considerato
@@ -387,28 +288,12 @@ def log_api_call(tokens_in: int, tokens_out: int):
 
 
 def save_ai_decision(decision_data):
-    """Salva la decisione AI per visualizzarla nella dashboard con metadata input per audit"""
+    """Salva la decisione AI per visualizzarla nella dashboard"""
     try:
         decisions = []
         if os.path.exists(AI_DECISIONS_FILE):
             with open(AI_DECISIONS_FILE, 'r') as f:
                 decisions = json.load(f)
-        
-        # Prepare input snapshot for audit/correlation
-        input_snapshot = {}
-        if 'input_snapshot' in decision_data:
-            input_snapshot = decision_data['input_snapshot']
-        else:
-            # Create minimal snapshot if not provided
-            input_snapshot = {
-                'entry_price': decision_data.get('entry_price'),
-                'sl_pct': decision_data.get('sl_pct'),
-                'tp_pct': decision_data.get('tp_pct'),
-                'leverage': decision_data.get('leverage'),
-                'entry_type': decision_data.get('entry_type'),
-                'wallet_available': decision_data.get('wallet_available'),
-                'positions_open': decision_data.get('positions_open'),
-            }
         
         # Aggiungi nuova decisione
         decisions.append({
@@ -426,11 +311,7 @@ def save_ai_decision(decision_data):
             # New structured fields
             'setup_confirmations': decision_data.get('setup_confirmations', []),
             'blocked_by': decision_data.get('blocked_by', []),
-            'soft_blockers': decision_data.get('soft_blockers', []),
-            'direction_considered': decision_data.get('direction_considered', 'NONE'),
-            # Input snapshot for audit/correlation
-            'input_snapshot': input_snapshot,
-            'prompt_version': 'v3_neutral',  # Track prompt version for A/B testing
+            'direction_considered': decision_data.get('direction_considered', 'NONE')
         })
         
         # Mantieni solo le ultime 100 decisioni
@@ -446,153 +327,16 @@ def save_ai_decision(decision_data):
 
 
 # Blocker reasons for structured decisions
-# HARD constraints that ALWAYS block OPEN actions
-HARD_BLOCKER_REASONS = Literal[
+BLOCKER_REASONS = Literal[
     "INSUFFICIENT_MARGIN",
     "MAX_POSITIONS",
     "COOLDOWN",
     "DRAWDOWN_GUARD",
-    "CRASH_GUARD",
-    "LOW_PRE_SCORE",
-    "LOW_RANGE_SCORE",
-    "MOMENTUM_UP_15M",
-    "MOMENTUM_DOWN_15M",
-    "LOW_VOLATILITY",
-    ""
-]
-
-# SOFT constraints that are warnings/flags but don't force HOLD
-SOFT_BLOCKER_REASONS = Literal[
-    "LOW_CONFIDENCE",
+    "PATTERN_LOSING",
     "CONFLICTING_SIGNALS",
-    ""
-]
-
-# Valid blocker values (used for normalization/mapping)
-VALID_HARD_BLOCKERS = {
-    "INSUFFICIENT_MARGIN",
-    "MAX_POSITIONS",
-    "COOLDOWN",
-    "DRAWDOWN_GUARD",
-    "CRASH_GUARD",
-    "LOW_PRE_SCORE",
-    "LOW_RANGE_SCORE",
-    "MOMENTUM_UP_15M",
-    "MOMENTUM_DOWN_15M",
-    "LOW_VOLATILITY",
-}
-
-VALID_SOFT_BLOCKERS = {
     "LOW_CONFIDENCE",
-    "CONFLICTING_SIGNALS",
-}
-
-# Mapping for common aliases/variations
-HARD_BLOCKER_ALIASES = {
-    "INSUFFICIENT_BALANCE": "INSUFFICIENT_MARGIN",
-    "NO_MARGIN": "INSUFFICIENT_MARGIN",
-    "LOW_CONFIDENCE_SETUP": "LOW_PRE_SCORE",  # Map to closest hard blocker
-    "MAX_POSITION": "MAX_POSITIONS",
-    "POSITION_LIMIT": "MAX_POSITIONS",
-    "COOLDOWN_ACTIVE": "COOLDOWN",
-    "DRAWDOWN": "DRAWDOWN_GUARD",
-    "DRAWDOWN_LIMIT": "DRAWDOWN_GUARD",
-    "CRASH": "CRASH_GUARD",
-    "KNIFE_CATCHING": "CRASH_GUARD",
-    "LOW_VOL": "LOW_VOLATILITY",
-    "NO_VOLATILITY": "LOW_VOLATILITY",
-    "MOMENTUM_UP": "MOMENTUM_UP_15M",
-    "MOMENTUM_DOWN": "MOMENTUM_DOWN_15M",
-}
-
-SOFT_BLOCKER_ALIASES = {
-    "LOW_CONF": "LOW_CONFIDENCE",
-    "CONFIDENCE_LOW": "LOW_CONFIDENCE",
-    "CONFLICTING": "CONFLICTING_SIGNALS",
-    "MIXED_SIGNALS": "CONFLICTING_SIGNALS",
-}
-
-
-def normalize_blocker_value(value: str, blocker_type: str = "hard") -> Optional[str]:
-    """
-    Normalize a blocker value by:
-    1. Stripping whitespace
-    2. Extracting token before first space or '('
-    3. Converting to uppercase
-    4. Replacing '-' with '_'
-    5. Mapping common aliases to valid enum values
-    6. Returning None for unknown values (with warning)
-    
-    Args:
-        value: Raw blocker string from LLM (e.g., "LOW_PRE_SCORE (47)")
-        blocker_type: Either "hard" or "soft"
-    
-    Returns:
-        Normalized blocker string or None if invalid
-    """
-    if not value or not isinstance(value, str):
-        return None
-    
-    # Step 1: Strip whitespace
-    value = value.strip()
-    
-    # Step 2: Extract token before first space or '('
-    if ' ' in value:
-        value = value.split(' ')[0]
-    if '(' in value:
-        value = value.split('(')[0].strip()
-    
-    # Step 3: Uppercase
-    value = value.upper()
-    
-    # Step 4: Replace '-' with '_'
-    value = value.replace('-', '_')
-    
-    # Step 5: Check if empty after processing
-    if not value:
-        return None
-    
-    # Step 6: Check if already valid
-    if blocker_type == "hard":
-        if value in VALID_HARD_BLOCKERS:
-            return value
-        # Check aliases
-        if value in HARD_BLOCKER_ALIASES:
-            return HARD_BLOCKER_ALIASES[value]
-    else:  # soft
-        if value in VALID_SOFT_BLOCKERS:
-            return value
-        # Check aliases
-        if value in SOFT_BLOCKER_ALIASES:
-            return SOFT_BLOCKER_ALIASES[value]
-    
-    # Step 7: Unknown value - log warning and return None
-    logger.warning(f"⚠️ Unknown {blocker_type} blocker value: '{value}' - dropping")
-    return None
-
-
-def normalize_blocker_list(values: List[str], blocker_type: str = "hard") -> List[str]:
-    """
-    Normalize a list of blocker values, dropping invalid ones.
-    
-    Args:
-        values: List of raw blocker strings
-        blocker_type: Either "hard" or "soft"
-    
-    Returns:
-        List of normalized, valid blocker strings
-    """
-    if not values:
-        return []
-    
-    normalized = []
-    for value in values:
-        norm_value = normalize_blocker_value(value, blocker_type)
-        if norm_value is not None:
-            normalized.append(norm_value)
-    
-    return normalized
-
+    "CRASH_GUARD"
+]
 
 class Decision(BaseModel):
     symbol: str
@@ -605,8 +349,7 @@ class Decision(BaseModel):
     risk_factors: Optional[List[str]] = None
     # New structured fields for coherence
     setup_confirmations: Optional[List[str]] = None
-    blocked_by: Optional[List[str]] = None  # HARD constraints (normalized via field_validator, unknown values dropped)
-    soft_blockers: Optional[List[str]] = None  # SOFT warnings/flags (normalized via field_validator, unknown values dropped)
+    blocked_by: Optional[List[BLOCKER_REASONS]] = None
     direction_considered: Optional[Literal["LONG", "SHORT", "NONE"]] = None
     # Scalping parameters
     tp_pct: Optional[float] = None  # Take profit percentage (e.g., 0.02 for 2%)
@@ -614,63 +357,11 @@ class Decision(BaseModel):
     time_in_trade_limit_sec: Optional[int] = None  # Max holding time in seconds
     cooldown_sec: Optional[int] = None  # Cooldown period after close (per symbol+direction)
     trail_activation_roi: Optional[float] = None  # ROI threshold to activate trailing (optional)
-    # LIMIT entry parameters
-    entry_type: Optional[Literal["MARKET", "LIMIT"]] = "MARKET"  # Entry order type
-    entry_price: Optional[float] = None  # Entry price for LIMIT orders (required when entry_type=LIMIT)
-    entry_expires_sec: Optional[int] = 240  # TTL for LIMIT orders in seconds (default 240, range 10-3600)
-    # Opportunistic LIMIT (conservative mode for HOLD scenarios)
-    opportunistic_limit: Optional[Dict[str, Any]] = None  # Optional opportunistic LIMIT when action=HOLD
-    
-    @field_validator('blocked_by', mode='before')
-    @classmethod
-    def normalize_blocked_by(cls, v):
-        """Normalize blocked_by field to handle LLM output variations"""
-        if v is None:
-            return []
-        if not isinstance(v, list):
-            return []
-        # Normalize each value
-        return normalize_blocker_list(v, blocker_type="hard")
-    
-    @field_validator('soft_blockers', mode='before')
-    @classmethod
-    def normalize_soft_blockers(cls, v):
-        """Normalize soft_blockers field to handle LLM output variations"""
-        if v is None:
-            return []
-        if not isinstance(v, list):
-            return []
-        # Normalize each value
-        return normalize_blocker_list(v, blocker_type="soft")
 
 class AnalysisPayload(BaseModel):
     global_data: Dict[str, Any]
     assets_data: Dict[str, Any]
     learning_params: Optional[Dict[str, Any]] = None
-
-# Fast decision models for low-latency path
-class DecisionFast(BaseModel):
-    """Minimal decision schema for fast response - only essential execution fields"""
-    symbol: str
-    action: Literal["OPEN_LONG", "OPEN_SHORT", "HOLD", "CLOSE"]
-    entry_type: Optional[Literal["MARKET", "LIMIT"]] = "MARKET"
-    entry_price: Optional[float] = None  # Required if entry_type=LIMIT
-    leverage: float = 1.0
-    size_pct: float = 0.0
-    tp_pct: Optional[float] = None
-    sl_pct: Optional[float] = None
-    time_in_trade_limit_sec: Optional[int] = None
-    cooldown_sec: Optional[int] = None
-    entry_expires_sec: Optional[int] = None
-    confidence: Optional[int] = None
-    reason_code: Optional[str] = None  # Short reason code (e.g., "LOW_VOL", "STRONG_LONG", "HOLD_WAIT")
-
-class ExplainBatchRequest(BaseModel):
-    """Request for verbose explanation after fast decision"""
-    context_ref: Optional[str] = None  # Optional reference ID to original request
-    fast_decisions: List[Dict[str, Any]]  # The fast decisions returned earlier
-    global_data: Dict[str, Any]  # Same context as fast call
-    assets_data: Dict[str, Any]
 
 class ReverseAnalysisRequest(BaseModel):
     symbol: str
@@ -819,832 +510,87 @@ async def collect_full_analysis(symbol: str, http_client) -> dict:
     return data
 
 
-def compute_risk_based_size(
-    symbol: str,
-    entry_price: float,
-    stop_loss_price: float,
-    leverage: float,
-    available_for_new_trades: float,
-    active_positions: List[dict],
-) -> dict:
-    """
-    Calculate position size based on maximum loss per trade (risk-based sizing).
-    Returns dict with: {size_pct, notional_usdt, margin_required, blocked_by, blocked_reason}
-    
-    Logic:
-    1. Calculate SL distance percentage
-    2. Check SL distance is within [MIN_SL_DISTANCE_PCT, MAX_SL_DISTANCE_PCT]
-    3. Calculate notional = MAX_LOSS_USDT_PER_TRADE / sl_distance_pct
-    4. Clamp notional to MAX_NOTIONAL_USDT
-    5. Calculate margin_required = notional / leverage
-    6. Check margin_required <= available_for_new_trades * MARGIN_SAFETY_FACTOR
-    7. Check total risk across all positions + this trade <= MAX_TOTAL_RISK_USDT
-    
-    If any check fails, return blocked_by with reason.
-    """
-    try:
-        # Validate inputs
-        if entry_price <= 0 or stop_loss_price <= 0 or leverage <= 0:
-            return {
-                "size_pct": 0.0,
-                "notional_usdt": 0.0,
-                "margin_required": 0.0,
-                "blocked_by": ["INVALID_RISK_PARAMS"],
-                "blocked_reason": f"Invalid risk params: entry={entry_price}, sl={stop_loss_price}, lev={leverage}"
-            }
-        
-        # 1. Calculate SL distance percentage
-        sl_distance_pct = abs(entry_price - stop_loss_price) / entry_price
-        
-        # 2. Check SL distance bounds
-        if sl_distance_pct < MIN_SL_DISTANCE_PCT:
-            return {
-                "size_pct": 0.0,
-                "notional_usdt": 0.0,
-                "margin_required": 0.0,
-                "blocked_by": ["SL_TOO_TIGHT"],
-                "blocked_reason": f"SL distance {sl_distance_pct*100:.3f}% < min {MIN_SL_DISTANCE_PCT*100:.3f}%"
-            }
-        
-        if sl_distance_pct > MAX_SL_DISTANCE_PCT:
-            return {
-                "size_pct": 0.0,
-                "notional_usdt": 0.0,
-                "margin_required": 0.0,
-                "blocked_by": ["SL_TOO_WIDE"],
-                "blocked_reason": f"SL distance {sl_distance_pct*100:.3f}% > max {MAX_SL_DISTANCE_PCT*100:.3f}%"
-            }
-        
-        # 3. Calculate notional based on max loss per trade
-        notional_usdt = MAX_LOSS_USDT_PER_TRADE / sl_distance_pct
-        
-        # 4. Clamp to MAX_NOTIONAL_USDT
-        notional_usdt = min(notional_usdt, MAX_NOTIONAL_USDT)
-        
-        # 5. Calculate margin required
-        margin_required = notional_usdt / leverage
-        
-        # 6. Check margin availability
-        max_margin_allowed = available_for_new_trades * MARGIN_SAFETY_FACTOR
-        if margin_required > max_margin_allowed:
-            return {
-                "size_pct": 0.0,
-                "notional_usdt": notional_usdt,
-                "margin_required": margin_required,
-                "blocked_by": ["INSUFFICIENT_MARGIN_FOR_RISK"],
-                "blocked_reason": f"Margin required {margin_required:.2f} > available {max_margin_allowed:.2f} (safety factor {MARGIN_SAFETY_FACTOR})"
-            }
-        
-        # 7. Check total risk across portfolio
-        # Calculate risk for existing positions (estimate based on SL distance)
-        total_existing_risk = 0.0
-        for pos in active_positions:
-            # Estimate risk as a fraction of current value
-            # Conservative assumption: 1% SL distance if actual SL not available
-            # TODO: Fetch actual SL from position manager for more accurate calculation
-            conservative_sl_estimate_pct = 0.01  # 1% conservative estimate
-            try:
-                pos_mark_price = float(pos.get('mark_price', 0))
-                pos_size = float(pos.get('size', 0))
-                pos_leverage = float(pos.get('leverage', 1))
-                if pos_mark_price > 0 and pos_size > 0:
-                    pos_notional = pos_mark_price * pos_size
-                    # Use conservative SL distance for risk estimation
-                    estimated_sl_dist = conservative_sl_estimate_pct
-                    pos_risk = pos_notional * estimated_sl_dist
-                    total_existing_risk += pos_risk
-            except Exception:
-                pass
-        
-        new_trade_risk = notional_usdt * sl_distance_pct
-        total_risk = total_existing_risk + new_trade_risk
-        
-        if total_risk > MAX_TOTAL_RISK_USDT:
-            return {
-                "size_pct": 0.0,
-                "notional_usdt": notional_usdt,
-                "margin_required": margin_required,
-                "blocked_by": ["MAX_TOTAL_RISK_EXCEEDED"],
-                "blocked_reason": f"Total portfolio risk {total_risk:.2f} USDT > max {MAX_TOTAL_RISK_USDT:.2f} USDT"
-            }
-        
-        # Calculate size_pct for backward compatibility
-        # Formula: size_pct = margin_required / available_for_new_trades
-        # Note: This is the fraction of available margin to use, not the fraction of notional
-        size_pct = margin_required / available_for_new_trades if available_for_new_trades > 0 else 0.0
-        size_pct = min(size_pct, 1.0)  # Cap at 100%
-        
-        return {
-            "size_pct": size_pct,
-            "notional_usdt": notional_usdt,
-            "margin_required": margin_required,
-            "blocked_by": [],
-            "blocked_reason": "",
-            "sl_distance_pct": sl_distance_pct,
-            "total_risk_usdt": total_risk,
-            "new_trade_risk_usdt": new_trade_risk
-        }
-        
-    except Exception as e:
-        logger.error(f"❌ Error in compute_risk_based_size: {e}")
-        return {
-            "size_pct": 0.0,
-            "notional_usdt": 0.0,
-            "margin_required": 0.0,
-            "blocked_by": ["RISK_CALC_ERROR"],
-            "blocked_reason": f"Risk calculation error: {str(e)}"
-        }
-
-
-def clamp_leverage_by_confidence(leverage: float, confidence: Optional[int]) -> float:
-    """
-    Clamp leverage based on confidence level if ENABLE_CONFIDENCE_LEVERAGE_ADJUST is true.
-    
-    Returns clamped leverage in range [MIN_LEVERAGE, MAX_LEVERAGE_OPEN]
-    """
-    # Always apply min/max bounds
-    leverage = max(MIN_LEVERAGE, min(leverage, MAX_LEVERAGE_OPEN))
-    
-    # Apply confidence-based adjustment if enabled
-    if ENABLE_CONFIDENCE_LEVERAGE_ADJUST and confidence is not None:
-        if confidence < LEVERAGE_CAP_CONFIDENCE_LOW:
-            # Low confidence: cap at lower leverage
-            leverage = min(leverage, LEVERAGE_MAX_CONFIDENCE_LOW)
-        elif confidence < LEVERAGE_CAP_CONFIDENCE_MED:
-            # Medium confidence: cap at medium leverage
-            leverage = min(leverage, LEVERAGE_MAX_CONFIDENCE_MED)
-        # High confidence (>=75): use full range up to MAX_LEVERAGE_OPEN
-    
-    return leverage
-
-
-def validate_opportunistic_limit(
-    opportunistic_limit: Optional[Dict[str, Any]],
-    action: str,
-    blocked_by: List[str],
-    symbol: str,
-    current_price: float,
-    volatility_pct: float
-) -> dict:
-    """
-    Validate opportunistic_limit with hard gates (conservative mode).
-    
-    Returns dict with: {valid: bool, reasons: List[str], modified: Optional[dict]}
-    """
-    if opportunistic_limit is None:
-        return {"valid": True, "reasons": [], "modified": None}
-    
-    # Gate 1: Must be presented only if action == HOLD
-    if action != "HOLD":
-        reason = f"Opportunistic LIMIT only allowed with HOLD, got {action}"
-        logger.info(f"🚫 Opportunistic LIMIT rejected for {symbol}: {reason}")
-        return {
-            "valid": False,
-            "reasons": [reason],
-            "modified": None
-        }
-    
-    # Gate 2: Cannot be present if hard blockers active
-    if blocked_by:
-        reason = f"Opportunistic LIMIT blocked due to hard constraints: {blocked_by}"
-        logger.info(f"🚫 Opportunistic LIMIT rejected for {symbol}: {reason}")
-        return {
-            "valid": False,
-            "reasons": [reason],
-            "modified": None
-        }
-    
-    reasons = []
-    modified = dict(opportunistic_limit)
-    
-    # Extract and validate required fields
-    side = opportunistic_limit.get("side")
-    entry_price = opportunistic_limit.get("entry_price")
-    entry_expires_sec = opportunistic_limit.get("entry_expires_sec")
-    tp_pct = opportunistic_limit.get("tp_pct")
-    sl_pct = opportunistic_limit.get("sl_pct")
-    rr = opportunistic_limit.get("rr")
-    edge_score = opportunistic_limit.get("edge_score")
-    reasoning_bullets = opportunistic_limit.get("reasoning_bullets")
-    
-    # Gate 3: Validate required fields are present
-    if not side or side not in ["LONG", "SHORT"]:
-        return {
-            "valid": False,
-            "reasons": [f"Invalid or missing side: {side}"],
-            "modified": None
-        }
-    
-    if not entry_price or not isinstance(entry_price, (int, float)) or entry_price <= 0:
-        return {
-            "valid": False,
-            "reasons": [f"Invalid entry_price: {entry_price}"],
-            "modified": None
-        }
-    
-    # Gate 4: entry_expires_sec between 60 and 300
-    if not entry_expires_sec or not isinstance(entry_expires_sec, (int, float)):
-        return {
-            "valid": False,
-            "reasons": ["Missing entry_expires_sec"],
-            "modified": None
-        }
-    
-    entry_expires_sec = int(entry_expires_sec)
-    if entry_expires_sec < 60 or entry_expires_sec > 300:
-        return {
-            "valid": False,
-            "reasons": [f"entry_expires_sec {entry_expires_sec} not in range [60, 300]"],
-            "modified": None
-        }
-    
-    # Gate 5: tp_pct >= OPP_LIMIT_MIN_TP_PCT (configurable, default 0.008)
-    if not tp_pct or not isinstance(tp_pct, (int, float)) or tp_pct < OPP_LIMIT_MIN_TP_PCT:
-        reason = f"tp_pct {tp_pct} < {OPP_LIMIT_MIN_TP_PCT} (minimum via OPP_LIMIT_MIN_TP_PCT)"
-        logger.info(f"🚫 Opportunistic LIMIT rejected for {symbol}: {reason}")
-        return {
-            "valid": False,
-            "reasons": [reason],
-            "modified": None
-        }
-    
-    # Gate 6: sl_pct within MIN_SL_DISTANCE_PCT and MAX_SL_DISTANCE_PCT
-    if not sl_pct or not isinstance(sl_pct, (int, float)):
-        return {
-            "valid": False,
-            "reasons": ["Missing sl_pct"],
-            "modified": None
-        }
-    
-    if sl_pct < MIN_SL_DISTANCE_PCT or sl_pct > MAX_SL_DISTANCE_PCT:
-        return {
-            "valid": False,
-            "reasons": [f"sl_pct {sl_pct} not in range [{MIN_SL_DISTANCE_PCT}, {MAX_SL_DISTANCE_PCT}]"],
-            "modified": None
-        }
-    
-    # Gate 7: rr >= OPP_LIMIT_MIN_RR (configurable, default 1.5)
-    if not rr or not isinstance(rr, (int, float)) or rr < OPP_LIMIT_MIN_RR:
-        reason = f"rr {rr} < {OPP_LIMIT_MIN_RR} (minimum via OPP_LIMIT_MIN_RR)"
-        logger.info(f"🚫 Opportunistic LIMIT rejected for {symbol}: {reason}")
-        return {
-            "valid": False,
-            "reasons": [reason],
-            "modified": None
-        }
-    
-    # Gate 8: entry_price distance from current price <= OPP_LIMIT_MAX_ENTRY_DISTANCE_PCT (configurable, default 0.006)
-    if current_price > 0:
-        price_diff_pct = abs(entry_price - current_price) / current_price
-        if price_diff_pct > OPP_LIMIT_MAX_ENTRY_DISTANCE_PCT:
-            reason = f"Entry price {entry_price} too far from current {current_price} ({price_diff_pct*100:.2f}% > {OPP_LIMIT_MAX_ENTRY_DISTANCE_PCT*100:.1f}%)"
-            logger.info(f"🚫 Opportunistic LIMIT rejected for {symbol}: {reason}")
-            return {
-                "valid": False,
-                "reasons": [reason],
-                "modified": None
-            }
-    
-    # Gate 9: Check volatility (opportunistic LIMIT requires some volatility)
-    if volatility_pct < 0.0010:  # Very low volatility
-        reason = f"Volatility too low for opportunistic LIMIT: {volatility_pct:.4f} < 0.0010"
-        logger.info(f"🚫 Opportunistic LIMIT rejected for {symbol}: {reason}")
-        return {
-            "valid": False,
-            "reasons": [reason],
-            "modified": None
-        }
-    
-    # Gate 10: edge_score >= OPP_LIMIT_MIN_EDGE_SCORE (configurable, default 60, optional but recommended)
-    if edge_score is not None:
-        if not isinstance(edge_score, (int, float)) or edge_score < 0 or edge_score > 100:
-            reasons.append(f"edge_score {edge_score} out of range [0, 100], ignoring")
-        elif edge_score < OPP_LIMIT_MIN_EDGE_SCORE:
-            reason = f"edge_score {edge_score} < {OPP_LIMIT_MIN_EDGE_SCORE} (minimum via OPP_LIMIT_MIN_EDGE_SCORE)"
-            logger.info(f"🚫 Opportunistic LIMIT rejected for {symbol}: {reason}")
-            return {
-                "valid": False,
-                "reasons": [reason],
-                "modified": None
-            }
-    
-    # Gate 11: reasoning_bullets should be a list (optional but recommended)
-    if reasoning_bullets is not None and not isinstance(reasoning_bullets, list):
-        reasons.append("reasoning_bullets should be a list, ignoring")
-    
-    # All gates passed - log success
-    logger.info(f"🎯 Opportunistic LIMIT VALIDATED for {symbol}: {side} @ {entry_price}, RR={rr:.2f}, TP={tp_pct*100:.1f}%, SL={sl_pct*100:.1f}%, edge_score={edge_score}")
-    
-    # All gates passed
-    return {
-        "valid": True,
-        "reasons": reasons,  # May contain warnings
-        "modified": modified
-    }
-
-
 SYSTEM_PROMPT = """
-You are an experienced crypto trading AI analyzing market data to make informed trading decisions.
+Sei un TRADER PROFESSIONISTA con esperienza nei mercati crypto.
+Il sistema di confluenza ha GIÀ PRE-FILTRATO questa opportunità con un punteggio >= 65/100.
+Il tuo ruolo è analizzare i dati e decidere i parametri del trade.
 
-## Your Role
-Analyze the provided market data and make trading decisions based on your assessment of the setup quality.
-You have access to technical indicators, price action, volume data, support/resistance levels, and market sentiment.
+## CONTESTO IMPORTANTE
+Il simbolo che ricevi ha GIÀ superato un filtro tecnico deterministico (confluenza >= 65/100) 
+basato su: trend multi-TF, momentum, mean reversion, volume e livelli chiave.
+NON devi ri-validare l'opportunità da zero. Devi decidere SE e COME eseguirla.
 
-## Decision Format
-For each asset, provide a JSON decision with:
-- **symbol**: Asset symbol
-- **action**: "OPEN_LONG", "OPEN_SHORT", or "HOLD"
-- **direction_considered**: "LONG", "SHORT", or "NONE"
-- **setup_confirmations**: List of factors supporting your chosen direction
-- **blocked_by**: List of HARD constraints preventing trade (empty if none)
-- **soft_blockers**: List of SOFT concerns (warnings, not blockers)
-- **confidence**: Your confidence level (0-100)
-- **rationale**: Clear explanation of your decision
-- **leverage**: Proposed leverage (will be clamped to safe range)
-- **size_pct**: Position size as fraction of available capital (advisory only)
-- **tp_pct**, **sl_pct**: Target profit and stop loss percentages
-- **time_in_trade_limit_sec**: Maximum holding time in seconds
-- **cooldown_sec**: Cooldown period after close
-- **entry_type**: "MARKET" or "LIMIT"
-- **entry_price**: Required if entry_type="LIMIT"
-- **entry_expires_sec**: TTL for LIMIT orders (60-600 seconds recommended)
+## QUANDO FARE VETO (HOLD) - SOLO per motivi gravi:
+- Margin insufficiente (< 10 USDT)
+- Max posizioni raggiunto
+- Crash guard: movimento violento contro direzione (return_5m > ±0.6%)
+- Drawdown sistema > -10%
+- Segnali FORTEMENTE contraddittori (es. trend 4h opposto + RSI estremo)
+NON fare veto per "confidenza bassa" se il trend e il momentum sono allineati.
 
-## Hard Constraints (MUST Block Trade)
-If any of these conditions exist, set `blocked_by` and `action` to "HOLD":
-- **INSUFFICIENT_MARGIN**: Available balance below minimum threshold
-- **MAX_POSITIONS**: Maximum positions limit reached
-- **COOLDOWN**: Recent close in same direction
-- **DRAWDOWN_GUARD**: Portfolio drawdown exceeds limit
-- **CRASH_GUARD**: Extreme momentum against intended direction
-- **SYMBOL_ALREADY_OPEN**: Symbol already has an open position
-- **LOW_PRE_SCORE**, **LOW_RANGE_SCORE**: Setup quality scores too low
-- **MOMENTUM_UP_15M**, **MOMENTUM_DOWN_15M**: Strong trend against direction
-- **LOW_VOLATILITY**: Market too choppy for entry
+## PROCESSO DECISIONALE
+1. Analizza i dati tecnici, fibonacci, gann, sentiment
+2. Conferma la direzione suggerita dal sistema
+3. Scegli leverage e size basati sulla qualità del setup
+4. Imposta SL/TP basati su ATR e livelli tecnici
+5. Solo se ci sono FORTI controindicazioni → HOLD con spiegazione
 
-## Soft Constraints (Warnings Only)
-These go in `soft_blockers` but don't force HOLD:
-- **LOW_CONFIDENCE**: Confidence below 50% but with valid confirmations
-- **CONFLICTING_SIGNALS**: Mixed signals requiring careful consideration
+## PARAMETRI
+**leverage**: 2-5x (mai superiore a 5x)
+  - Setup forte (trend allineato + momentum + volume): 4-5x
+  - Setup buono (trend + 1-2 conferme): 3x
+  - Setup ok (confluenza borderline): 2x
 
-## Available Data
-You receive for each symbol:
-- **market_data**: Technical indicators across multiple timeframes (15m, 1h, 4h, 1d):
-  - Price action: RSI, MACD, ADX, EMA (20/50/200), ATR
-  - **Range metrics (15m, 1h)**: range_high, range_low, range_mid, range_width_pct, distance_to_range_low_pct, distance_to_range_high_pct (64-candle window)
-  - **Bollinger Bands (15m, 1h)**: bb_upper, bb_middle, bb_lower, bb_width_pct (20-period, 2 std dev)
-  - **Volume z-score (15m, 1h)**: Standardized volume indicator showing volume spikes/drops relative to 20-period average
-  - Returns and momentum metrics
-- **fibonacci**: Fibonacci retracement/extension levels
-- **gann**: Gann levels and geometric support/resistance
-- **news**: Sentiment analysis from news sources
-- **forecast**: Price prediction models
-- **fase2_metrics**: Volatility, ADX, trend strength, EMA positioning
+**size_pct**: 0.06-0.10 dell'equity
+  - Setup forte: 0.10
+  - Setup buono: 0.08
+  - Setup ok: 0.06
 
-## Decision Guidelines
-1. Analyze all available data for each symbol
-2. Identify potential setup direction (LONG/SHORT/NONE)
-3. Collect confirmations supporting your direction
-4. Check for hard constraints in `wallet.can_open_new_positions` and other system flags
-5. Make decision: if hard-blocked → HOLD, otherwise use your judgment
-6. Provide clear rationale explaining your analysis
+**sl_pct**: Stop loss (0.01 = 1%)
+  - Usa ATR * 2 come base, minimo 0.008, massimo 0.025
+  - Volatilità alta → SL più ampio
 
-## Risk Parameters
-- Use `sl_pct` to define stop loss distance (e.g., 0.015 = 1.5%)
-- Use `tp_pct` to define take profit target (e.g., 0.02 = 2%)
-- Stop loss should be tight enough for capital protection but wide enough to avoid noise
-- Your `size_pct` is advisory; actual sizing will be calculated based on risk management rules
+**tp_pct**: Take profit (0.01 = 1%)
+  - Usa ATR * 3 come base (R:R minimo 1.5:1)
+  - Setup forte: tp può essere 3-4x ATR
 
-## LIMIT Entry Strategy
-Use LIMIT entries when:
-- Price is near a key support/resistance level (Fibonacci, Gann, range boundaries, Bollinger Bands)
-- You want precise entry at a specific price
-- Market is in RANGE mode (not trending strongly)
-- Volume z-score shows accumulation/distribution at key levels
+## REGOLE RSI
+- LONG: RSI < 35 = buon entry (oversold bounce), RSI 35-55 = ok, RSI > 70 = evita
+- SHORT: RSI > 65 = buon entry (overbought reversal), RSI 45-65 = ok, RSI < 30 = evita
 
-Use MARKET entries when:
-- Setup is time-sensitive (breakout, momentum)
-- High volatility or trending market
-- No clear support/resistance nearby
+## CRASH GUARD (BLOCCANTE)
+- Block LONG se return_5m <= -0.6%
+- Block SHORT se return_5m >= +0.6%
 
-## Opportunistic LIMIT (Conservative Mode for HOLD)
-When your main `action` is HOLD, you **MUST** evaluate whether an **opportunistic_limit** is appropriate:
-- **If YES**: Propose an opportunistic LIMIT with proper justification
-- **If NO**: Set opportunistic_limit to null and include ONE reasoning bullet in your rationale explaining why no opportunistic setup exists
-
-Use the new indicators to identify opportunistic opportunities:
-- **Range metrics**: Entry near range_low (for LONG) or range_high (for SHORT) with distance_to_range_* showing proximity
-- **Bollinger Bands**: Entry near bb_lower (for LONG) or bb_upper (for SHORT), especially if BB width shows volatility
-- **Volume z-score**: High positive z-score at support (accumulation) or resistance (distribution) confirms opportunity
-
-The opportunistic LIMIT must be a separate object with these fields:
-  - `side`: "LONG" or "SHORT"
-  - `entry_price`: float (required, specific entry price near key level)
-  - `entry_expires_sec`: int (60-300 seconds recommended)
-  - `tp_pct`: float (>= 0.008, minimum 0.8% via config)
-  - `sl_pct`: float (within safe bounds)
-  - `rr`: float (reward/risk ratio, must be >= 1.5 via config)
-  - `edge_score`: int (>= 60 via config, your confidence in this opportunistic setup)
-  - `reasoning_bullets`: list of strings explaining the opportunity (mention range/BB/volume if used)
-
-**Conservative Rules for Opportunistic LIMIT:**
-- Only propose when action=HOLD (not when blocked by hard constraints)
-- RR must be >= 1.5 (configurable via OPP_LIMIT_MIN_RR)
-- tp_pct must be >= 0.008 or 0.8% (configurable via OPP_LIMIT_MIN_TP_PCT)
-- entry_price should be within 0.6% of current price (configurable via OPP_LIMIT_MAX_ENTRY_DISTANCE_PCT)
-- edge_score must be >= 60 (configurable via OPP_LIMIT_MIN_EDGE_SCORE)
-- entry_expires_sec between 60 and 300
-- Do NOT propose if `blocked_by` contains hard blockers
-- Do NOT propose if volatility too low or crash guard active
-- Maximum 1 opportunistic LIMIT per symbol
-
-**Example opportunistic_limit:**
-```json
+## OUTPUT JSON OBBLIGATORIO
 {
-  "side": "LONG",
-  "entry_price": 50100.0,
-  "entry_expires_sec": 180,
-  "tp_pct": 0.012,
-  "sl_pct": 0.008,
-  "rr": 1.5,
-  "edge_score": 72,
-  "reasoning_bullets": [
-    "Price near range_low at 50100 (distance_to_range_low_pct: 0.3%)",
-    "Price touching bb_lower, BB width shows volatility spike",
-    "Volume z-score +2.1 confirms accumulation at support",
-    "RSI 15m oversold at 32, 1h trend neutral"
-  ]
-}
-```
-
-## Output JSON Format
-```json
-{
-  "analysis_summary": "Brief market overview",
+  "analysis_summary": "Sintesi breve della situazione",
   "decisions": [
     {
-      "symbol": "BTCUSDT",
-      "action": "OPEN_LONG" | "OPEN_SHORT" | "HOLD",
-      "direction_considered": "LONG" | "SHORT" | "NONE",
-      "setup_confirmations": ["confirmation1", "confirmation2", "confirmation3"],
+      "symbol": "SUIUSDT",
+      "action": "OPEN_LONG|OPEN_SHORT|HOLD",
+      "leverage": 3.0,
+      "size_pct": 0.08,
+      "confidence": 70,
+      "rationale": "Spiegazione della decisione",
+      "setup_confirmations": ["conferma 1", "conferma 2"],
       "blocked_by": [],
-      "soft_blockers": [],
-      "confidence": 75,
-      "rationale": "Detailed explanation of decision and reasoning",
-      "leverage": 5.0,
-      "size_pct": 0.15,
+      "direction_considered": "LONG|SHORT",
       "tp_pct": 0.02,
       "sl_pct": 0.015,
-      "time_in_trade_limit_sec": 3600,
-      "cooldown_sec": 900,
-      "entry_type": "MARKET" | "LIMIT",
-      "entry_price": 50000.0,
-      "entry_expires_sec": 240,
-      "opportunistic_limit": {
-        "side": "LONG",
-        "entry_price": 50100.0,
-        "entry_expires_sec": 180,
-        "tp_pct": 0.015,
-        "sl_pct": 0.010,
-        "rr": 1.5,
-        "edge_score": 72,
-        "reasoning_bullets": ["reason1", "reason2"]
-      }
+      "risk_factors": ["rischio 1"],
+      "confirmations": ["conferma 1"]
     }
   ]
 }
-```
 
-Remember: Focus on quality setups with multiple confirmations. Respect hard constraints. Provide clear rationale for every decision.
+RICORDA:
+- La confluenza ha già filtrato: se sei qui, il setup è probabilmente valido
+- Il tuo valore aggiunto è nei PARAMETRI (leverage, SL, TP) non nel dire HOLD a tutto
+- Fai veto SOLO per motivi gravi e specifici, non per incertezza generica
+- Leverage MAX 5x, size MAX 10%
+- SL e TP basati su ATR, non su percentuali fisse
 """
-
-
-MIN_PRE_SCORE = int(os.getenv("MIN_PRE_SCORE", "45"))  # Minimum base confidence required to allow OPEN_LONG/OPEN_SHORT - lowered for AI autonomy
-MIN_RANGE_SCORE = int(os.getenv("MIN_RANGE_SCORE", "50"))  # Minimum range score required to allow OPEN_LONG/OPEN_SHORT in RANGE playbook - lowered for AI autonomy
-
-def _safe_float(x, default=0.0):
-    try:
-        if x is None:
-            return default
-        if isinstance(x, (int, float)):
-            return float(x)
-        if isinstance(x, str):
-            return float(x.strip())
-        return default
-    except Exception:
-        return default
-
-
-def _extract_numeric_levels_from_dict(d):
-    levels = []
-    if isinstance(d, dict):
-        for v in d.values():
-            try:
-                fv = float(v)
-                if fv > 0:
-                    levels.append(fv)
-            except Exception:
-                pass
-    return levels
-
-
-def _nearest_sr(price, levels):
-    if not price or price <= 0 or not levels:
-        return None, None
-    below = [x for x in levels if x <= price]
-    above = [x for x in levels if x >= price]
-    support = max(below) if below else None
-    resistance = min(above) if above else None
-    return support, resistance
-
-
-def _sr_bonus(direction, price, fib, gann):
-    levels = []
-    fib_levels = (fib or {}).get("fib_levels") or {}
-    gann_levels = (gann or {}).get("next_important_levels") or {}
-    levels += _extract_numeric_levels_from_dict(fib_levels)
-    levels += _extract_numeric_levels_from_dict(gann_levels)
-
-    support, resistance = _nearest_sr(price, levels)
-
-    def dist_pct(level):
-        if level is None or price <= 0:
-            return None
-        return abs(price - level) / price
-
-    support_dist = dist_pct(support)
-    resist_dist = dist_pct(resistance)
-
-    chosen = support_dist if direction == "LONG" else resist_dist
-
-    bonus = 0
-    if chosen is not None:
-        if chosen <= 0.0010:
-            bonus = 12
-        elif chosen <= 0.0025:
-            bonus = 8
-        elif chosen <= 0.0050:
-            bonus = 4
-
-    return bonus, {
-        "levels_count": len(levels),
-        "support": support,
-        "resistance": resistance,
-        "support_dist_pct": support_dist,
-        "resistance_dist_pct": resist_dist,
-        "chosen_dist_pct": chosen,
-        "bonus": bonus,
-    }
-
-
-def _compute_base_score(direction, tf_15m, fase2_metrics, fib, gann):
-    """
-    Tuning v2 (15m scalping, "pro" / low-bias):
-    - Trend/structure matters but doesn't dominate
-    - Needs strength (ADX) or a trigger (momentum/volume)
-    - Rewards location (S/R proximity) heavily
-    - Penalizes chop only when ADX is weak (to avoid bias against healthy ranges/compressions)
-    - Keeps RSI sanity small (avoid "overbought/oversold anchoring")
-    """
-    breakdown = {}
-    score = 0
-
-    price = _safe_float((tf_15m or {}).get("price"), 0.0)
-
-    trend = str((tf_15m or {}).get("trend") or "").lower()
-    rsi = _safe_float((tf_15m or {}).get("rsi"), 0.0)
-    ret15 = _safe_float((tf_15m or {}).get("return_15m"), 0.0)
-    adx = _safe_float((tf_15m or {}).get("adx"), 0.0)
-    macd_mom_raw = (tf_15m or {}).get("macd_momentum")
-    macd_state_raw = (tf_15m or {}).get("macd")
-    macd_mom = _safe_float(macd_mom_raw, 0.0)  # compat if numeric in future
-    vol_spike = bool((tf_15m or {}).get("volume_spike_15m"))
-    ema20 = _safe_float((tf_15m or {}).get("ema_20"), 0.0)
-    ema50 = _safe_float((tf_15m or {}).get("ema_50"), 0.0)
-    ema200 = _safe_float((tf_15m or {}).get("ema_200"), 0.0)
-
-    regime = str((fase2_metrics or {}).get("regime") or "").upper()
-    range_15m_pct = _safe_float((tf_15m or {}).get("range_15m_pct"), 0.0)
-
-    # A) Trend & structure (max 30)
-    trend_alignment = 0
-    ema_stacking = 0
-
-    if direction == "LONG":
-        trend_ok = (trend == "bullish") or (ema20 and ema200 and ema20 > ema200)
-        if trend_ok:
-            trend_alignment = 18
-        if ema20 and ema50 and ema200 and (ema20 > ema50 > ema200):
-            ema_stacking = 12
-    else:
-        trend_ok = (trend == "bearish") or (ema20 and ema200 and ema20 < ema200)
-        if trend_ok:
-            trend_alignment = 18
-        if ema20 and ema50 and ema200 and (ema20 < ema50 < ema200):
-            ema_stacking = 12
-
-    score += trend_alignment + ema_stacking
-    breakdown["trend_alignment"] = trend_alignment
-    breakdown["ema_stacking"] = ema_stacking
-
-    # B) Strength (ADX) (max 20)
-    adx_points = 0
-    if adx >= 25:
-        adx_points = 20
-    elif adx >= 18:
-        adx_points = 12
-    elif adx >= 14:
-        adx_points = 6
-
-    score += adx_points
-    breakdown["adx"] = adx_points
-    breakdown["adx_value"] = adx
-
-    # C) Trigger (momentum + volume) (max 25)
-    mom_points = 0
-    if direction == "LONG":
-        if ret15 > 0:
-            mom_points += 8
-        if macd_mom > 0:
-            mom_points += 10
-    else:
-        if ret15 < 0:
-            mom_points += 8
-        if macd_mom < 0:
-            mom_points += 10
-
-    vol_points = 7 if vol_spike else 0
-
-    score += mom_points + vol_points
-    breakdown["momentum"] = mom_points
-    breakdown["volume_spike_15m"] = vol_points
-    breakdown["return_15m"] = ret15
-    breakdown["macd_momentum"] = macd_mom
-    # MACD string signals (tech agent returns strings like NEGATIVE/POSITIVE and RISING/FALLING)
-    macd_sig_points = 0
-    mom_s = str(macd_mom_raw or "").upper()
-    state_s = str(macd_state_raw or "").upper()
-    if direction == "LONG":
-        if mom_s == "RISING":
-            macd_sig_points += 6
-        if state_s == "POSITIVE":
-            macd_sig_points += 4
-    else:
-        if mom_s == "FALLING":
-            macd_sig_points += 6
-        if state_s == "NEGATIVE":
-            macd_sig_points += 4
-    score += macd_sig_points
-    breakdown["macd_signal_points"] = macd_sig_points
-    breakdown["macd_state_raw"] = macd_state_raw
-    breakdown["macd_momentum_raw"] = macd_mom_raw
-
-    # D) Location (S/R proximity) (max 20)
-    _sr_points_raw, sr_details = _sr_bonus(direction, price, fib, gann)
-    chosen_dist = sr_details.get("chosen_dist_pct", None)
-
-    sr_points = 0
-    if isinstance(chosen_dist, (int, float)):
-        if chosen_dist <= 0.0010:
-            sr_points = 20
-        elif chosen_dist <= 0.0025:
-            sr_points = 14
-        elif chosen_dist <= 0.0050:
-            sr_points = 8
-        elif chosen_dist <= 0.0100:
-            sr_points = 4
-
-    score += sr_points
-    breakdown["sr_bonus"] = sr_points
-    breakdown["sr_details"] = sr_details
-
-    # E) Chop filter (penalty up to -20, only when ADX weak)
-    chop_pen = 0
-    if adx < 14:
-        chop_pen -= 10
-        if 0 < range_15m_pct < 0.10:
-            chop_pen -= 10
-
-    if regime == "RANGE" and adx < 18:
-        chop_pen -= 4
-
-    score += chop_pen
-    breakdown["chop_penalty"] = chop_pen
-    breakdown["regime"] = regime
-    breakdown["range_15m_pct"] = range_15m_pct
-
-    # F) RSI sanity (small, max ±12)
-    rsi_adj = 0
-    if direction == "LONG":
-        if rsi >= 72:
-            rsi_adj -= 12
-        elif rsi >= 65:
-            rsi_adj -= 6
-        elif 45 <= rsi <= 60:
-            rsi_adj += 4
-    else:
-        if rsi <= 28:
-            rsi_adj -= 12
-        elif rsi <= 35:
-            rsi_adj -= 6
-        elif 40 <= rsi <= 55:
-            rsi_adj += 4
-
-    score += rsi_adj
-    breakdown["rsi_adjust"] = rsi_adj
-    breakdown["rsi"] = rsi
-
-    score = max(0, min(100, int(round(score))))
-    breakdown["final_score"] = score
-    return score, breakdown
-
-
-
-def _compute_range_score(direction, tf_15m, fase2_metrics, fib, gann):
-    """
-    RANGE playbook score (15m mean reversion).
-    Purpose: allow trades in RANGE regime without lowering trend threshold.
-    """
-    breakdown = {}
-    score = 0
-
-    price = _safe_float((tf_15m or {}).get("price"), 0.0)
-    rsi = _safe_float((tf_15m or {}).get("rsi"), 0.0)
-    ret15 = _safe_float((tf_15m or {}).get("return_15m"), 0.0)
-    adx = _safe_float((tf_15m or {}).get("adx"), 0.0)
-
-    regime = str((fase2_metrics or {}).get("regime") or "").upper()
-    breakdown["regime"] = regime
-    breakdown["adx_value"] = adx
-    breakdown["rsi"] = rsi
-    breakdown["return_15m"] = ret15
-
-    # 1) Must be RANGE
-    if regime != "RANGE":
-        breakdown["regime_gate"] = 0
-        return 0, breakdown
-    breakdown["regime_gate"] = 20
-    score += 20
-
-    # 2) Tradable range ADX band (12..22 best)
-    adx_points = 0
-    if 12 <= adx <= 22:
-        adx_points = 20
-    elif 10 <= adx < 12 or 22 < adx <= 25:
-        adx_points = 10
-    else:
-        adx_points = 0
-    score += adx_points
-    breakdown["adx_band"] = adx_points
-
-    # 3) Location at S/R (very important)
-    _sr_points_raw, sr_details = _sr_bonus(direction, price, fib, gann)
-    chosen_dist = sr_details.get("chosen_dist_pct", None)
-
-    loc_points = 0
-    if isinstance(chosen_dist, (int, float)):
-        if chosen_dist <= 0.0010:
-            loc_points = 35
-        elif chosen_dist <= 0.0025:
-            loc_points = 25
-        elif chosen_dist <= 0.0050:
-            loc_points = 12
-        else:
-            loc_points = 0
-    score += loc_points
-    breakdown["location_points"] = loc_points
-    breakdown["sr_details"] = sr_details
-
-    # 4) RSI mean-reversion filter (moderate weight)
-    rsi_points = 0
-    if direction == "LONG":
-        if 40 <= rsi <= 55:
-            rsi_points = 15
-        elif 55 < rsi <= 62:
-            rsi_points = 8
-        elif rsi >= 70:
-            rsi_points = -10
-    else:
-        if 45 <= rsi <= 60:
-            rsi_points = 15
-        elif 38 <= rsi < 45:
-            rsi_points = 8
-        elif rsi <= 30:
-            rsi_points = -10
-    score += rsi_points
-    breakdown["rsi_points"] = rsi_points
-
-    # 5) Anti-chase: avoid entering after an extended move
-    chase_pen = 0
-    if direction == "LONG" and ret15 > 0.20:
-        chase_pen = -10
-    if direction == "SHORT" and ret15 < -0.20:
-        chase_pen = -10
-    score += chase_pen
-    breakdown["chase_penalty"] = chase_pen
-
-    score = max(0, min(100, int(round(score))))
-    breakdown["final_score"] = score
-    return score, breakdown
 
 
 @app.post("/decide_batch")
@@ -1680,58 +626,6 @@ async def decide_batch(payload: AnalysisPayload):
             for symbol, asset_data in payload.assets_data.items():
                 # Raccoglie dati da Fibonacci, Gann, News, Forecast
                 additional_data = await collect_full_analysis(symbol, http_client)
-                if os.getenv("DEBUG_TF_KEYS", "0") == "1":
-                    try:
-                        logger.info(f"[DEBUG] {symbol} additional_data keys: {sorted(list(additional_data.keys()))}")
-                        fib = additional_data.get("fibonacci") or {}
-                        gann = additional_data.get("gann") or {}
-                        logger.info(f"[DEBUG] {symbol} fibonacci keys: {sorted(list(fib.keys()))}")
-                        logger.info(f"[DEBUG] {symbol} fib_levels sample: {str(fib.get('fib_levels'))[:400]}")
-                        logger.info(f"[DEBUG] {symbol} gann next_important_levels sample: {str(gann.get('next_important_levels'))[:400]}")
-
-                        logger.info(f"[DEBUG] {symbol} gann keys: {sorted(list(gann.keys()))}")
-                    except Exception as e:
-                        logger.info(f"[DEBUG] {symbol} additional_data debug failed: {e}")
-
-                
-                # FASE 2: Compute volatility and regime metrics
-                tech_data = asset_data.get('tech', {})
-                timeframes = tech_data.get('timeframes', {})
-                tf_15m = timeframes.get('15m', {})
-
-                if os.getenv("DEBUG_TF_KEYS", "0") == "1":
-                    logger.info(f"[DEBUG] {symbol} tf_15m keys: {sorted(tf_15m.keys())}")
-                    logger.info(f"[DEBUG] {symbol} macd={tf_15m.get('macd')} macd_momentum={tf_15m.get('macd_momentum')}")
-
-
-                
-                # Volatility filter (anti-chop): volatility = ATR / price
-                atr = tf_15m.get('atr') or 0
-                price = tf_15m.get('price') or 0
-                volatility_pct = (atr / price) if price > 0 else 0
-                
-                # Market regime detection: trend_strength = abs((EMA20 - EMA200) / EMA200)
-                ema_20 = tf_15m.get('ema_20') or 0
-                ema_200 = tf_15m.get('ema_200') or 0
-                trend_strength = abs((ema_20 - ema_200) / ema_200) if ema_200 > 0 else 0
-                
-                # Regime classification: TREND if trend_strength > 0.005, else RANGE
-                regime_threshold = float(os.getenv("REGIME_TREND_THRESHOLD", "0.005"))
-                regime = "TREND" if trend_strength > regime_threshold else "RANGE"
-                
-                # ADX for trend confirmation
-                adx = tf_15m.get('adx') or 0
-                
-                # Add FASE 2 metrics to technical data
-                fase2_metrics = {
-                    "volatility_pct": round(volatility_pct, 6),
-                    "atr": atr,
-                    "trend_strength": round(trend_strength, 6),
-                    "regime": regime,
-                    "adx": adx,
-                    "ema_20": ema_20,
-                    "ema_200": ema_200
-                }
                 
                 # Combina technical analysis (già presente) con nuovi dati
                 enriched_assets_data[symbol] = {
@@ -1739,59 +633,8 @@ async def decide_batch(payload: AnalysisPayload):
                     "fibonacci": additional_data.get('fibonacci', {}),
                     "gann": additional_data.get('gann', {}),
                     "news": additional_data.get('news', {}),
-                    "forecast": additional_data.get('forecast', {}),
-                    "fase2_metrics": fase2_metrics
+                    "forecast": additional_data.get('forecast', {})
                 }
-                # Pre-score (deterministic) used as base_confidence and guardrail
-                tf_15m_local = asset_data.get('tech', {}).get('timeframes', {}).get('15m', {}) or {}
-                fib = additional_data.get('fibonacci', {}) or {}
-                gann = additional_data.get('gann', {}) or {}
-                long_score, long_breakdown = _compute_base_score('LONG', tf_15m_local, fase2_metrics, fib, gann)
-                short_score, short_breakdown = _compute_base_score('SHORT', tf_15m_local, fase2_metrics, fib, gann)
-                enriched_assets_data[symbol]['pre_score'] = {
-                    'LONG': {'base_confidence': long_score, 'breakdown': long_breakdown},
-                    'SHORT': {'base_confidence': short_score, 'breakdown': short_breakdown},
-                }
-                # Range-score (deterministic) used as alternative playbook guardrail
-                range_long_score, range_long_breakdown = _compute_range_score('LONG', tf_15m_local, fase2_metrics, fib, gann)
-                range_short_score, range_short_breakdown = _compute_range_score('SHORT', tf_15m_local, fase2_metrics, fib, gann)
-                enriched_assets_data[symbol]['range_score'] = {
-                    'LONG': {'base_confidence': range_long_score, 'breakdown': range_long_breakdown},
-                    'SHORT': {'base_confidence': range_short_score, 'breakdown': range_short_breakdown},
-                }
-                if os.getenv("DEBUG_TF_KEYS", "0") == "1":
-                    logger.info(f"[PRESCORE] {symbol} LONG={long_score} SHORT={short_score}")
-                    logger.info(f"[RANGE_SCORE] {symbol} LONG={range_long_score} SHORT={range_short_score}")
-
-                    logger.info(f"[PRESCORE_BREAKDOWN] {symbol} LONG={json.dumps(long_breakdown, default=str)[:800]}")
-                    logger.info(f"[PRESCORE_BREAKDOWN] {symbol} SHORT={json.dumps(short_breakdown, default=str)[:800]}")
-
-        
-        # Create cleaned market_data for LLM (remove labels, keep only numeric metrics)
-        cleaned_market_data_for_llm = {}
-        
-        # Whitelist of numeric fields to include from fase2_metrics
-        fase2_numeric_fields = {"volatility_pct", "atr", "trend_strength", "adx", "ema_20", "ema_200"}
-        
-        for symbol, data in enriched_assets_data.items():
-            # Deep copy to avoid modifying original
-            cleaned_data = {}
-            cleaned_data["technical"] = data.get("technical", {})
-            cleaned_data["fibonacci"] = data.get("fibonacci", {})
-            cleaned_data["gann"] = data.get("gann", {})
-            cleaned_data["news"] = data.get("news", {})
-            cleaned_data["forecast"] = data.get("forecast", {})
-            
-            # Include fase2_metrics but filter to numeric fields only (exclude labels)
-            fase2 = data.get("fase2_metrics", {})
-            if fase2:
-                cleaned_fase2 = {k: v for k, v in fase2.items() if k in fase2_numeric_fields}
-                cleaned_data["fase2_metrics"] = cleaned_fase2
-            
-            # OMIT pre_score and range_score from LLM payload
-            # These will still be used server-side for validation but not sent to AI
-            
-            cleaned_market_data_for_llm[symbol] = cleaned_data
         
         # 6. Costruisci prompt con TUTTO il contesto
         # Estrai informazioni dal payload (tutte da portfolio e global_data)
@@ -1826,7 +669,7 @@ async def decide_batch(payload: AnalysisPayload):
             "positions_remaining": max(0, max_positions - positions_open_count),
             "drawdown_pct": drawdown_pct,
             "active_positions": already_open,
-            "market_data": cleaned_market_data_for_llm,  # Use cleaned data without labels
+            "market_data": enriched_assets_data,
             "recent_closes": recent_closes,
             "recent_losses": recent_losses[:5],
             "system_performance": performance,
@@ -1835,9 +678,78 @@ async def decide_batch(payload: AnalysisPayload):
             "learning_params_meta": payload_learning_params_meta
         }
         
-        # Use SYSTEM_PROMPT directly without concatenating constraints/policy text
-        # All necessary context is in prompt_data
-        enhanced_system_prompt = SYSTEM_PROMPT
+        # 7. Costruisci contesto per DeepSeek con informazioni sui vincoli
+        constraints_text = f"""
+## VINCOLI ATTUALI DEL SISTEMA
+- Posizioni aperte: {positions_open_count}/{max_positions}
+- Wallet disponibile: ${wallet_available:.2f}
+- Wallet per nuovi trade: ${wallet_available_for_new_trades:.2f}
+- Drawdown corrente: {drawdown_pct:.2f}%
+
+⚠️ IMPORTANTE: 
+- Se positions_open_count >= max_positions, usa blocked_by: ["MAX_POSITIONS"]
+- Se wallet_available_for_new_trades < 10.0 USDT, usa blocked_by: ["INSUFFICIENT_MARGIN"]
+- Se drawdown_pct < -10%, usa blocked_by: ["DRAWDOWN_GUARD"]
+"""
+        
+        # 8. Costruisci contesto per DeepSeek
+        margin_text = ""
+        if not can_open_new_positions:
+            margin_text = f"""
+
+## ⚠️ MARGINE INSUFFICIENTE - NUOVE APERTURE BLOCCATE
+- Available for new trades: {wallet_available_for_new_trades:.2f} USDT
+- Soglia minima: {margin_threshold:.2f} USDT
+- Fonte dati: {wallet_source}
+- **AZIONE RICHIESTA**: Ritorna solo HOLD per tutti gli asset. Non aprire nuove posizioni.
+"""
+        cooldown_text = ""
+        if recent_closes:
+            cooldown_text = "\n\n## CHIUSURE RECENTI (ultimi 15 minuti)\n"
+            for close in recent_closes:
+                cooldown_text += f"- {close['symbol']} {close['side'].upper()} chiuso: {close['reason']}\n"
+            cooldown_text += "\n⚠️ NON riaprire queste posizioni nella stessa direzione! Se tentato, usa blocked_by: ['COOLDOWN']"
+        
+        performance_text = ""
+        if performance.get('total_trades', 0) > 0:
+            performance_text = f"""
+
+## PERFORMANCE SISTEMA RECENTE
+- Totale trade: {performance['total_trades']}
+- Win rate: {performance['win_rate']*100:.1f}%
+- PnL totale: {performance['total_pnl']:.2f}%
+- Max drawdown: {performance['max_drawdown']:.2f}%
+- Trade vincenti: {performance['winning_trades']}
+- Trade perdenti: {performance['losing_trades']}
+"""
+        learning_text = ""
+        learning_policy_text = ""
+        if payload_learning_params_params:
+            learning_policy_text = f"""
+## LEARNING POLICY (guidance, NOT hard rules)
+- Questi parametri sono evoluti dal Learning Agent e servono come guardrail.
+- Puoi scegliere leva e size liberamente, ma se fai override rispetto alla policy devi spiegarlo nel rationale.
+- In generale: se vai contro policy, riduci rischio (leva/size) e aumenta prudenza.
+
+Evolved params (guidance):
+{json.dumps(payload_learning_params_params, indent=2)[:1200]}
+"""
+
+        if learning_insights.get('losing_patterns'):
+            learning_text = "\n\n## PATTERN PERDENTI DA EVITARE\n"
+            for pattern in learning_insights['losing_patterns']:
+                learning_text += f"- {pattern}\n"
+        
+        # Build enhanced system prompt (fixed indentation - moved outside if block)
+        enhanced_system_prompt = (
+            SYSTEM_PROMPT
+            + constraints_text
+            + margin_text
+            + cooldown_text
+            + performance_text
+            + learning_text
+            + learning_policy_text
+        )
         
         response = client.chat.completions.create(
             model="deepseek-chat", 
@@ -1859,53 +771,13 @@ async def decide_batch(payload: AnalysisPayload):
         content = response.choices[0].message.content
         logger.info(f"AI Raw Response: {content}")
         
-        decision_json = safe_json_loads(content, context_label="decide_batch")
+        decision_json = json.loads(content)
         
         valid_decisions = []
         for d in decision_json.get("decisions", []):
             try:
                 # Applica guardrail per garantire coerenza
                 d = enforce_decision_consistency(d)
-                
-                # LIMIT entry validation - convert to HOLD if invalid (no fallback to MARKET)
-                if d.get("entry_type") == "LIMIT":
-                    entry_price = d.get("entry_price")
-                    entry_expires_sec = d.get("entry_expires_sec", 240)
-                    
-                    # Validate entry_price
-                    # Check for valid positive price (minimum 0.01 to avoid extremely small values)
-                    if not entry_price or not isinstance(entry_price, (int, float)) or entry_price < 0.01:
-                        logger.warning(f"⚠️ LIMIT entry without valid entry_price for {d.get('symbol')}: {entry_price}. Converting to HOLD.")
-                        # Convert to HOLD instead of fallback to MARKET
-                        d["action"] = "HOLD"
-                        d["entry_type"] = "MARKET"  # Reset to default
-                        d["entry_price"] = None
-                        d["entry_expires_sec"] = None
-                        d["leverage"] = 0
-                        d["size_pct"] = 0
-                        # Add to blocked_by
-                        if "blocked_by" not in d or not isinstance(d["blocked_by"], list):
-                            d["blocked_by"] = []
-                        if "INVALID_ENTRY_PRICE" not in d["blocked_by"]:
-                            d["blocked_by"].append("INVALID_ENTRY_PRICE")
-                        # Update rationale
-                        original_rationale = d.get("rationale", "")
-                        d["rationale"] = f"Blocked: LIMIT entry without valid entry_price ({entry_price}). Original: {original_rationale}"
-                    else:
-                        # Validate and clamp entry_expires_sec
-                        try:
-                            entry_expires_sec = int(entry_expires_sec)
-                            if entry_expires_sec < 10:
-                                logger.warning(f"⚠️ entry_expires_sec {entry_expires_sec} < 10, clamping to 10")
-                                entry_expires_sec = 10
-                            elif entry_expires_sec > 3600:
-                                logger.warning(f"⚠️ entry_expires_sec {entry_expires_sec} > 3600, clamping to 3600")
-                                entry_expires_sec = 3600
-                            d["entry_expires_sec"] = entry_expires_sec
-                        except (ValueError, TypeError):
-                            logger.warning(f"⚠️ Invalid entry_expires_sec for {d.get('symbol')}, using default 240")
-                            d["entry_expires_sec"] = 240
-                
                 valid_dec = Decision(**d)
 
                 # CAP ENTRY CONFIDENCE by setup_confirmations (soft sanity-check)
@@ -1924,56 +796,6 @@ async def decide_batch(payload: AnalysisPayload):
                         conf = min(conf, 75)
                     valid_dec.confidence = max(0, min(100, conf))
 
-                # PRE-SCORE + RANGE-SCORE GUARDRAIL:
-                # Allow OPEN only if either:
-                # - trend pre_score >= MIN_PRE_SCORE
-                # - range_score >= MIN_RANGE_SCORE
-                if valid_dec.action in ["OPEN_LONG", "OPEN_SHORT"]:
-                    ps = enriched_assets_data.get(valid_dec.symbol, {}).get('pre_score', {}) or {}
-                    rs = enriched_assets_data.get(valid_dec.symbol, {}).get('range_score', {}) or {}
-
-                    dir_key = 'LONG' if valid_dec.action == 'OPEN_LONG' else 'SHORT'
-
-                    base_conf = ps.get(dir_key, {}).get('base_confidence', None)
-                    range_conf = rs.get(dir_key, {}).get('base_confidence', None)
-
-                    base_conf_i = int(base_conf) if isinstance(base_conf, (int, float)) else None
-                    range_conf_i = int(range_conf) if isinstance(range_conf, (int, float)) else None
-
-                    passes_trend = (base_conf_i is not None and base_conf_i >= MIN_PRE_SCORE)
-                    passes_range = (range_conf_i is not None and range_conf_i >= MIN_RANGE_SCORE)
-
-                    if not (passes_trend or passes_range):
-                        current_blocked = list(valid_dec.blocked_by or [])
-                        if 'LOW_PRE_SCORE' not in current_blocked:
-                            current_blocked.append('LOW_PRE_SCORE')
-                        if 'LOW_RANGE_SCORE' not in current_blocked:
-                            current_blocked.append('LOW_RANGE_SCORE')
-                        valid_dec.blocked_by = current_blocked
-                        valid_dec.action = 'HOLD'
-                        valid_dec.leverage = 0
-                        valid_dec.size_pct = 0
-                        valid_dec.rationale = (
-                            f"Blocked: trend_base_conf={base_conf_i} (min={MIN_PRE_SCORE}), "
-                            f"range_base_conf={range_conf_i} (min={MIN_RANGE_SCORE}). "
-                            f"Original: {valid_dec.rationale}"
-                        )
-                    else:
-                        # Cap confidence to the best available score (+10)
-                        best = None
-                        if passes_trend:
-                            best = base_conf_i
-                        if passes_range and (best is None or (range_conf_i is not None and range_conf_i > best)):
-                            best = range_conf_i
-
-                        if best is not None:
-                            if valid_dec.confidence is None:
-                                valid_dec.confidence = best
-                            else:
-                                try:
-                                    valid_dec.confidence = min(int(valid_dec.confidence), best + 10)
-                                except Exception:
-                                    valid_dec.confidence = best
                 # HARD CONSTRAINT: blocca OPEN_LONG/OPEN_SHORT se margine insufficiente
                 if not can_open_new_positions and valid_dec.action in ["OPEN_LONG", "OPEN_SHORT"]:
                     logger.warning(
@@ -1984,13 +806,6 @@ async def decide_batch(payload: AnalysisPayload):
                     valid_dec.action = "HOLD"
                     valid_dec.leverage = 0
                     valid_dec.size_pct = 0
-                    
-                    # Add INSUFFICIENT_MARGIN to blocked_by
-                    current_blocked = list(valid_dec.blocked_by or [])
-                    if "INSUFFICIENT_MARGIN" not in current_blocked:
-                        current_blocked.append("INSUFFICIENT_MARGIN")
-                    valid_dec.blocked_by = current_blocked
-                    
                     valid_dec.rationale = (
                         f"Blocked: insufficient free margin "
                         f"(available_for_new_trades={wallet_available_for_new_trades:.2f}, "
@@ -2003,44 +818,6 @@ async def decide_batch(payload: AnalysisPayload):
                 symbol = valid_dec.symbol
                 tech_data = enriched_assets_data.get(symbol, {}).get('technical', {})
                 return_5m = tech_data.get('summary', {}).get('return_5m', 0)
-                return_15m = tech_data.get('summary', {}).get('return_15m', 0)
-
-                # AIRBAG (SOL only): block contrarian entries in moderate trend that may not trigger crash_guard
-                # This prevents "price rising -> OPEN_SHORT" / "price falling -> OPEN_LONG" churn on SOL.
-                try:
-                    sym_u = (symbol or "").upper()
-                    r15 = float(return_15m or 0)
-                    if sym_u == "SOLUSDT" and valid_dec.action in ["OPEN_LONG", "OPEN_SHORT"]:
-                        if valid_dec.action == "OPEN_SHORT" and r15 >= 0.25:
-                            reason = (
-                                f"MOMENTUM_15M_GUARD: Blocked OPEN_SHORT on SOL due to bullish 15m trend "
-                                f"(return_15m={r15:.2f}% >= +0.25%). Avoiding shorting strength."
-                            )
-                            logger.warning(f"🚫 {reason}")
-                            valid_dec.action = "HOLD"
-                            valid_dec.leverage = 0
-                            valid_dec.size_pct = 0
-                            cb = list(valid_dec.blocked_by or [])
-                            if "MOMENTUM_UP_15M" not in cb:
-                                cb.append("MOMENTUM_UP_15M")
-                            valid_dec.blocked_by = cb
-                            valid_dec.rationale = f"{reason} Original: {valid_dec.rationale}"
-                        elif valid_dec.action == "OPEN_LONG" and r15 <= -0.25:
-                            reason = (
-                                f"MOMENTUM_15M_GUARD: Blocked OPEN_LONG on SOL due to bearish 15m trend "
-                                f"(return_15m={r15:.2f}% <= -0.25%). Avoiding catching a falling knife."
-                            )
-                            logger.warning(f"🚫 {reason}")
-                            valid_dec.action = "HOLD"
-                            valid_dec.leverage = 0
-                            valid_dec.size_pct = 0
-                            cb = list(valid_dec.blocked_by or [])
-                            if "MOMENTUM_DOWN_15M" not in cb:
-                                cb.append("MOMENTUM_DOWN_15M")
-                            valid_dec.blocked_by = cb
-                            valid_dec.rationale = f"{reason} Original: {valid_dec.rationale}"
-                except Exception as _e:
-                    logger.warning(f"⚠️ MOMENTUM_15M_GUARD failed: {_e}")
                 
                 crash_guard_blocked = False
                 crash_guard_reason = ""
@@ -2080,247 +857,10 @@ async def decide_batch(payload: AnalysisPayload):
                     # Aggiungi crash guard reason al rationale
                     valid_dec.rationale = f"{crash_guard_reason} Original: {valid_dec.rationale}"
                 
-                # FASE 2: VOLATILITY FILTER (anti-chop)
-                # Block entry if volatility (ATR/price) is too low
-                # Volatility filter thresholds (trend vs range playbook)
-                min_volatility_trend = float(os.getenv("MIN_VOLATILITY_PCT_TREND", os.getenv("MIN_VOLATILITY_PCT", "0.0025")))
-                min_volatility_range = float(os.getenv("MIN_VOLATILITY_PCT_RANGE", "0.0010"))
-                fase2_metrics = enriched_assets_data.get(symbol, {}).get('fase2_metrics', {})
-                volatility_pct = fase2_metrics.get('volatility_pct', 0)
-                
-                # Choose threshold based on whether RANGE playbook is eligible for this direction
-                selected_threshold = min_volatility_trend
-                try:
-                    rs = enriched_assets_data.get(valid_dec.symbol, {}).get("range_score", {}) or {}
-                    dir_key = "LONG" if valid_dec.action == "OPEN_LONG" else "SHORT"
-                    range_conf = rs.get(dir_key, {}).get("base_confidence", None)
-                    range_conf_i = int(range_conf) if isinstance(range_conf, (int, float)) else None
-                    if range_conf_i is not None and range_conf_i >= MIN_RANGE_SCORE:
-                        selected_threshold = min_volatility_range
-                except Exception:
-                    selected_threshold = min_volatility_trend
-
-                if valid_dec.action in ["OPEN_LONG", "OPEN_SHORT"] and volatility_pct < selected_threshold:
-                    volatility_blocked_reason = (
-                        f"VOLATILITY_FILTER: Blocked {valid_dec.action} due to low volatility "
-                        f"(volatility={volatility_pct:.4f} < threshold={selected_threshold}). "
-                        f"Market in consolidation/chop mode - avoiding entry."
-                    )
-                    logger.warning(f"🚫 {volatility_blocked_reason}")
-                    
-                    # Convert to HOLD
-                    valid_dec.action = "HOLD"
-                    valid_dec.leverage = 0
-                    valid_dec.size_pct = 0
-                    
-                    # Add to blocked_by
-                    current_blocked = list(valid_dec.blocked_by or [])
-                    if "LOW_VOLATILITY" not in current_blocked:
-                        current_blocked.append("LOW_VOLATILITY")
-                    valid_dec.blocked_by = current_blocked
-                    
-                    # Add to rationale
-                    valid_dec.rationale = f"{volatility_blocked_reason} Original: {valid_dec.rationale}"
-                
-                # === SYMBOL_ALREADY_OPEN CHECK ===
-                # One position per symbol hard constraint
-                if valid_dec.action in ["OPEN_LONG", "OPEN_SHORT"]:
-                    # Check if symbol is already in active positions
-                    symbol_already_open = False
-                    for active_sym in already_open:
-                        if active_sym == valid_dec.symbol:
-                            symbol_already_open = True
-                            break
-                    
-                    if symbol_already_open:
-                        logger.warning(f"🚫 Blocked {valid_dec.action} on {valid_dec.symbol}: symbol already has open position")
-                        valid_dec.action = "HOLD"
-                        valid_dec.leverage = 0
-                        valid_dec.size_pct = 0
-                        current_blocked = list(valid_dec.blocked_by or [])
-                        if "SYMBOL_ALREADY_OPEN" not in current_blocked:
-                            current_blocked.append("SYMBOL_ALREADY_OPEN")
-                        valid_dec.blocked_by = current_blocked
-                        valid_dec.rationale = f"Blocked: symbol {valid_dec.symbol} already has open position (one per symbol constraint). Original: {valid_dec.rationale}"
-                
-                # === LEVERAGE CLAMP ===
-                # Apply leverage clamping for OPEN actions
-                if valid_dec.action in ["OPEN_LONG", "OPEN_SHORT"] and valid_dec.leverage > 0:
-                    original_leverage = valid_dec.leverage
-                    valid_dec.leverage = clamp_leverage_by_confidence(valid_dec.leverage, valid_dec.confidence)
-                    if abs(original_leverage - valid_dec.leverage) > 0.1:
-                        logger.info(f"📊 Leverage clamped for {valid_dec.symbol}: {original_leverage:.1f}x → {valid_dec.leverage:.1f}x (confidence={valid_dec.confidence})")
-                
-                # === RISK-BASED SIZING ===
-                # Apply risk-based sizing for OPEN actions (unless ENABLE_RECOVERY_SIZING is true)
-                if valid_dec.action in ["OPEN_LONG", "OPEN_SHORT"] and not ENABLE_RECOVERY_SIZING:
-                    # Calculate risk-based size using entry_price and sl_pct
-                    # For LIMIT orders, use entry_price; for MARKET, estimate from current price
-                    try:
-                        tech_data = enriched_assets_data.get(valid_dec.symbol, {}).get('technical', {})
-                        mark_price = tech_data.get('summary', {}).get('price', 0) if tech_data.get('summary') else 0
-                        
-                        # Use entry_price if LIMIT, otherwise use mark_price
-                        entry_price_for_calc = valid_dec.entry_price if valid_dec.entry_type == "LIMIT" and valid_dec.entry_price else mark_price
-                        
-                        if entry_price_for_calc > 0 and valid_dec.sl_pct and valid_dec.sl_pct > 0:
-                            # Calculate stop loss price
-                            if valid_dec.action == "OPEN_LONG":
-                                stop_loss_price = entry_price_for_calc * (1 - valid_dec.sl_pct)
-                            else:  # OPEN_SHORT
-                                stop_loss_price = entry_price_for_calc * (1 + valid_dec.sl_pct)
-                            
-                            # Get active positions for portfolio risk calculation
-                            active_positions_details = []
-                            try:
-                                # Extract position details from global_data if available
-                                for pos in payload.global_data.get('active_positions_details', []):
-                                    active_positions_details.append(pos)
-                            except Exception:
-                                pass
-                            
-                            # Compute risk-based size
-                            risk_sizing = compute_risk_based_size(
-                                symbol=valid_dec.symbol,
-                                entry_price=entry_price_for_calc,
-                                stop_loss_price=stop_loss_price,
-                                leverage=valid_dec.leverage,
-                                available_for_new_trades=wallet_available_for_new_trades,
-                                active_positions=active_positions_details
-                            )
-                            
-                            # Check if blocked by risk constraints
-                            if risk_sizing.get("blocked_by"):
-                                logger.warning(f"🚫 Risk-based sizing blocked {valid_dec.action} on {valid_dec.symbol}: {risk_sizing.get('blocked_reason')}")
-                                valid_dec.action = "HOLD"
-                                valid_dec.leverage = 0
-                                valid_dec.size_pct = 0
-                                current_blocked = list(valid_dec.blocked_by or [])
-                                for blocker in risk_sizing.get("blocked_by", []):
-                                    if blocker not in current_blocked:
-                                        current_blocked.append(blocker)
-                                valid_dec.blocked_by = current_blocked
-                                valid_dec.rationale = f"Blocked by risk management: {risk_sizing.get('blocked_reason')}. Original: {valid_dec.rationale}"
-                            else:
-                                # Apply risk-based sizing
-                                original_size_pct = valid_dec.size_pct
-                                valid_dec.size_pct = risk_sizing.get("size_pct", 0.0)
-                                logger.info(
-                                    f"📊 Risk-based sizing for {valid_dec.symbol}: "
-                                    f"size_pct {original_size_pct:.3f} → {valid_dec.size_pct:.3f}, "
-                                    f"notional={risk_sizing.get('notional_usdt', 0):.2f} USDT, "
-                                    f"margin={risk_sizing.get('margin_required', 0):.2f} USDT, "
-                                    f"sl_dist={risk_sizing.get('sl_distance_pct', 0)*100:.2f}%, "
-                                    f"risk={risk_sizing.get('new_trade_risk_usdt', 0):.2f} USDT"
-                                )
-                        else:
-                            logger.warning(f"⚠️ Cannot compute risk-based sizing for {valid_dec.symbol}: missing price or sl_pct")
-                    except Exception as e:
-                        logger.error(f"❌ Risk-based sizing error for {valid_dec.symbol}: {e}")
-                
-                # === OPPORTUNISTIC LIMIT VALIDATION ===
-                # Validate and process opportunistic_limit if present
-                opportunistic_gate_verdict = None
-                if valid_dec.opportunistic_limit:
-                    logger.info(f"🎯 Validating opportunistic_limit for {valid_dec.symbol}")
-                    
-                    # Get current price and volatility for validation
-                    tech_data = enriched_assets_data.get(valid_dec.symbol, {}).get('technical', {})
-                    mark_price = tech_data.get('summary', {}).get('price', 0) if tech_data.get('summary') else 0
-                    fase2_metrics_for_opp = enriched_assets_data.get(valid_dec.symbol, {}).get('fase2_metrics', {})
-                    volatility_pct_for_opp = fase2_metrics_for_opp.get('volatility_pct', 0)
-                    
-                    # Validate opportunistic_limit
-                    validation_result = validate_opportunistic_limit(
-                        opportunistic_limit=valid_dec.opportunistic_limit,
-                        action=valid_dec.action,
-                        blocked_by=valid_dec.blocked_by or [],
-                        symbol=valid_dec.symbol,
-                        current_price=mark_price,
-                        volatility_pct=volatility_pct_for_opp
-                    )
-                    
-                    if validation_result["valid"]:
-                        logger.info(f"✅ Opportunistic LIMIT passed gates for {valid_dec.symbol}")
-                        opportunistic_gate_verdict = {
-                            "passed": True,
-                            "reasons": validation_result["reasons"]
-                        }
-                        
-                        # Apply risk-based sizing to opportunistic LIMIT
-                        opp = valid_dec.opportunistic_limit
-                        try:
-                            opp_side = opp.get("side", "LONG")
-                            opp_entry_price = opp.get("entry_price", mark_price)
-                            opp_sl_pct = opp.get("sl_pct", 0.010)
-                            
-                            # Calculate stop loss price for opportunistic order
-                            if opp_side == "LONG":
-                                opp_stop_loss_price = opp_entry_price * (1 - opp_sl_pct)
-                            else:  # SHORT
-                                opp_stop_loss_price = opp_entry_price * (1 + opp_sl_pct)
-                            
-                            # Use conservative leverage for opportunistic orders (3-4x)
-                            opp_leverage = min(4.0, max(3.0, clamp_leverage_by_confidence(3.5, opp.get("edge_score"))))
-                            
-                            # Get active positions for portfolio risk calculation
-                            active_positions_details = []
-                            try:
-                                for pos in payload.global_data.get('active_positions_details', []):
-                                    active_positions_details.append(pos)
-                            except Exception:
-                                pass
-                            
-                            # Compute risk-based size for opportunistic order
-                            opp_risk_sizing = compute_risk_based_size(
-                                symbol=valid_dec.symbol,
-                                entry_price=opp_entry_price,
-                                stop_loss_price=opp_stop_loss_price,
-                                leverage=opp_leverage,
-                                available_for_new_trades=wallet_available_for_new_trades,
-                                active_positions=active_positions_details
-                            )
-                            
-                            if opp_risk_sizing.get("blocked_by"):
-                                logger.warning(f"🚫 Opportunistic LIMIT blocked by risk sizing: {opp_risk_sizing.get('blocked_reason')}")
-                                valid_dec.opportunistic_limit = None
-                                opportunistic_gate_verdict = {
-                                    "passed": False,
-                                    "reasons": [f"Risk sizing blocked: {opp_risk_sizing.get('blocked_reason')}"]
-                                }
-                            else:
-                                # Update opportunistic_limit with computed sizing
-                                opp["size_pct"] = opp_risk_sizing.get("size_pct", 0.0)
-                                opp["notional_usdt"] = opp_risk_sizing.get("notional_usdt", 0.0)
-                                opp["margin_required"] = opp_risk_sizing.get("margin_required", 0.0)
-                                opp["leverage"] = opp_leverage
-                                valid_dec.opportunistic_limit = opp
-                                
-                                logger.info(
-                                    f"📊 Opportunistic LIMIT sizing for {valid_dec.symbol}: "
-                                    f"side={opp_side}, entry={opp_entry_price:.2f}, "
-                                    f"size_pct={opp['size_pct']:.3f}, leverage={opp_leverage:.1f}x, "
-                                    f"notional={opp['notional_usdt']:.2f} USDT"
-                                )
-                        except Exception as opp_err:
-                            logger.error(f"❌ Opportunistic LIMIT sizing error: {opp_err}")
-                            valid_dec.opportunistic_limit = None
-                            opportunistic_gate_verdict = {
-                                "passed": False,
-                                "reasons": [f"Sizing error: {str(opp_err)}"]
-                            }
-                    else:
-                        logger.warning(f"🚫 Opportunistic LIMIT failed gates: {validation_result['reasons']}")
-                        valid_dec.opportunistic_limit = None
-                        opportunistic_gate_verdict = {
-                            "passed": False,
-                            "reasons": validation_result["reasons"]
-                        }
-                
                 valid_decisions.append(valid_dec)
                 
-                # Salva la decisione per la dashboard (including FASE 2 metrics and opportunistic_limit)
-                decision_data = {
+                # Salva la decisione per la dashboard
+                save_ai_decision({
                     'symbol': valid_dec.symbol,
                     'action': valid_dec.action,
                     'leverage': valid_dec.leverage,
@@ -2333,22 +873,8 @@ async def decide_batch(payload: AnalysisPayload):
                     'source': 'master_ai',
                     'setup_confirmations': valid_dec.setup_confirmations or [],
                     'blocked_by': valid_dec.blocked_by or [],
-                    'soft_blockers': valid_dec.soft_blockers or [],
-                    'direction_considered': valid_dec.direction_considered or 'NONE',
-                    # FASE 2 metrics
-                    'regime': fase2_metrics.get('regime', 'UNKNOWN'),
-                    'trend_strength': fase2_metrics.get('trend_strength', 0),
-                    'volatility_pct': fase2_metrics.get('volatility_pct', 0),
-                    'adx': fase2_metrics.get('adx', 0)
-                }
-                
-                # Add opportunistic_limit data if present
-                if valid_dec.opportunistic_limit:
-                    decision_data['opportunistic_limit'] = valid_dec.opportunistic_limit
-                if opportunistic_gate_verdict:
-                    decision_data['opportunistic_gate'] = opportunistic_gate_verdict
-                
-                save_ai_decision(decision_data)
+                    'direction_considered': valid_dec.direction_considered or 'NONE'
+                })
             except Exception as e: 
                 logger.warning(f"Invalid decision: {e}")
 
@@ -2360,515 +886,6 @@ async def decide_batch(payload: AnalysisPayload):
     except Exception as e:
         logger.error(f"AI Critical Error: {e}")
         return {"analysis": "Error", "decisions": []}
-
-
-
-def _extract_first_json_object(text: str):
-    """
-    Best-effort extraction of the first top-level JSON object from arbitrary text.
-    Handles extra leading/trailing text and tries to avoid breaking on braces inside strings.
-    """
-    if not text:
-        return None
-
-    # fast path: already starts with '{'
-    start = text.find("{")
-    if start == -1:
-        return None
-
-    in_str = False
-    esc = False
-    depth = 0
-    end = None
-
-    for i in range(start, len(text)):
-        ch = text[i]
-        if in_str:
-            if esc:
-                esc = False
-                continue
-            if ch == "\\":
-                esc = True
-                continue
-            if ch == '"':
-                in_str = False
-            continue
-        else:
-            if ch == '"':
-                in_str = True
-                continue
-            if ch == "{":
-                depth += 1
-            elif ch == "}":
-                depth -= 1
-                if depth == 0:
-                    end = i + 1
-                    break
-
-    if end is None:
-        return None
-    return text[start:end]
-
-
-def _safe_fast_json_loads(content: str):
-    """
-    Fast endpoint JSON parser:
-    - extracts first JSON object
-    - loads it with json.loads
-    Returns {} on failure.
-    """
-    import json as _json
-    try:
-        extracted = _extract_first_json_object(content)
-        if not extracted:
-            return {}
-        return _json.loads(extracted)
-    except Exception:
-        return {}
-
-
-@app.post("/decide_batch_fast")
-async def decide_batch_fast(payload: AnalysisPayload):
-    """
-    Fast decision endpoint optimized for low latency and minimal response size.
-    
-    Returns minimal JSON with only essential execution parameters.
-    Designed to avoid DeepSeek truncation issues by:
-    - Using compact prompt with explicit JSON-only instructions
-    - Requesting minimal response fields
-    - Enforcing 20-30s timeout budget
-    - Safe fallback: all HOLD on parse failure
-    
-    For verbose rationale/analysis, use /explain_batch after receiving fast decisions.
-    """
-    start_time = datetime.now()
-    
-    try:
-        # 1. Extract context (reuse logic from decide_batch)
-        already_open = payload.global_data.get('already_open', [])
-        recent_closes = load_recent_closes()
-        
-        # Filter recent closes per symbol
-        recent_losses = []
-        try:
-            trading_history = load_json_file(TRADING_HISTORY_FILE, [])
-            recent_losses = [t for t in trading_history if t.get('pnl_pct', 0) < LOSS_THRESHOLD_PCT][-MAX_RECENT_LOSSES:]
-        except Exception:
-            pass
-        
-        # 2. Get learning insights (best effort, skip if slow)
-        learning_insights = {}
-        try:
-            learning_insights = await asyncio.wait_for(get_learning_insights(), timeout=5.0)
-        except Exception as e:
-            logger.warning(f"⚠️ Fast path: skipped learning insights: {e}")
-        
-        # 3. Prepare minimal market data (numeric only, no verbose labels)
-        assets_symbols = list(payload.assets_data.keys())
-        minimal_market_data = {}
-        
-        for symbol, asset_data in payload.assets_data.items():
-            tech = asset_data.get('tech', {})
-            timeframes = tech.get('timeframes', {})
-            tf_15m = timeframes.get('15m', {})
-            
-            # Extract only essential numeric fields for decision
-            minimal_market_data[symbol] = {
-                "price": tf_15m.get('price', 0),
-                "rsi": tf_15m.get('rsi', 50),
-                "trend": tf_15m.get('trend', 'neutral'),
-                "adx": tf_15m.get('adx', 20),
-                "atr": tf_15m.get('atr', 0),
-                "volatility_pct": (tf_15m.get('atr', 0) / tf_15m.get('price', 1)) if tf_15m.get('price', 0) > 0 else 0,
-                "return_5m": tech.get('summary', {}).get('return_5m', 0),
-                "return_15m": tech.get('summary', {}).get('return_15m', 0),
-            }
-        
-        # 4. Build compact prompt for fast response
-        portfolio = payload.global_data.get('portfolio', {})
-        wallet_available = portfolio.get('available_for_new_trades', portfolio.get('available', 0) * 0.95)
-        can_open = wallet_available >= 10.0
-        
-        prompt_data = {
-            "symbols": assets_symbols,
-            "market_data": minimal_market_data,
-            "wallet_available_for_trades": wallet_available,
-            "can_open_new_positions": can_open,
-            "max_positions": payload.global_data.get('max_positions', 3),
-            "positions_open": len(already_open),
-            "already_open": already_open,
-            "recent_closes_count": len(recent_closes)
-        }
-        
-        # Compact system prompt for fast response
-        fast_system_prompt = """You are a crypto trading AI making FAST decisions with MINIMAL output.
-
-RESPOND WITH VALID JSON ONLY. NO MARKDOWN. NO COMMENTS. NO TRAILING TEXT.
-
-You will receive per-symbol facts including confluence long/short and current_price.
-
-CRITICAL OUTPUT RULES (hard):
-1) Return decisions ONLY for symbols you want to OPEN (OPEN_LONG or OPEN_SHORT). DO NOT return HOLD decisions.
-   - If nothing to open, return: {"decisions":[]}
-2) Keep each decision minimal. Only include fields required for execution.
-3) If entry_type="LIMIT", you MUST include entry_price and entry_expires_sec (60..600).
-   If entry_type="MARKET", OMIT entry_price and entry_expires_sec entirely.
-4) Use thresholds OPEN_THR and LIMIT_THR from user input:
-   - strength=max(cl,cs)
-   - if strength>=OPEN_THR => OPEN with MARKET
-   - else if strength>=LIMIT_THR => OPEN with LIMIT
-   - else => no decision for that symbol (omit)
-5) Direction MUST follow confluence: cs>cl => OPEN_SHORT else OPEN_LONG.
-6) Never open if already_open=true or can_open_new_positions=false (omit the symbol).
-
-Return JSON:
-{"decisions":[
-  {"symbol":"BTCUSDT","action":"OPEN_SHORT","entry_type":"MARKET","leverage":5.0,"size_pct":0.15,"tp_pct":0.02,"sl_pct":0.015,"time_in_trade_limit_sec":3600,"cooldown_sec":600,"confidence":80,"reason_code":"STRONG_SHORT"},
-  {"symbol":"BNBUSDT","action":"OPEN_SHORT","entry_type":"LIMIT","entry_price":905.1,"entry_expires_sec":180,"leverage":4.0,"size_pct":0.10,"tp_pct":0.018,"sl_pct":0.012,"time_in_trade_limit_sec":3600,"cooldown_sec":600,"confidence":72,"reason_code":"LIMIT_SHORT"}
-]}
-"""
-        # Build compact facts for fast path (force the model to use key analyses)
-        assets = payload.assets_data or {}
-        assets_upper = {str(k).upper(): v for k, v in (assets or {}).items()}
-        already_open_set = set(x.upper() for x in prompt_data.get("already_open", []) if isinstance(x, str))
-
-        fast_symbols = {}
-        for sym, data in assets.items():
-            try:
-                enhanced = (data or {}).get("enhanced", {}) or {}
-                conf = enhanced.get("confluence", {}) or {}
-                cl = int((conf.get("long", {}) or {}).get("score", 0) or 0)
-                cs = int((conf.get("short", {}) or {}).get("score", 0) or 0)
-
-                # Reliable current price for LIMIT (prefer minimal_market_data, fallback to tech if present)
-                current_price = None
-                try:
-                    current_price = (minimal_market_data.get(str(sym), {}) or {}).get("price")
-                except Exception:
-                    current_price = None
-
-                if not current_price:
-                    tech = (data or {}).get("tech", {}) or {}
-                    if isinstance(tech, dict):
-                        current_price = tech.get("current_price") or tech.get("price") or tech.get("last_price")
-
-                fast_symbols[str(sym).upper()] = {
-                    "regime": enhanced.get("regime", "UNKNOWN"),
-                    "vol": enhanced.get("volatility_bucket", "MEDIUM"),
-                    "cl": cl,
-                    "cs": cs,
-                    "current_price": current_price,
-                    "already_open": str(sym).upper() in already_open_set
-                }
-            except Exception:
-                # If anything fails, still include the symbol so the model can HOLD
-                fast_symbols[str(sym).upper()] = {"regime": "UNKNOWN", "vol": "UNKNOWN", "cl": 0, "cs": 0, "current_price": None, "already_open": str(sym).upper() in already_open_set}
-
-        fast_payload = {
-            "can_open_new_positions": prompt_data.get("can_open_new_positions", True),
-            "max_positions": prompt_data.get("max_positions"),
-            "positions_open": prompt_data.get("positions_open"),
-            "already_open": list(already_open_set),
-            "OPEN_THR": FAST_OPEN_CONFLUENCE_THRESHOLD,
-            "LIMIT_THR": FAST_LIMIT_CONFLUENCE_THRESHOLD,
-            "symbols": fast_symbols
-        }
-
-        try:
-            b = fast_payload.get("symbols", {}).get("BTCUSDT")
-            e = fast_payload.get("symbols", {}).get("ETHUSDT")
-            logger.info(f"FAST_PAYLOAD sample BTCUSDT={b} ETHUSDT={e} OPEN_THR={fast_payload.get('OPEN_THR')} LIMIT_THR={fast_payload.get('LIMIT_THR')}")
-        except Exception:
-            pass
-
-        user_prompt = f"FAST DECISION FOR: {json.dumps(fast_payload, separators=(',', ':'))}"
-        
-        # 5. Call DeepSeek with tight timeout
-        try:            # DEBUG (prints to docker logs): show compact facts + symbol keys sample
-            try:
-                fp = locals().get("fast_payload", None)
-                if isinstance(fp, dict):
-                    syms = fp.get("symbols", {}) or {}
-                    keys = list(syms.keys())
-                    b = syms.get("BTCUSDT")
-                    e = syms.get("ETHUSDT")
-                    print(f"[FAST_DEBUG] OPEN_THR={fp.get('OPEN_THR')} LIMIT_THR={fp.get('LIMIT_THR')} symbols_n={len(keys)} keys_sample={keys[:15]} BTC={b} ETH={e}", flush=True)
-            except Exception:
-                pass
-
-            # DEBUG: show prompt previews (to confirm LLM sees confluence thresholds/facts)
-            try:
-                sp = locals().get("fast_system_prompt", "")
-                up = locals().get("user_prompt", "")
-                print(f"[FAST_PROMPT_DEBUG] system_preview={sp[:220]!r}", flush=True)
-                print(f"[FAST_PROMPT_DEBUG] user_preview={up[:260]!r}", flush=True)
-            except Exception:
-                pass
-
-            response = await asyncio.wait_for(
-                asyncio.to_thread(
-                    lambda: client.chat.completions.create(
-                        model="deepseek-chat",
-                        messages=[
-                            {"role": "system", "content": fast_system_prompt},
-                            {"role": "user", "content": user_prompt}
-                        ],
-                        response_format={"type": "json_object"},
-                        temperature=0.5,  # Lower temp for consistency
-                        max_tokens=FAST_DECISION_MAX_TOKENS  # Configurable limit
-                    )
-                ),
-                timeout=FAST_DECISION_TIMEOUT_SEC  # Configurable timeout
-            )
-            
-            # Log API costs
-            if hasattr(response, 'usage') and response.usage:
-                log_api_call(
-                    tokens_in=response.usage.prompt_tokens,
-                    tokens_out=response.usage.completion_tokens
-                )
-            
-            content = response.choices[0].message.content
-            logger.info(f"Fast AI Response ({len(content)} chars): {content[:200]}...")
-            
-            # DEBUG: inspect raw LLM response (truncation / invalid JSON)
-            try:
-                print(f"[FAST_LLM_RAW] {content[:900]!r}", flush=True)
-            except Exception:
-                pass
-
-            decision_json = _safe_fast_json_loads(content)
-            if not isinstance(decision_json, dict):
-                decision_json = {}
-
-            
-        except asyncio.TimeoutError:
-            logger.error("⏱️ Fast path timeout (60s) - returning all HOLD")
-            decision_json = {}
-        except Exception as e:
-            logger.error(f"❌ Fast path LLM error: {e} - returning all HOLD")
-            decision_json = {}
-        
-        # 6. Parse and validate fast decisions
-        valid_decisions = []
-        decisions_raw = decision_json.get("decisions", [])
-        
-        if not decisions_raw:
-            # Safe fallback: all HOLD
-            logger.warning("⚠️ No decisions from fast AI, generating HOLD fallback")
-            for symbol in assets_symbols:
-                valid_decisions.append(DecisionFast(
-                    symbol=symbol,
-                    action="HOLD",
-                    reason_code="LLM_PARSE_ERROR",
-                    confidence=0
-                ))
-        else:
-            for d_raw in decisions_raw:
-                try:
-                    # Validate and normalize
-                    d = DecisionFast(**d_raw)                    # Deterministic direction selection from confluence (aligns with orchestrator verification):
-                    # - If both confluence scores are low => HOLD
-                    # - If one side is clearly stronger => force direction
-                    # This ensures shorts/longs are always confirmed by analyses, not model bias.
-                    try:
-                        sym = (d.symbol or "").upper()
-                        enhanced = (assets_upper.get(sym, {}) or {}).get("enhanced", {})
-                        conf = enhanced.get("confluence", {})
-                        long_score = int(conf.get("long", {}).get("score", 0) or 0)
-                        short_score = int(conf.get("short", {}).get("score", 0) or 0)
-
-                        MIN_THR = 40
-                        STRONG_THR = 70
-
-                        preferred = None
-                        if long_score < MIN_THR and short_score < MIN_THR:
-                            preferred = None  # force HOLD
-                        elif short_score >= STRONG_THR and long_score < MIN_THR:
-                            preferred = "SHORT"
-                        elif long_score >= STRONG_THR and short_score < MIN_THR:
-                            preferred = "LONG"
-                        else:
-                            preferred = "LONG" if long_score >= short_score else "SHORT"
-
-                        if preferred is None:
-                            if d.action in ("OPEN_LONG", "OPEN_SHORT"):
-                                d.action = "HOLD"
-                                d.reason_code = "LOW_CONFLUENCE"
-                                d.confidence = min(int(d.confidence or 0), 50)
-                        else:
-                            if d.action in ("OPEN_LONG", "OPEN_SHORT"):
-                                d.action = "OPEN_LONG" if preferred == "LONG" else "OPEN_SHORT"
-                    except Exception:
-                        pass
-
-                    valid_decisions.append(d)
-                except Exception as e:
-                    logger.warning(f"Invalid fast decision: {e}")
-                    # Add HOLD for this symbol
-                    symbol = d_raw.get('symbol', 'UNKNOWN')
-                    if symbol in assets_symbols:
-                        valid_decisions.append(DecisionFast(
-                            symbol=symbol,
-                            action="HOLD",
-                            reason_code="PARSE_ERROR",
-                            confidence=0
-                        ))
-        
-        # 7. Ensure all requested symbols have decisions (fill missing with HOLD)
-        decided_symbols = {d.symbol for d in valid_decisions}
-        for symbol in assets_symbols:
-            if symbol not in decided_symbols:
-                valid_decisions.append(DecisionFast(
-                    symbol=symbol,
-                    action="HOLD",
-                    reason_code="MISSING_DECISION",
-                    confidence=0
-                ))
-        
-        elapsed_ms = int((datetime.now() - start_time).total_seconds() * 1000)
-        
-        return {
-            "decisions": [d.model_dump() for d in valid_decisions],
-            "meta": {
-                "processing_time_ms": elapsed_ms,
-                "endpoint": "decide_batch_fast",
-                "symbols_count": len(valid_decisions)
-            }
-        }
-        
-    except Exception as e:
-        logger.error(f"❌ Fast path critical error: {e}")
-        # Ultimate fallback: all HOLD
-        fallback_decisions = []
-        try:
-            for symbol in payload.assets_data.keys():
-                fallback_decisions.append(DecisionFast(
-                    symbol=symbol,
-                    action="HOLD",
-                    reason_code="CRITICAL_ERROR",
-                    confidence=0
-                ).model_dump())
-        except Exception:
-            pass
-        
-        elapsed_ms = int((datetime.now() - start_time).total_seconds() * 1000)
-        return {
-            "decisions": fallback_decisions,
-            "meta": {
-                "processing_time_ms": elapsed_ms,
-                "endpoint": "decide_batch_fast",
-                "error": str(e)
-            }
-        }
-
-
-@app.post("/explain_batch")
-async def explain_batch(request: ExplainBatchRequest):
-    """
-    Generate verbose explanations for fast decisions.
-    
-    This endpoint is called AFTER /decide_batch_fast to provide:
-    - Detailed rationale for each decision
-    - Full analysis summary
-    - Blocker explanations
-    - Risk factors and confirmations
-    
-    This is non-blocking for the critical decision path.
-    """
-    try:
-        # Build explanation prompt using fast decisions as context
-        fast_decisions = request.fast_decisions
-        symbols = [d.get('symbol') for d in fast_decisions if d.get('symbol')]
-        
-        prompt_data = {
-            "fast_decisions": fast_decisions,
-            "symbols": symbols,
-            "context_ref": request.context_ref
-        }
-        
-        explanation_prompt = f"""You previously made these FAST trading decisions:
-
-{json.dumps(fast_decisions, indent=2)}
-
-Now provide DETAILED EXPLANATIONS for each decision:
-
-For each symbol, explain:
-1. Why this action was chosen
-2. What indicators/confirmations supported it
-3. What risks or blockers were considered
-4. Market regime and setup quality
-
-Return JSON:
-{{
-  "explanations": [
-    {{
-      "symbol": "BTCUSDT",
-      "rationale": "Detailed explanation of decision...",
-      "confirmations": ["RSI oversold", "Support at fib 0.618"],
-      "risk_factors": ["High volatility", "Recent losses"],
-      "blocked_by": [],  // Hard constraints
-      "soft_blockers": []  // Warnings
-    }}
-  ],
-  "analysis_summary": "Overall market analysis..."
-}}"""
-        
-        # Call DeepSeek for explanations (with longer timeout since non-critical)
-        response = await asyncio.wait_for(
-            asyncio.to_thread(
-                lambda: client.chat.completions.create(
-                    model="deepseek-chat",
-                    messages=[
-                        {"role": "system", "content": "You are a crypto trading analyst providing detailed explanations."},
-                        {"role": "user", "content": explanation_prompt}
-                    ],
-                    response_format={"type": "json_object"},
-                    temperature=0.7
-                )
-            ),
-            timeout=EXPLANATION_TIMEOUT_SEC  # Configurable timeout for non-critical path
-        )
-        
-        # Log API costs
-        if hasattr(response, 'usage') and response.usage:
-            log_api_call(
-                tokens_in=response.usage.prompt_tokens,
-                tokens_out=response.usage.completion_tokens
-            )
-        
-        content = response.choices[0].message.content
-        explanation_json = safe_json_loads(content, context_label="explain_batch")
-        
-        return {
-            "explanations": explanation_json.get("explanations", []),
-            "analysis_summary": explanation_json.get("analysis_summary", ""),
-            "meta": {
-                "endpoint": "explain_batch",
-                "symbols_count": len(symbols)
-            }
-        }
-        
-    except asyncio.TimeoutError:
-        logger.warning("⏱️ Explanation timeout (60s) - returning minimal response")
-        return {
-            "explanations": [],
-            "analysis_summary": "Explanation generation timed out",
-            "meta": {
-                "endpoint": "explain_batch",
-                "error": "timeout"
-            }
-        }
-    except Exception as e:
-        logger.error(f"❌ Explanation error: {e}")
-        return {
-            "explanations": [],
-            "analysis_summary": f"Error generating explanations: {str(e)}",
-            "meta": {
-                "endpoint": "explain_batch",
-                "error": str(e)
-            }
-        }
 
 
 @app.post("/analyze_reverse")
@@ -3046,7 +1063,7 @@ Analizza TUTTI gli indicatori e decidi: HOLD, CLOSE o REVERSE."""
         content = response.choices[0].message.content
         logger.info(f"AI Reverse Analysis Response: {content}")
         
-        decision = safe_json_loads(content, context_label="reverse_analysis")
+        decision = json.loads(content)
         
         # Valida e normalizza la risposta
         action = decision.get("action", "HOLD").upper()
@@ -3283,7 +1300,7 @@ DECIDI: HOLD, CLOSE o REVERSE"""
                     )
                 
                 content = response.choices[0].message.content
-                decision_data = safe_json_loads(content, context_label="position_llm")
+                decision_data = json.loads(content)
                 
                 decision_action = decision_data.get("action", "CLOSE").upper()
                 decision_confidence = decision_data.get("confidence", 50)
@@ -3403,6 +1420,98 @@ DECIDI: HOLD, CLOSE o REVERSE"""
                 "error": str(e)
             }
         }
+
+
+class LeverageRequest(BaseModel):
+    """Phase 4: DeepSeek only selects leverage + optional veto."""
+    symbol: str
+    direction: str  # "long" or "short"
+    confluence_score: float
+    equity: float = 0.0
+    available_for_new_trades: float = 0.0
+    positions_open: int = 0
+    max_positions: int = 3
+    learning_params: Optional[Dict[str, Any]] = None
+
+
+LEVERAGE_SYSTEM_PROMPT = """You are a risk manager for a crypto trading bot.
+The system has already decided to open a position based on technical confluence scoring.
+Your ONLY job is to select the appropriate leverage and optionally veto the trade.
+
+INPUT: symbol, direction (long/short), confluence_score (0-100), account equity, available margin, open positions count.
+
+RULES:
+- Leverage range: 2x to 5x
+- Higher confluence (80+) = up to 4-5x
+- Medium confluence (65-79) = 2-3x
+- If equity < 50 USDT or available < 15 USDT: veto=true
+- If positions_open >= max_positions: veto=true
+- You may veto if you see extreme risk (rare)
+
+OUTPUT JSON only:
+{"leverage": 3, "veto": false, "reason": "brief explanation"}
+
+Be concise. No analysis needed - just leverage number and veto decision."""
+
+
+@app.post("/select_leverage")
+async def select_leverage(request: LeverageRequest):
+    """
+    Phase 4: Reduced LLM role.
+    DeepSeek only decides leverage (2-5x) and optional veto.
+    Temperature 0.1 for near-deterministic output.
+    """
+    try:
+        # Hard veto checks (no LLM needed)
+        if request.available_for_new_trades < 15.0:
+            return {"leverage": 2, "veto": True, "reason": f"Insufficient margin: {request.available_for_new_trades:.2f} USDT"}
+        if request.positions_open >= request.max_positions:
+            return {"leverage": 2, "veto": True, "reason": f"Max positions reached: {request.positions_open}/{request.max_positions}"}
+
+        user_prompt = (
+            f"Symbol: {request.symbol}\n"
+            f"Direction: {request.direction}\n"
+            f"Confluence score: {request.confluence_score:.1f}/100\n"
+            f"Account equity: {request.equity:.2f} USDT\n"
+            f"Available for trades: {request.available_for_new_trades:.2f} USDT\n"
+            f"Open positions: {request.positions_open}/{request.max_positions}\n"
+        )
+
+        response = client.chat.completions.create(
+            model="deepseek-chat",
+            messages=[
+                {"role": "system", "content": LEVERAGE_SYSTEM_PROMPT},
+                {"role": "user", "content": user_prompt},
+            ],
+            response_format={"type": "json_object"},
+            temperature=0.1,
+        )
+
+        if hasattr(response, 'usage') and response.usage:
+            log_api_call(response.usage.prompt_tokens, response.usage.completion_tokens)
+
+        content = response.choices[0].message.content
+        result = json.loads(content)
+
+        # Clamp leverage to 2-5
+        lev = max(2, min(5, int(result.get("leverage", 3))))
+        veto = bool(result.get("veto", False))
+        reason = result.get("reason", "")
+
+        logger.info(f"✅ Leverage decision for {request.symbol}: lev={lev}, veto={veto}, reason={reason}")
+
+        return {"leverage": lev, "veto": veto, "reason": reason}
+
+    except Exception as e:
+        logger.warning(f"⚠️ Leverage selection error: {e}, using fallback")
+        # Deterministic fallback
+        if request.confluence_score >= 80:
+            lev = 4
+        elif request.confluence_score >= 70:
+            lev = 3
+        else:
+            lev = 2
+        return {"leverage": lev, "veto": False, "reason": f"fallback_error: {str(e)[:50]}"}
 
 
 @app.get("/health")

@@ -779,7 +779,21 @@ def state_cleanup_loop():
             # Prune stale positions from local state (e.g. positions closed on exchange but left in trading_state.json)
             try:
                 active_keys = set()
-                if exchange:
+                if hl_bot:
+                    # Use Hyperliquid to get current open positions
+                    try:
+                        hl_status = hl_bot.get_account_status()
+                        for p in hl_status.get("open_positions", []):
+                            sz = abs(float(p.get("size", 0)))
+                            if sz <= 0:
+                                continue
+                            sym = p.get("symbol", "")
+                            side = str(p.get("side", "")).lower()
+                            if sym and side in ("long", "short"):
+                                active_keys.add(f"{sym}_{side}")
+                    except Exception as e:
+                        print(f"\u26a0\ufe0f Hyperliquid status fetch failed for prune: {e}")
+                elif exchange:
                     live = exchange.fetch_positions(None, params={"category": "linear"})
                     for p in live:
                         contracts = to_float(p.get("contracts"), 0.0)
@@ -797,6 +811,15 @@ def state_cleanup_loop():
                 
                 if removed_keys:
                     print(f"🧹 Pruned stale positions from trading_state: {removed_keys}")
+                    
+                    # Get current mark prices for accurate PnL calculation
+                    _mark_prices = {}
+                    try:
+                        if hl_bot:
+                            _mids = hl_bot.info.all_mids()
+                            _mark_prices = {k: float(v) for k, v in _mids.items()}
+                    except Exception as _e:
+                        print(f"   ⚠️ Could not fetch mark prices for prune: {_e}")
                     
                     # Persist closed trades before discarding position metadata
                     for pos_data in removed_positions:
@@ -818,6 +841,22 @@ def state_cleanup_loop():
                             # Add to closed_trades
                             trading_state.add_closed_trade(closed_trade_record)
                             print(f"   💾 Persisted closed trade: {pos_data.get('symbol')} {pos_data.get('side')}")
+
+                            # Also record for learning agent (trading_history.json)
+                            try:
+                                record_trade_for_learning(
+                                    symbol=pos_data.get("symbol", ""),
+                                    side_raw=pos_data.get("side", "long"),
+                                    entry_price=float(pos_data.get("entry_price", 0)),
+                                    exit_price=_mark_prices.get(pos_data.get("symbol", ""), float(pos_data.get("entry_price", 0))),  # use mark price if available
+                                    leverage=float(pos_data.get("leverage", 1)),
+                                    duration_minutes=0,
+                                    market_conditions={"closed_by": "exchange_sl_tp"},
+                                    intent_id=pos_data.get("intent_id"),
+                                )
+                                print(f"   📚 Recorded pruned trade for learning: {pos_data.get('symbol')}")
+                            except Exception as le:
+                                print(f"   ⚠️ Failed to record pruned trade for learning: {le}")
                         except Exception as e:
                             print(f"   ⚠️ Failed to persist closed trade: {e}")
                     
@@ -1076,6 +1115,273 @@ def check_time_based_exits():
                 
     except Exception as e:
         print(f"⚠️ Error in check_time_based_exits: {e}")
+
+# =========================================================
+# HYPERLIQUID TRAILING STOP
+# =========================================================
+_hl_trailing_state = {}  # {symbol: {"peak_price": float, "trough_price": float, "last_sl_trigger": float}}
+HL_TRAIL_FILE = "/data/hl_trailing_state.json"
+
+def _load_hl_trail_state():
+    global _hl_trailing_state
+    try:
+        import json as _json
+        with open(HL_TRAIL_FILE, "r") as f:
+            _hl_trailing_state = _json.load(f)
+    except Exception:
+        _hl_trailing_state = {}
+
+def _save_hl_trail_state():
+    try:
+        import json as _json
+        with open(HL_TRAIL_FILE, "w") as f:
+            _json.dump(_hl_trailing_state, f, indent=2)
+    except Exception:
+        pass
+
+_load_hl_trail_state()
+
+def check_hl_trailing_stops():
+    """
+    Hyperliquid trailing stop + automatic close detection.
+
+    Multi-stage ATR-based trailing:
+    Stage 1: ROI >= 0.5% leveraged -> trail at 3.0x ATR
+    Stage 2: ROI >= 1.5% leveraged -> trail at 2.0x ATR
+    Stage 3: ROI >= 3.0% leveraged -> trail at 1.2x ATR
+    Stage 4: ROI >= 5.0% leveraged -> trail at 0.8x ATR
+
+    Also: break-even protection at ROI >= 1.0%
+    Also: detects positions that closed on exchange and records them.
+    """
+    global _hl_trailing_state
+
+    if not hl_bot:
+        return
+
+    try:
+        status = hl_bot.get_account_status()
+        positions = status.get("open_positions", [])
+    except Exception as e:
+        print(f"HL trailing: could not get positions: {e}")
+        return
+
+    # === CLOSE DETECTION ===
+    # Track current open position keys and detect closures
+    current_keys = set()
+    for p in positions:
+        sym = p.get("symbol", "")
+        side = str(p.get("side", "")).lower()
+        if sym and side:
+            current_keys.add(f"{sym}_{side}")
+
+    # Check if any previously tracked position has disappeared
+    prev_keys = set(_hl_trailing_state.keys())
+    closed_keys = prev_keys - current_keys
+
+    if closed_keys:
+        # Get mark prices for PnL calculation
+        try:
+            mids = hl_bot.info.all_mids()
+        except Exception:
+            mids = {}
+
+        for key in closed_keys:
+            state = _hl_trailing_state.get(key, {})
+            if not state.get("entry_price"):
+                # No entry data, just clean up state
+                del _hl_trailing_state[key]
+                continue
+
+            parts = key.split("_", 1)
+            if len(parts) != 2:
+                del _hl_trailing_state[key]
+                continue
+
+            sym, side = parts
+            entry_price = float(state.get("entry_price", 0))
+            leverage = float(state.get("leverage", 1))
+            mark = float(mids.get(sym, entry_price))
+
+            print(f"   CLOSE DETECTED: {sym} {side} (was tracked, now gone from exchange)")
+            print(f"      Entry={entry_price} MarkAtDetection={mark} Leverage={leverage}x")
+
+            try:
+                record_trade_for_learning(
+                    symbol=sym,
+                    side_raw=side,
+                    entry_price=entry_price,
+                    exit_price=mark,
+                    leverage=leverage,
+                    duration_minutes=0,
+                    market_conditions={"closed_by": "exchange_sl_tp"},
+                )
+                print(f"      Recorded to trading_history.json")
+            except Exception as e:
+                print(f"      Failed to record: {e}")
+
+            del _hl_trailing_state[key]
+
+        _save_hl_trail_state()
+
+    if not positions:
+        return
+
+    # Get all mid prices
+    try:
+        mids = hl_bot.info.all_mids()
+    except Exception:
+        return
+
+    for pos in positions:
+        try:
+            symbol = pos.get("symbol", "")
+            side = str(pos.get("side", "")).lower()
+            size = abs(float(pos.get("size", 0)))
+            entry_price = float(pos.get("entry_price", 0))
+
+            if size <= 0 or entry_price <= 0 or not symbol:
+                continue
+
+            # Parse leverage
+            import re as _re
+            lev_str = str(pos.get("leverage", "1"))
+            lev_m = _re.match(r"([\d.]+)", lev_str)
+            leverage = float(lev_m.group(1)) if lev_m else 1.0
+
+            mark_price = float(mids.get(symbol, 0))
+            if mark_price <= 0:
+                continue
+
+            # Calculate ROI
+            if side == "long":
+                roi_raw = (mark_price - entry_price) / entry_price
+            else:
+                roi_raw = (entry_price - mark_price) / entry_price
+
+            roi_leveraged = roi_raw * leverage * 100  # as percentage
+
+            # Get ATR for trailing distance
+            atr_val = None
+            try:
+                atr_result = get_atr_for_symbol(symbol)
+                if atr_result and atr_result[0]:
+                    atr_val = atr_result[0]
+            except Exception:
+                pass
+
+            # Determine trailing stage and ATR multiplier
+            if roi_leveraged < 0.5:
+                # Not profitable enough for trailing - but check if we need break-even
+                if roi_leveraged >= 1.0 and symbol in _hl_trailing_state:
+                    pass  # Will apply break-even below
+                else:
+                    continue
+
+            # Multi-stage trailing
+            if roi_leveraged >= 5.0:
+                atr_mult = 0.8
+                stage = 4
+            elif roi_leveraged >= 3.0:
+                atr_mult = 1.2
+                stage = 3
+            elif roi_leveraged >= 1.5:
+                atr_mult = 2.0
+                stage = 2
+            else:
+                atr_mult = 3.0
+                stage = 1
+
+            # Calculate trailing distance
+            if atr_val and atr_val > 0:
+                trail_dist = (atr_val * atr_mult) / mark_price
+            else:
+                # Fallback: percentage-based
+                if stage >= 4:
+                    trail_dist = 0.004  # 0.4%
+                elif stage >= 3:
+                    trail_dist = 0.006  # 0.6%
+                elif stage >= 2:
+                    trail_dist = 0.010  # 1.0%
+                else:
+                    trail_dist = 0.015  # 1.5%
+
+            # Clamp trail distance
+            trail_dist = max(0.003, min(trail_dist, 0.025))  # 0.3% to 2.5%
+
+            # Track peak/trough
+            key = f"{symbol}_{side}"
+            state = _hl_trailing_state.get(key, {})
+
+            if side == "long":
+                peak = max(mark_price, state.get("peak_price", mark_price))
+                state["peak_price"] = peak
+                # SL = peak * (1 - trail_dist)
+                target_sl = peak * (1 - trail_dist)
+                # Break-even: if ROI >= 1%, SL at least at entry + 0.1%
+                if roi_leveraged >= 1.0:
+                    breakeven_sl = entry_price * 1.001
+                    target_sl = max(target_sl, breakeven_sl)
+                # Anti-regression
+                prev_sl = state.get("last_sl_trigger", 0)
+                target_sl = max(target_sl, prev_sl)
+            else:  # short
+                trough = min(mark_price, state.get("trough_price", mark_price))
+                state["trough_price"] = trough
+                # SL = trough * (1 + trail_dist)
+                target_sl = trough * (1 + trail_dist)
+                # Break-even: if ROI >= 1%, SL at most at entry - 0.1%
+                if roi_leveraged >= 1.0:
+                    breakeven_sl = entry_price * 0.999
+                    target_sl = min(target_sl, breakeven_sl)
+                # Anti-regression
+                prev_sl = state.get("last_sl_trigger", float('inf'))
+                if prev_sl < float('inf'):
+                    target_sl = min(target_sl, prev_sl)
+
+            # Round price for Hyperliquid
+            target_sl = hl_bot._round_price(target_sl)
+
+            # Check if SL needs updating (significant change)
+            if prev_sl and prev_sl > 0 and prev_sl < float('inf'):
+                sl_change_pct = abs(target_sl - prev_sl) / mark_price * 100
+                if sl_change_pct < 0.05:  # Less than 0.05% change, skip
+                    _hl_trailing_state[key] = state
+                    continue
+
+            # Cancel existing SL orders for this symbol
+            try:
+                open_orders = hl_bot.info.open_orders(hl_bot.account_address)
+                for order in open_orders:
+                    if order.get("coin") == symbol and order.get("reduceOnly", False):
+                        oid = order.get("oid")
+                        if oid:
+                            hl_bot.exchange.cancel(symbol, oid)
+            except Exception as ce:
+                print(f"   \u26a0\ufe0f HL cancel old SL failed for {symbol}: {ce}")
+
+            # Place new SL
+            try:
+                is_buy_sl = (side == "short")  # Buy to close short, Sell to close long
+                hl_bot._place_stop_loss(symbol, is_buy_sl, size, target_sl)
+                state["last_sl_trigger"] = target_sl
+                print(f"   \U0001f6e1 HL Trailing [{symbol} {side.upper()}] Stage {stage} "
+                      f"ROI={roi_leveraged:.1f}% SL={target_sl:.4f} "
+                      f"(entry={entry_price:.4f} mark={mark_price:.4f} trail={trail_dist*100:.2f}%)")
+            except Exception as se:
+                print(f"   \u26a0\ufe0f HL place SL failed for {symbol}: {se}")
+
+            # Store entry data for close detection
+            state["entry_price"] = entry_price
+            state["leverage"] = leverage
+            _hl_trailing_state[key] = state
+
+        except Exception as pe:
+            print(f"   HL trailing error for position: {pe}")
+
+    _save_hl_trail_state()
+
+
 def position_monitor_loop():
     """
     Background loop that monitors positions every 30 seconds.
@@ -1089,14 +1395,19 @@ def position_monitor_loop():
     while True:
         if exchange:
             try:
-                check_pending_entry_orders()  # Check LIMIT entry orders first
+                check_pending_entry_orders()
                 check_recent_closes_and_save_cooldown()
                 check_and_update_trailing_stops()
                 check_smart_reverse()
-                check_time_based_exits()  # Check for time-based exits
+                check_time_based_exits()
             except Exception as e:
-                print(f"⚠️ Position monitor loop error: {e}")
-        
+                print(f"Position monitor loop error: {e}")
+        elif hl_bot:
+            try:
+                check_hl_trailing_stops()
+            except Exception as e:
+                print(f"HL position monitor error: {e}")
+
         time.sleep(30)
 Thread(target=position_monitor_loop, daemon=True).start()
 # =========================================================
@@ -2234,6 +2545,39 @@ def get_balance():
     usando i dati raw Bybit: walletBalance - totalPositionIM - totalOrderIM - locked - buffer.
     """
     if not exchange:
+        # Hyperliquid fallback via hl_bot
+        if hl_bot:
+            try:
+                status = hl_bot.get_account_status()
+                eq = float(status.get("balance_usd", 0))
+                # Estimate margin used from positions (entry * size / leverage)
+                margin_used = 0.0
+                for pos in status.get("open_positions", []):
+                    try:
+                        ep = float(pos.get("entry_price", 0))
+                        sz = float(pos.get("size", 0))
+                        lev_str = str(pos.get("leverage", "1"))
+                        import re as _re
+                        lev_m = _re.match(r"([\d.]+)", lev_str)
+                        lev = float(lev_m.group(1)) if lev_m else 1.0
+                        margin_used += (ep * sz) / max(lev, 1.0)
+                    except Exception:
+                        pass
+                buffer = 10.0
+                avail = max(0.0, eq - margin_used - buffer)
+                return {
+                    "equity": eq,
+                    "available": eq - margin_used,
+                    "available_for_new_trades": avail,
+                    "available_source": "hyperliquid_hl_bot",
+                    "components": {
+                        "accountValue": eq,
+                        "margin_used": margin_used,
+                        "buffer": buffer,
+                    }
+                }
+            except Exception as e:
+                print(f"\u26a0\ufe0f Hyperliquid wallet error: {e}")
         return {
             "equity": 0,
             "available": 0,
@@ -3056,7 +3400,11 @@ def reverse_position(req: ReverseRequest):
 @app.post("/manage_active_positions")
 def manage():
     if EXCHANGE == "hyperliquid":
-        return {"status": "disabled", "exchange": "hyperliquid"}
+        try:
+            check_hl_trailing_stops()
+        except Exception as e:
+            print(f"\u26a0\ufe0f HL manage error: {e}")
+        return {"status": "ok", "exchange": "hyperliquid"}
     check_recent_closes_and_save_cooldown()
     check_and_update_trailing_stops()
     check_smart_reverse()

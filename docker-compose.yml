@@ -53,34 +53,18 @@ services:
 
   07_position_manager:
     environment:
-      MIN_SL_MOVE_DEFAULT: "0.001"
       POSITION_MANAGER_ENABLE_REVERSE: "true"
-      POSITION_MANAGER_MANUAL_ONLY: "true"
-      DEBUG_SYMBOLS:  "BTCUSDT,ETHUSDT,SOLUSDT"
-      WARNING_THRESHOLD: "-0.02"          # -2% ROI lev
-      AI_REVIEW_THRESHOLD: "-0.025"        # -4% ROI lev  
-      REVERSE_THRESHOLD: "-0.03"          # -6% ROI lev
-      HARD_STOP_THRESHOLD: "-0.05"        # -10% ROI lev
-      # --- TRAILING basato su movimento RAW (leverage independent) ---
-      TRAILING_ACTIVATION_RAW_PCT: "0.0010"    # 0.6% raw
-      BREAKEVEN_ACTIVATION_RAW_PCT: "0.008"   # 0.8% raw
-
-      # clamp distanza trailing (raw)
-      TRAIL_MIN_DIST_RAW_PCT: "0.004"
-      TRAIL_MAX_DIST_RAW_PCT: "0.025"         # 2.5% max: evita trailing troppo largo (BE-blocco)
-
-      # dwell-time tightening (stringe solo dopo consolidamento)
-      TRAIL_TIGHTEN_AFTER_SEC: "180"          # 3 minuti
-      TRAIL_TIGHTEN_ZONE_PCT: "0.003"         # 0.30% zona vicino a peak/trough
-      TRAIL_TIGHTEN_STEP: "0.85"              # -15% distanza per step
-      TRAIL_TIGHTEN_MIN_PCT: "0.008"          # 0.8% minimo dopo tightening
-      TRAIL_TIGHTEN_MAX_STEPS: "4"
-      # profit-lock minimo quando ROI leveraged >= 2.5%
-      PROFIT_LOCK_1_ACTIVATION_LEV_PCT: "0.025"
-      PROFIT_LOCK_1_MARGIN_RAW_PCT: "0.0018"
-      # Profit lock a scalini (leva-indipendente): trigger_raw:lock_raw
-      PROFIT_LOCK_RAW_STEPS: "0.006:0.0018,0.010:0.0035,0.012:0.0060,0.016:0.0090,0.020:0.0120"
-      EQUITY_HISTORY_FILE: "/data/equity_history.json"
+      POSITION_MANAGER_MANUAL_ONLY: "false"
+      DEBUG_SYMBOLS: "BTCUSDT,ETHUSDT,SOLUSDT"
+      WARNING_THRESHOLD: "-0.02"
+      AI_REVIEW_THRESHOLD: "-0.025"
+      REVERSE_THRESHOLD: "-0.03"
+      HARD_STOP_THRESHOLD: "-0.05"
+      FORCE_LIMIT_ONLY: "true"
+      LIMIT_ORDER_TTL_SEC: "300"
+      MAX_LIMIT_RESUBMISSIONS: "2"
+      DEFAULT_INITIAL_SL_PCT: "0.02"
+      DEFAULT_SIZE_PCT: "0.08"
     build: ./agents/07_position_manager
     container_name: 07_position_manager
     ports:
@@ -107,7 +91,13 @@ services:
     container_name: orchestrator
     environment:
       - PYTHONUNBUFFERED=1
-      - DASHBOARD_RESET_PASSWORD=181279
+      - FORCE_LIMIT_ONLY=true
+      - SNIPER_BUFFER_PCT=0.0008
+      - LIMIT_ORDER_TTL_SEC=300
+      - ATR_SL_MULTIPLIER=2.0
+      - ATR_TP_MULTIPLIER=3.0
+      - MIN_SIZE_PCT=0.06
+      - MAX_SIZE_PCT=0.10
     env_file: .env
     restart: always
     volumes:

@@ -1,257 +1,508 @@
 """
-Timeframe Confluence Scoring Module
+Enhanced Confluence Scoring System (0-100)
 
-Computes a deterministic confluence score (0-100) based on:
-- Trend alignment across multiple timeframes (15m, 1h, 4h, 1d)
-- Return/momentum alignment across timeframes
-- Weighted scoring with major TF conflict penalties
+5-dimension scoring replaces the old binary trend check.
+Used by the orchestrator for deterministic entry decisions.
 
-Higher scores indicate stronger multi-timeframe agreement.
-Lower scores indicate conflicting signals across timeframes.
+Dimensions:
+  1. Trend Alignment  (0-30) - Multi-TF trend agreement weighted by ADX
+  2. Momentum Quality (0-20) - MACD histogram direction + RSI position
+  3. Mean Reversion   (0-20) - Bollinger Band position + EMA20 distance
+  4. Volume Confirm   (0-15) - Volume Z-score confirmation
+  5. Key Level Prox   (0-15) - Price near Fibonacci / EMA support-resistance
 """
 
-from typing import Dict, Optional, Literal
-
-# Timeframe weights (must sum to 1.0)
-TF_WEIGHTS = {
-    "15m": 0.4,   # Primary scalping timeframe
-    "1h": 0.3,    # Confirmation timeframe
-    "4h": 0.2,    # Macro trend
-    "1d": 0.1     # Context
-}
-
-# Penalties
-MAJOR_TF_CONFLICT_PENALTY = 25  # Penalty when 1h or 4h opposes direction
+from typing import Dict, Optional, Tuple
 
 
-def _normalize_trend(trend: Optional[str]) -> Literal["bullish", "bearish", "neutral"]:
-    """Normalize trend string to standard values."""
-    if not trend:
-        return "neutral"
-    t = str(trend).lower().strip()
-    if "bull" in t or "up" in t:
-        return "bullish"
-    elif "bear" in t or "down" in t:
-        return "bearish"
-    else:
-        return "neutral"
+# ---------------------------------------------------------------------------
+# helpers
+# ---------------------------------------------------------------------------
+
+def _safe(d: dict, *keys, default=None):
+    """Nested dict get."""
+    cur = d
+    for k in keys:
+        if not isinstance(cur, dict):
+            return default
+        cur = cur.get(k, default)
+    return cur
 
 
-def _get_return_sign(return_val: Optional[float], threshold: float = 0.1) -> Literal["positive", "negative", "neutral"]:
+def _to_float(v, default: float = 0.0) -> float:
+    try:
+        if v is None:
+            return default
+        return float(v)
+    except Exception:
+        return default
+
+
+# ---------------------------------------------------------------------------
+# 1. Trend Alignment  (0-30)
+# ---------------------------------------------------------------------------
+
+def _trend_value(tf_data: dict) -> float:
+    """Return +1 for bullish, -1 for bearish, 0 for unknown."""
+    t = (tf_data.get("trend") or "").upper()
+    if t == "BULLISH":
+        return 1.0
+    if t == "BEARISH":
+        return -1.0
+    return 0.0
+
+
+def _adx_from_tf(tf_data: dict) -> float:
+    """Extract ADX if available, else return 0."""
+    return _to_float(tf_data.get("adx"), 0.0)
+
+
+def score_trend_alignment(tech: dict, direction: str) -> float:
     """
-    Get sign of return with threshold for noise filtering.
-    
+    Multi-TF trend agreement (15m/1h/4h/1d) weighted by ADX strength.
+
+    Each timeframe contributes a weighted share (15m=5, 1h=8, 4h=10, 1d=7).
+    Score multiplied by min(adx/25, 1.0) so no trend = no score.
+    Conflict penalty: if 1h and 4h disagree on direction, cap at 15.
+    """
+    tfs = tech.get("timeframes", {})
+    weights = {"15m": 5, "1h": 8, "4h": 10, "1d": 7}  # sum = 30
+    sign = 1.0 if direction == "long" else -1.0
+
+    raw = 0.0
+    for tf_name, w in weights.items():
+        tf = tfs.get(tf_name, {})
+        tv = _trend_value(tf) * sign  # +1 if aligned with direction
+        if tv > 0:
+            raw += w
+        elif tv < 0:
+            raw -= w * 0.5  # penalty for opposing TF
+
+    raw = max(0.0, raw)
+
+    # ADX weighting: use 1h ADX if available, else approximate
+    adx = _adx_from_tf(tfs.get("1h", {}))
+    if adx <= 0:
+        adx = _adx_from_tf(tfs.get("4h", {}))
+    if adx <= 0:
+        # Approximate ADX from EMA50 distance: |(close - ema50)| / atr * 10
+        tf_15m = tfs.get("15m", {})
+        price = _to_float(tf_15m.get("price"))
+        ema50 = _to_float(tf_15m.get("ema_50"))
+        atr = _to_float(tf_15m.get("atr"))
+        if price > 0 and ema50 > 0 and atr > 0:
+            adx = min(50, abs(price - ema50) / atr * 10)
+        else:
+            adx = 15  # neutral default
+
+    adx_factor = max(0.4, min(adx / 18.0, 1.0))  # floor=0.4, full credit at ADX=18
+    score = raw * adx_factor
+
+    # Conflict penalty: if 1h and 4h disagree, cap at 15
+    tv_1h = _trend_value(tfs.get("1h", {}))
+    tv_4h = _trend_value(tfs.get("4h", {}))
+    if tv_1h != 0 and tv_4h != 0 and tv_1h != tv_4h:
+        score = min(score, 15.0)
+
+    return round(min(30.0, max(0.0, score)), 2)
+
+
+# ---------------------------------------------------------------------------
+# 2. Momentum Quality  (0-20)
+# ---------------------------------------------------------------------------
+
+def score_momentum(tech: dict, direction: str) -> float:
+    """
+    MACD histogram direction + RSI position (not overbought/oversold).
+
+    MACD component (0-10):
+      - histogram rising + aligned with direction = 10
+      - histogram rising but neutral = 5
+      - histogram falling against direction = 0
+
+    RSI component (0-10):
+      - RSI in sweet zone (40-60 for long, 40-60 for short) = 10
+      - RSI mildly extended (30-40 or 60-70) = 5
+      - RSI overbought (>70 for long) or oversold (<30 for short) = 0
+    """
+    tfs = tech.get("timeframes", {})
+    tf_15m = tfs.get("15m", {})
+    tf_1h = tfs.get("1h", {})
+
+    # --- MACD component (0-10) ---
+    macd_trend = (tf_15m.get("macd") or "").upper()
+    macd_momentum = (tf_15m.get("macd_momentum") or "").upper()
+
+    macd_score = 0.0
+    if direction == "long":
+        if macd_trend == "POSITIVE" and macd_momentum == "RISING":
+            macd_score = 10.0
+        elif macd_trend == "POSITIVE":
+            macd_score = 6.0
+        elif macd_momentum == "RISING":
+            macd_score = 4.0
+    else:  # short
+        if macd_trend == "NEGATIVE" and macd_momentum == "FALLING":
+            macd_score = 10.0
+        elif macd_trend == "NEGATIVE":
+            macd_score = 6.0
+        elif macd_momentum == "FALLING":
+            macd_score = 4.0
+
+    # --- RSI component (0-10) ---
+    rsi = _to_float(tf_1h.get("rsi"), 50)
+    rsi_score = 0.0
+
+    if direction == "long":
+        if 35 <= rsi <= 55:
+            rsi_score = 10.0  # sweet zone for long entry
+        elif 25 <= rsi < 35:
+            rsi_score = 7.0  # oversold = potential bounce
+        elif 55 < rsi <= 65:
+            rsi_score = 5.0  # slightly extended
+        elif rsi > 70:
+            rsi_score = 0.0  # overbought - bad for long entry
+        else:
+            rsi_score = 3.0
+    else:  # short
+        if 45 <= rsi <= 65:
+            rsi_score = 10.0  # sweet zone for short entry
+        elif 65 < rsi <= 75:
+            rsi_score = 7.0  # overbought = potential reversal down
+        elif 35 <= rsi < 45:
+            rsi_score = 5.0  # slightly low
+        elif rsi < 30:
+            rsi_score = 0.0  # oversold - bad for short entry
+        else:
+            rsi_score = 3.0
+
+    return round(min(20.0, macd_score + rsi_score), 2)
+
+
+# ---------------------------------------------------------------------------
+# 3. Mean Reversion  (0-20)
+# ---------------------------------------------------------------------------
+
+def score_mean_reversion(tech: dict, direction: str) -> float:
+    """
+    Bollinger Band position + distance from EMA20.
+
+    Uses (close - EMA20) / ATR as magnitude measure.
+    For LONG: want price below EMA20 (buying dip) -> positive score
+    For SHORT: want price above EMA20 (selling rally) -> positive score
+
+    Magnitude > 2 ATR = overextended, score drops.
+    """
+    tfs = tech.get("timeframes", {})
+    tf_15m = tfs.get("15m", {})
+
+    price = _to_float(tf_15m.get("price"))
+    ema20 = _to_float(tf_15m.get("ema_20"))
+    atr = _to_float(tf_15m.get("atr"))
+
+    if price <= 0 or ema20 <= 0 or atr <= 0:
+        return 0.0
+
+    # Distance from EMA20 in ATR units
+    dist_atr = (price - ema20) / atr
+
+    score = 0.0
+
+    if direction == "long":
+        # Buying dip: price below EMA20 is good (negative dist_atr)
+        if -2.0 <= dist_atr <= -0.3:
+            score = 15.0 + min(5.0, abs(dist_atr) * 5)  # 15-20
+        elif -0.3 < dist_atr <= 0.3:
+            score = 13.0  # near EMA20, good trending entry
+        elif 0.3 < dist_atr <= 1.0:
+            score = 7.0  # slightly above, acceptable
+        elif dist_atr > 1.0:
+            score = 3.0  # extended above, mean reversion risk
+        elif dist_atr < -2.0:
+            score = 8.0  # very oversold, risky but possible bounce
+    else:  # short
+        # Selling rally: price above EMA20 is good (positive dist_atr)
+        if 0.3 <= dist_atr <= 2.0:
+            score = 15.0 + min(5.0, dist_atr * 5)  # 15-20
+        elif -0.3 <= dist_atr < 0.3:
+            score = 13.0  # near EMA20, good trending entry
+        elif -1.0 <= dist_atr < -0.3:
+            score = 7.0  # slightly below, acceptable
+        elif dist_atr < -1.0:
+            score = 3.0  # extended below, mean reversion risk
+        elif dist_atr > 2.0:
+            score = 8.0  # very overbought, risky
+
+    return round(min(20.0, max(0.0, score)), 2)
+
+
+# ---------------------------------------------------------------------------
+# 4. Volume Confirmation  (0-15)
+# ---------------------------------------------------------------------------
+
+def score_volume(tech: dict) -> float:
+    """
+    Volume Z-score > 0.5 for confirmation.
+
+    Uses volume_spike_Xtf from technical analyzer (current_vol / 20-bar avg).
+    Spike > 1.5 = strong confirmation (15 pts)
+    Spike 1.0-1.5 = moderate (10 pts)
+    Spike 0.5-1.0 = weak (5 pts)
+    """
+    tfs = tech.get("timeframes", {})
+    summary = tech.get("summary", {})
+
+    # Try volume_spike_5m first, then 15m
+    vol_spike = _to_float(summary.get("volume_spike_5m"), 0)
+    if vol_spike <= 0:
+        vol_spike = _to_float(tfs.get("15m", {}).get("volume_spike_15m"), 0)
+    if vol_spike <= 0:
+        vol_spike = _to_float(tfs.get("5m", {}).get("volume_spike_5m"), 0)
+
+    # Also check volume_zscore (often available when spike is not)
+    vol_zscore = _to_float(tfs.get("15m", {}).get("volume_zscore"), 0)
+    if vol_zscore <= 0:
+        vol_zscore = _to_float(tfs.get("1h", {}).get("volume_zscore"), 0)
+
+    # Score from spike (primary)
+    spike_score = 0.0
+    if vol_spike >= 2.0:
+        spike_score = 15.0
+    elif vol_spike >= 1.5:
+        spike_score = 12.0
+    elif vol_spike >= 1.0:
+        spike_score = 10.0
+    elif vol_spike >= 0.5:
+        spike_score = 7.0
+    elif vol_spike >= 0.3:
+        spike_score = 4.0
+
+    # Score from zscore (secondary)
+    zscore_score = 0.0
+    if vol_zscore >= 2.0:
+        zscore_score = 12.0
+    elif vol_zscore >= 1.0:
+        zscore_score = 8.0
+    elif vol_zscore >= 0.5:
+        zscore_score = 5.0
+    elif vol_zscore >= 0.0:
+        zscore_score = 3.0  # above average = some activity
+
+    # Take the best of the two signals
+    return min(15.0, max(spike_score, zscore_score))
+
+
+# ---------------------------------------------------------------------------
+# 5. Key Level Proximity  (0-15)
+# ---------------------------------------------------------------------------
+
+def score_key_levels(tech: dict, fib_data: dict, direction: str) -> float:
+    """
+    Price near Fibonacci / EMA support-resistance levels.
+
+    For LONG: price near support levels = higher score
+    For SHORT: price near resistance levels = higher score
+    """
+    tfs = tech.get("timeframes", {})
+    tf_15m = tfs.get("15m", {})
+    price = _to_float(tf_15m.get("price"))
+    atr = _to_float(tf_15m.get("atr"))
+
+    if price <= 0 or atr <= 0:
+        return 0.0
+
+    score = 0.0
+    proximity_threshold = atr * 2  # within 2 ATR of a key level
+
+    # --- EMA levels ---
+    ema20 = _to_float(tf_15m.get("ema_20"))
+    ema50 = _to_float(tf_15m.get("ema_50"))
+
+    if direction == "long":
+        # Support levels: EMA20, EMA50
+        for ema_val in [ema20, ema50]:
+            if ema_val > 0:
+                dist = price - ema_val
+                if 0 <= dist <= proximity_threshold:
+                    # Price just above EMA (support holding)
+                    score += 4.0
+                elif -proximity_threshold <= dist < 0:
+                    # Price just below EMA (potential bounce)
+                    score += 3.0
+    else:  # short
+        # Resistance levels: EMA20, EMA50
+        for ema_val in [ema20, ema50]:
+            if ema_val > 0:
+                dist = ema_val - price
+                if 0 <= dist <= proximity_threshold:
+                    # Price just below EMA (resistance holding)
+                    score += 4.0
+                elif -proximity_threshold <= dist < 0:
+                    # Price just above EMA (potential rejection)
+                    score += 3.0
+
+    # --- Fibonacci levels ---
+    fib_levels = fib_data.get("fib_levels", {})
+    if fib_levels and price > 0:
+        for level_name, level_price in fib_levels.items():
+            lp = _to_float(level_price)
+            if lp <= 0:
+                continue
+
+            dist_pct = abs(price - lp) / price
+
+            if dist_pct > 0.005:  # more than 0.5% away, skip
+                continue
+
+            # Within 0.5% of a Fibonacci level
+            if direction == "long":
+                # Good if price is near support fibs (0.382, 0.5, 0.618)
+                if "0.382" in level_name or "0.5" in level_name or "0.618" in level_name:
+                    if price >= lp:  # bouncing off support
+                        score += 5.0
+                    else:
+                        score += 3.0
+            else:  # short
+                # Good if price is near resistance fibs (0.618, 0.786, 1.0)
+                if "0.618" in level_name or "0.786" in level_name or "1.0" in level_name:
+                    if price <= lp:  # rejecting resistance
+                        score += 5.0
+                    else:
+                        score += 3.0
+
+    return round(min(15.0, score), 2)
+
+
+# ---------------------------------------------------------------------------
+# Main scoring function
+# ---------------------------------------------------------------------------
+
+def calculate_confluence(tech: dict, fib_data: dict, direction: str) -> dict:
+    """
+    Calculate the full confluence score for a given direction.
+
     Args:
-        return_val: Return percentage
-        threshold: Minimum absolute value to consider non-neutral (default 0.1%)
-    """
-    if return_val is None:
-        return "neutral"
-    if return_val > threshold:
-        return "positive"
-    elif return_val < -threshold:
-        return "negative"
-    else:
-        return "neutral"
+        tech: Technical analysis data from /analyze_multi_tf_full
+        fib_data: Fibonacci data from /analyze_fib
+        direction: 'long' or 'short'
 
-
-def calculate_confluence_score(
-    direction: Literal["LONG", "SHORT"],
-    timeframes: Dict[str, Dict],
-    apply_penalties: bool = True
-) -> tuple[int, Dict[str, any]]:
-    """
-    Calculate multi-timeframe confluence score for a given direction.
-    
-    Args:
-        direction: Trade direction ("LONG" or "SHORT")
-        timeframes: Dictionary of timeframe data from technical analyzer
-                   Expected keys: "15m", "1h", "4h", "1d"
-                   Each contains: trend, return_15m/1h/4h/1d, etc.
-        apply_penalties: Whether to apply major TF conflict penalties
-    
     Returns:
-        Tuple of (score, breakdown_dict)
-        - score: 0-100, higher means stronger confluence
-        - breakdown: Detailed scoring breakdown
-    """
-    score = 0
-    breakdown = {
-        "direction": direction,
-        "trend_alignment": {},
-        "return_alignment": {},
-        "weighted_scores": {},
-        "penalties": [],
-        "total_before_penalties": 0,
-        "total_after_penalties": 0
-    }
-    
-    # Determine expected trend and return sign for this direction
-    expected_trend = "bullish" if direction == "LONG" else "bearish"
-    expected_return = "positive" if direction == "LONG" else "negative"
-    
-    # Calculate trend alignment for each timeframe
-    for tf, weight in TF_WEIGHTS.items():
-        tf_data = timeframes.get(tf, {})
-        
-        # Get trend
-        trend = _normalize_trend(tf_data.get("trend"))
-        
-        # Get return (try multiple field names for backward compatibility)
-        return_field = f"return_{tf}" if tf != "15m" else "return_15m"
-        return_val = tf_data.get(return_field)
-        if return_val is None:
-            # Try alternative fields
-            return_val = tf_data.get("return")
-        return_sign = _get_return_sign(return_val)
-        
-        # Score trend alignment (0-100 points per TF)
-        trend_score = 0
-        if trend == expected_trend:
-            trend_score = 100
-        elif trend == "neutral":
-            trend_score = 50
-        # else: opposite trend = 0 points
-        
-        # Score return alignment (0-100 points per TF)
-        return_score = 0
-        if return_sign == expected_return:
-            return_score = 100
-        elif return_sign == "neutral":
-            return_score = 50
-        # else: opposite return = 0 points
-        
-        # Combined score for this TF (0-100): average of trend and return
-        tf_score = (trend_score + return_score) / 2.0
-        
-        # Weight by timeframe importance
-        weighted_score = tf_score * weight  # weight is 0-1, so result is 0-weight*100
-        score += weighted_score
-        
-        # Store breakdown
-        breakdown["trend_alignment"][tf] = {
-            "trend": trend,
-            "expected": expected_trend,
-            "match": trend == expected_trend,
-            "score": trend_score
+        {
+            "total": 0-100,
+            "trend_alignment": 0-30,
+            "momentum": 0-20,
+            "mean_reversion": 0-20,
+            "volume": 0-15,
+            "key_levels": 0-15,
+            "direction": "long" | "short"
         }
-        breakdown["return_alignment"][tf] = {
-            "return": return_val,
-            "sign": return_sign,
-            "expected": expected_return,
-            "match": return_sign == expected_return,
-            "score": return_score
-        }
-        breakdown["weighted_scores"][tf] = {
-            "raw_score": tf_score,
-            "weight": weight,
-            "weighted_score": weighted_score
-        }
-    
-    breakdown["total_before_penalties"] = int(round(score))
-    
-    # Apply major TF conflict penalties
-    if apply_penalties:
-        # Check 1h opposition
-        tf_1h = timeframes.get("1h", {})
-        trend_1h = _normalize_trend(tf_1h.get("trend"))
-        return_1h = _get_return_sign(tf_1h.get("return_1h"))
-        
-        opposite_trend = "bearish" if direction == "LONG" else "bullish"
-        opposite_return = "negative" if direction == "LONG" else "positive"
-        
-        if trend_1h == opposite_trend and return_1h == opposite_return:
-            score -= MAJOR_TF_CONFLICT_PENALTY
-            breakdown["penalties"].append({
-                "type": "1h_opposition",
-                "penalty": MAJOR_TF_CONFLICT_PENALTY,
-                "reason": f"1h shows {opposite_trend} trend with {opposite_return} return"
-            })
-        
-        # Check 4h opposition
-        tf_4h = timeframes.get("4h", {})
-        trend_4h = _normalize_trend(tf_4h.get("trend"))
-        return_4h = _get_return_sign(tf_4h.get("return_4h"))
-        
-        if trend_4h == opposite_trend and return_4h == opposite_return:
-            score -= MAJOR_TF_CONFLICT_PENALTY
-            breakdown["penalties"].append({
-                "type": "4h_opposition",
-                "penalty": MAJOR_TF_CONFLICT_PENALTY,
-                "reason": f"4h shows {opposite_trend} trend with {opposite_return} return"
-            })
-    
-    # Clamp to 0-100 range
-    final_score = max(0, min(100, int(round(score))))
-    breakdown["total_after_penalties"] = final_score
-    
-    return final_score, breakdown
-
-
-def calculate_tf_aligned(timeframes: Dict[str, Dict]) -> bool:
     """
-    Calculate simple boolean TF alignment (backward compatible with existing tech analyzer).
-    
-    Returns True if major timeframes (15m, 1h, 4h) are aligned in trend.
-    
-    Args:
-        timeframes: Dictionary of timeframe data
-    
-    Returns:
-        Boolean indicating if timeframes are aligned
-    """
-    trends = []
-    for tf in ["15m", "1h", "4h"]:
-        tf_data = timeframes.get(tf, {})
-        trend = _normalize_trend(tf_data.get("trend"))
-        if trend != "neutral":
-            trends.append(trend)
-    
-    if not trends:
-        return False
-    
-    # Check if all non-neutral trends agree
-    return len(set(trends)) == 1
+    trend = score_trend_alignment(tech, direction)
+    momentum = score_momentum(tech, direction)
+    mean_rev = score_mean_reversion(tech, direction)
+    volume = score_volume(tech)
+    levels = score_key_levels(tech, fib_data or {}, direction)
 
+    total = trend + momentum + mean_rev + volume + levels
 
-def get_confluence_summary(
-    timeframes: Dict[str, Dict]
-) -> Dict[str, any]:
-    """
-    Get confluence summary for both directions.
-    
-    Args:
-        timeframes: Dictionary of timeframe data
-    
-    Returns:
-        Dictionary with scores and recommendations for both LONG and SHORT
-    """
-    long_score, long_breakdown = calculate_confluence_score("LONG", timeframes)
-    short_score, short_breakdown = calculate_confluence_score("SHORT", timeframes)
-    
-    # Determine recommendation
-    if long_score >= 70 and short_score < 40:
-        recommendation = "LONG"
-        confidence = "HIGH"
-    elif short_score >= 70 and long_score < 40:
-        recommendation = "SHORT"
-        confidence = "HIGH"
-    elif long_score >= 60:
-        recommendation = "LONG"
-        confidence = "MEDIUM"
-    elif short_score >= 60:
-        recommendation = "SHORT"
-        confidence = "MEDIUM"
-    else:
-        recommendation = "NEUTRAL"
-        confidence = "LOW"
-    
     return {
-        "long_score": long_score,
-        "short_score": short_score,
-        "recommendation": recommendation,
-        "confidence": confidence,
-        "tf_aligned": calculate_tf_aligned(timeframes),
-        "long_breakdown": long_breakdown,
-        "short_breakdown": short_breakdown
+        "total": round(min(100.0, total), 2),
+        "trend_alignment": trend,
+        "momentum": momentum,
+        "mean_reversion": mean_rev,
+        "volume": volume,
+        "key_levels": levels,
+        "direction": direction,
     }
+
+
+def calculate_confluence_both(tech: dict, fib_data: dict) -> Tuple[dict, dict]:
+    """
+    Calculate confluence for both directions, return (long_score, short_score).
+    """
+    long_score = calculate_confluence(tech, fib_data, "long")
+    short_score = calculate_confluence(tech, fib_data, "short")
+    return long_score, short_score
+
+
+def calculate_limit_price(
+    price: float,
+    direction: str,
+    tech: dict,
+    fib_data: dict,
+    sniper_buffer_pct: float = 0.0008,
+) -> float:
+    """
+    Calculate the limit order entry price.
+
+    Priority order:
+    1. Nearest Fibonacci level within 0.3% of current price
+    2. EMA20 if within 0.2% of current price
+    3. Fallback: current_price +/- SNIPER_BUFFER_PCT
+
+    Args:
+        price: Current price
+        direction: 'long' or 'short'
+        tech: Technical analysis data
+        fib_data: Fibonacci data
+        sniper_buffer_pct: Buffer percentage for fallback
+
+    Returns:
+        Limit order price
+    """
+    tfs = tech.get("timeframes", {})
+    tf_15m = tfs.get("15m", {})
+    ema20 = _to_float(tf_15m.get("ema_20"))
+
+    # 1. Check Fibonacci levels within 0.3%
+    fib_levels = fib_data.get("fib_levels", {}) if fib_data else {}
+    best_fib = None
+    best_fib_dist = float("inf")
+
+    for level_name, level_price in fib_levels.items():
+        lp = _to_float(level_price)
+        if lp <= 0:
+            continue
+
+        dist_pct = abs(price - lp) / price
+
+        if dist_pct > 0.003:  # more than 0.3%
+            continue
+
+        if direction == "long":
+            # For LONG: want fib level below current price (support)
+            if lp < price and dist_pct < best_fib_dist:
+                # Prefer golden ratio levels
+                if any(k in level_name for k in ["0.382", "0.5", "0.618"]):
+                    best_fib = lp
+                    best_fib_dist = dist_pct
+                elif best_fib is None:
+                    best_fib = lp
+                    best_fib_dist = dist_pct
+        else:  # short
+            # For SHORT: want fib level above current price (resistance)
+            if lp > price and dist_pct < best_fib_dist:
+                if any(k in level_name for k in ["0.618", "0.786", "1.0"]):
+                    best_fib = lp
+                    best_fib_dist = dist_pct
+                elif best_fib is None:
+                    best_fib = lp
+                    best_fib_dist = dist_pct
+
+    if best_fib is not None:
+        return round(best_fib, 8)
+
+    # 2. Check EMA20 within 0.2%
+    if ema20 > 0:
+        ema_dist_pct = abs(price - ema20) / price
+        if ema_dist_pct <= 0.002:
+            if direction == "long" and ema20 < price:
+                return round(ema20, 8)
+            elif direction == "short" and ema20 > price:
+                return round(ema20, 8)
+
+    # 3. Fallback: sniper buffer
+    if direction == "long":
+        return round(price * (1 - sniper_buffer_pct), 8)
+    else:
+        return round(price * (1 + sniper_buffer_pct), 8)
