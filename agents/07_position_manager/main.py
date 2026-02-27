@@ -69,7 +69,7 @@ MIN_SL_MOVE_ETH = float(os.getenv("MIN_SL_MOVE_ETH", "0.8"))
 MIN_SL_MOVE_SOL = float(os.getenv("MIN_SL_MOVE_SOL", "0.05"))
 MIN_SL_MOVE_DEFAULT = float(os.getenv("MIN_SL_MOVE_DEFAULT", "0.001"))
 # --- BREAK-EVEN PROTECTION ---
-BREAKEVEN_ACTIVATION_RAW_PCT = float(os.getenv("BREAKEVEN_ACTIVATION_RAW_PCT", "0.015"))  # 1.5% ROI (leveraged)
+BREAKEVEN_ACTIVATION_RAW_PCT = float(os.getenv("BREAKEVEN_ACTIVATION_RAW_PCT", "0.03"))  # 1.5% ROI (leveraged)
 BREAKEVEN_MARGIN_PCT = float(os.getenv("BREAKEVEN_MARGIN_PCT", "0.001"))  # 0.1% margin
 # --- PARAMETRI AI REVIEW / REVERSE ---
 ENABLE_AI_REVIEW = os.getenv("ENABLE_AI_REVIEW", "true").lower() == "true"
@@ -1143,16 +1143,15 @@ _load_hl_trail_state()
 
 def check_hl_trailing_stops():
     """
-    Hyperliquid trailing stop + automatic close detection.
+    Hyperliquid trailing stop implementation.
 
     Multi-stage ATR-based trailing:
-    Stage 1: ROI >= 0.5% leveraged -> trail at 3.0x ATR
-    Stage 2: ROI >= 1.5% leveraged -> trail at 2.0x ATR
-    Stage 3: ROI >= 3.0% leveraged -> trail at 1.2x ATR
-    Stage 4: ROI >= 5.0% leveraged -> trail at 0.8x ATR
+    Stage 1: ROI >= 1.5% leveraged -> trail at 3.0x ATR
+    Stage 2: ROI >= 3.0% leveraged -> trail at 2.0x ATR
+    Stage 3: ROI >= 5.0% leveraged -> trail at 1.2x ATR
+    Stage 4: ROI >= 8.0% leveraged -> trail at 0.8x ATR
 
     Also: break-even protection at ROI >= 1.0%
-    Also: detects positions that closed on exchange and records them.
     """
     global _hl_trailing_state
 
@@ -1163,66 +1162,8 @@ def check_hl_trailing_stops():
         status = hl_bot.get_account_status()
         positions = status.get("open_positions", [])
     except Exception as e:
-        print(f"HL trailing: could not get positions: {e}")
+        print(f"\u26a0\ufe0f HL trailing: could not get positions: {e}")
         return
-
-    # === CLOSE DETECTION ===
-    # Track current open position keys and detect closures
-    current_keys = set()
-    for p in positions:
-        sym = p.get("symbol", "")
-        side = str(p.get("side", "")).lower()
-        if sym and side:
-            current_keys.add(f"{sym}_{side}")
-
-    # Check if any previously tracked position has disappeared
-    prev_keys = set(_hl_trailing_state.keys())
-    closed_keys = prev_keys - current_keys
-
-    if closed_keys:
-        # Get mark prices for PnL calculation
-        try:
-            mids = hl_bot.info.all_mids()
-        except Exception:
-            mids = {}
-
-        for key in closed_keys:
-            state = _hl_trailing_state.get(key, {})
-            if not state.get("entry_price"):
-                # No entry data, just clean up state
-                del _hl_trailing_state[key]
-                continue
-
-            parts = key.split("_", 1)
-            if len(parts) != 2:
-                del _hl_trailing_state[key]
-                continue
-
-            sym, side = parts
-            entry_price = float(state.get("entry_price", 0))
-            leverage = float(state.get("leverage", 1))
-            mark = float(mids.get(sym, entry_price))
-
-            print(f"   CLOSE DETECTED: {sym} {side} (was tracked, now gone from exchange)")
-            print(f"      Entry={entry_price} MarkAtDetection={mark} Leverage={leverage}x")
-
-            try:
-                record_trade_for_learning(
-                    symbol=sym,
-                    side_raw=side,
-                    entry_price=entry_price,
-                    exit_price=mark,
-                    leverage=leverage,
-                    duration_minutes=0,
-                    market_conditions={"closed_by": "exchange_sl_tp"},
-                )
-                print(f"      Recorded to trading_history.json")
-            except Exception as e:
-                print(f"      Failed to record: {e}")
-
-            del _hl_trailing_state[key]
-
-        _save_hl_trail_state()
 
     if not positions:
         return
@@ -1271,21 +1212,21 @@ def check_hl_trailing_stops():
                 pass
 
             # Determine trailing stage and ATR multiplier
-            if roi_leveraged < 0.5:
+            if roi_leveraged < 1.5:
                 # Not profitable enough for trailing - but check if we need break-even
-                if roi_leveraged >= 1.0 and symbol in _hl_trailing_state:
+                if roi_leveraged >= 1.5 and symbol in _hl_trailing_state:
                     pass  # Will apply break-even below
                 else:
                     continue
 
             # Multi-stage trailing
-            if roi_leveraged >= 5.0:
+            if roi_leveraged >= 8.0:
                 atr_mult = 0.8
                 stage = 4
-            elif roi_leveraged >= 3.0:
+            elif roi_leveraged >= 5.0:
                 atr_mult = 1.2
                 stage = 3
-            elif roi_leveraged >= 1.5:
+            elif roi_leveraged >= 3.0:
                 atr_mult = 2.0
                 stage = 2
             else:
@@ -1319,7 +1260,7 @@ def check_hl_trailing_stops():
                 # SL = peak * (1 - trail_dist)
                 target_sl = peak * (1 - trail_dist)
                 # Break-even: if ROI >= 1%, SL at least at entry + 0.1%
-                if roi_leveraged >= 1.0:
+                if roi_leveraged >= 3.0:
                     breakeven_sl = entry_price * 1.001
                     target_sl = max(target_sl, breakeven_sl)
                 # Anti-regression
@@ -1331,7 +1272,7 @@ def check_hl_trailing_stops():
                 # SL = trough * (1 + trail_dist)
                 target_sl = trough * (1 + trail_dist)
                 # Break-even: if ROI >= 1%, SL at most at entry - 0.1%
-                if roi_leveraged >= 1.0:
+                if roi_leveraged >= 3.0:
                     breakeven_sl = entry_price * 0.999
                     target_sl = min(target_sl, breakeven_sl)
                 # Anti-regression
@@ -1371,13 +1312,10 @@ def check_hl_trailing_stops():
             except Exception as se:
                 print(f"   \u26a0\ufe0f HL place SL failed for {symbol}: {se}")
 
-            # Store entry data for close detection
-            state["entry_price"] = entry_price
-            state["leverage"] = leverage
             _hl_trailing_state[key] = state
 
         except Exception as pe:
-            print(f"   HL trailing error for position: {pe}")
+            print(f"   \u26a0\ufe0f HL trailing error for position: {pe}")
 
     _save_hl_trail_state()
 
