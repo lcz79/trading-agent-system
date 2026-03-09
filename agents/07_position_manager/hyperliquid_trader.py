@@ -28,8 +28,17 @@ class HyperLiquidTrader:
         # crea account signer
         account: LocalAccount = eth_account.Account.from_key(secret_key)
 
-        self.info = Info(base_url, skip_ws=skip_ws)
-        self.exchange = Exchange(account, base_url, account_address=account_address)
+        # Filter corrupted spot_meta entries (testnet has out-of-range token indices)
+        from hyperliquid.api import API
+        _api = API(base_url)
+        _spot_meta = _api.post("/info", {"type": "spotMeta"})
+        _n_tokens = len(_spot_meta.get("tokens", []))
+        _spot_meta["universe"] = [
+            u for u in _spot_meta.get("universe", [])
+            if all(idx < _n_tokens for idx in u.get("tokens", []))
+        ]
+        self.info = Info(base_url, skip_ws=skip_ws, spot_meta=_spot_meta)
+        self.exchange = Exchange(account, base_url, account_address=account_address, spot_meta=_spot_meta)
 
         # cache meta per tick-size e min-size
         self.meta = self.info.meta()

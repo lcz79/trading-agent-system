@@ -19,7 +19,12 @@ try:
     from hyperliquid.utils import constants
 
     _API_URL = constants.TESTNET_API_URL if HL_TESTNET else constants.MAINNET_API_URL
-    info = Info(_API_URL, skip_ws=True)
+    # Filter corrupted spot_meta entries (testnet has out-of-range token indices)
+    from hyperliquid.api import API as _HLApi
+    _spot_meta = _HLApi(_API_URL).post("/info", {"type": "spotMeta"})
+    _n_tok = len(_spot_meta.get("tokens", []))
+    _spot_meta["universe"] = [u for u in _spot_meta.get("universe", []) if all(i < _n_tok for i in u.get("tokens", []))]
+    info = Info(_API_URL, skip_ws=True, spot_meta=_spot_meta)
     HL_AVAILABLE = True
     logger.info(f"Hyperliquid SDK initialized ({'testnet' if HL_TESTNET else 'mainnet'})")
 except ImportError:

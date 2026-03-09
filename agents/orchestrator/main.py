@@ -38,6 +38,7 @@ ATR_SL_MULTIPLIER = float(os.getenv("ATR_SL_MULTIPLIER", "1.5"))
 ATR_TP_MULTIPLIER = float(os.getenv("ATR_TP_MULTIPLIER", "4.5"))
 MIN_SIZE_PCT = float(os.getenv("MIN_SIZE_PCT", "0.06"))
 MAX_SIZE_PCT = float(os.getenv("MAX_SIZE_PCT", "0.10"))
+MIN_TP_PCT = float(os.getenv("MIN_TP_PCT", "0.35"))
 
 # --- CRITICAL CLOSE CONFIRMATION STATE ---
 pending_critical_closes = {}
@@ -63,6 +64,53 @@ _cooldown_tracker = {}  # {(symbol, direction): timestamp}
 _pending_orders = {}  # {symbol: timestamp_of_submission}
 PENDING_ORDER_TTL = int(os.getenv("PENDING_ORDER_TTL", "600"))  # 10 min before allowing resubmission
 
+# --- STRATEGY RULES (from learning agent reflection) ---
+STRATEGY_RULES_FILE = "/data/strategy_rules.json"
+_cached_strategy_rules = {}
+_strategy_rules_mtime = 0
+
+def load_strategy_rules() -> dict:
+    """Load strategy rules from file. Caches and reloads on file change."""
+    global _cached_strategy_rules, _strategy_rules_mtime
+    import os as _os
+    try:
+        if not _os.path.exists(STRATEGY_RULES_FILE):
+            return {}
+        mtime = _os.path.getmtime(STRATEGY_RULES_FILE)
+        if mtime != _strategy_rules_mtime:
+            with open(STRATEGY_RULES_FILE) as f:
+                import json as _json
+                _cached_strategy_rules = _json.load(f)
+                _strategy_rules_mtime = mtime
+        # Stale check: if rules are older than 48h, ignore them
+        from datetime import datetime as _dt, timedelta as _td
+        updated = _cached_strategy_rules.get("updated_at", "")
+        if updated:
+            try:
+                age = _dt.utcnow() - _dt.fromisoformat(updated)
+                if age > _td(hours=48):
+                    return {}
+            except:
+                pass
+        return _cached_strategy_rules
+    except:
+        return {}
+
+def is_blocked_by_rules(symbol: str, direction: str, hour: int, rules: dict) -> str:
+    """Check if symbol/direction/hour is blocked. Returns reason or empty string."""
+    r = rules.get("rules", {})
+    # Normalize symbol for comparison (rules may use "BTC", orchestrator uses "BTCUSDT")
+    sym_norm = symbol.replace("USDT", "").replace("USD", "").upper()
+    # Symbol+direction blocks
+    for block in r.get("symbol_direction_blocks", []):
+        block_sym = block.get("symbol", "").replace("USDT", "").replace("USD", "").upper()
+        if block_sym == sym_norm and block.get("direction") == direction:
+            return f"STRATEGY_BLOCK: {symbol} {direction} blocked by reflection rules"
+    # Hour restrictions
+    if hour in r.get("hour_restrictions", []):
+        return f"STRATEGY_BLOCK: hour {hour:02d}:00 blocked by reflection rules"
+    return ""
+
 
 # ---------------------------------------------------------------------------
 # Deterministic tables (replace LLM decisions)
@@ -85,11 +133,11 @@ def deterministic_leverage(confluence_score: float) -> int:
 def deterministic_size(confluence_score: float) -> float:
     """Position size from hardcoded table. No LLM involved."""
     if confluence_score >= 85:
-        return 0.10
+        return 0.25
     elif confluence_score >= 75:
-        return 0.08
+        return 0.20
     else:
-        return 0.06
+        return 0.15
 
 
 # ---------------------------------------------------------------------------
@@ -422,7 +470,23 @@ async def analysis_cycle():
         for s in active_symbols:
             clear_pending_order(s)
 
+        # Load strategy rules from learning agent
+        sr = load_strategy_rules()
+        sr_rules = sr.get("rules", {})
+        sr_version = sr.get("version", 0)
+        sr_blocks = sr_rules.get("symbol_direction_blocks", [])
+        sr_hours = sr_rules.get("hour_restrictions", [])
+        sr_conf_adj = sr_rules.get("confluence_threshold_adj", 0)
+        sr_long_adj = sr_rules.get("long_penalty_adj", 0)
+        sr_sl_adj = sr_rules.get("atr_sl_multiplier_adj", 0.0)
+        sr_tp_adj = sr_rules.get("atr_tp_multiplier_adj", 0.0)
+
+        effective_threshold = CONFLUENCE_THRESHOLD + sr_conf_adj
+
         print(f"\n[{datetime.now().strftime('%H:%M')}] Positions: {num_positions}/{MAX_POSITIONS}")
+        if sr_version:
+            print(f"        Strategy rules: v{sr_version}, {len(sr_blocks)} blocks, {len(sr_hours)} hour restrictions, conf_adj={sr_conf_adj:+d}, long_adj={sr_long_adj:+d}, sl_adj={sr_sl_adj:+.2f}, tp_adj={sr_tp_adj:+.2f}")
+
 
         # 2. CRITICAL LOSS CHECK
         positions_losing = []
@@ -591,7 +655,25 @@ async def analysis_cycle():
 
             score = long_score if confluence_dir == "long" else short_score
 
-            if score['total'] > best_score:
+            # --- STRATEGY RULE CHECKS ---
+            block_reason = is_blocked_by_rules(sym, confluence_dir, datetime.now().hour, sr)
+            if block_reason:
+                print(f"        {sym}: {block_reason}")
+                continue
+
+            # Apply long penalty from strategy rules
+            effective_score = score['total']
+            if confluence_dir == "long" and sr_long_adj > 0:
+                effective_score -= sr_long_adj
+                if effective_score < effective_threshold:
+                    print(f"        {sym}: LONG penalty applied ({sr_long_adj:+d}), effective={effective_score:.1f} < {effective_threshold}")
+                    continue
+
+            # Check against effective threshold (base + strategy adj)
+            if effective_score < effective_threshold:
+                continue
+
+            if effective_score > best_score:
                 if check_correlation_guard(sym, confluence_dir, position_details):
                     best_candidate = {
                         "symbol": sym,
@@ -603,13 +685,13 @@ async def analysis_cycle():
                         "tech": tech,
                         "fib": fib
                     }
-                    best_score = score['total']
+                    best_score = effective_score
 
         if not best_candidate:
-            print(f"        No symbol meets confluence threshold ({CONFLUENCE_THRESHOLD})")
+            print(f"        No symbol meets confluence threshold ({effective_threshold})")
             append_ai_decision_event({
                 "type": "DETERMINISTIC_SCAN", "action": "HOLD",
-                "rationale": f"No symbol reached confluence >= {CONFLUENCE_THRESHOLD}"
+                "rationale": f"No symbol reached effective threshold >= {effective_threshold}"
             })
             return
 
@@ -698,11 +780,21 @@ async def analysis_cycle():
         price = float(tf_15m.get("price", 0))
 
         if atr > 0 and price > 0:
-            sl_pct = (ATR_SL_MULTIPLIER * atr) / price
-            tp_pct = (ATR_TP_MULTIPLIER * atr) / price
+            sl_pct = ((ATR_SL_MULTIPLIER + sr_sl_adj) * atr) / price
+            tp_pct = ((ATR_TP_MULTIPLIER + sr_tp_adj) * atr) / price
         else:
             sl_pct = 0.02
             tp_pct = 0.03
+
+        # --- FEE PROFITABILITY FILTER ---
+        if tp_pct * 100 < MIN_TP_PCT:
+            print(f"        FEE_FILTER: {sym} {direction.upper()} TP={tp_pct*100:.2f}% < min {MIN_TP_PCT}% (not profitable after fees)")
+            append_ai_decision_event({
+                "type": "FEE_FILTER_BLOCK", "symbol": sym, "action": "HOLD",
+                "tp_pct": tp_pct * 100, "min_tp_pct": MIN_TP_PCT,
+                "rationale": f"TP {tp_pct*100:.2f}% too small, would lose money to fees"
+            })
+            return
 
         # Calculate limit entry price
         entry_price = calculate_limit_price(price, direction, tech, fib, SNIPER_BUFFER_PCT)

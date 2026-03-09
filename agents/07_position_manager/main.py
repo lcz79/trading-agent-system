@@ -45,7 +45,6 @@ IS_TESTNET = os.getenv("BYBIT_TESTNET", "false").lower() == "true"
 # Hyperliquid API Configuration
 HYPERLIQUID_API_KEY = os.getenv("HYPERLIQUID_API_KEY")
 HYPERLIQUID_API_SECRET = os.getenv("HYPERLIQUID_API_SECRET")
-HYPERLIQUID_TESTNET = os.getenv("HYPERLIQUID_TESTNET", "false").lower() == "true"
 # Se usi Hedge Mode su Bybit (posizioni long/short contemporanee),
 # metti BYBIT_HEDGE_MODE=true. Se non sei sicuro, lascialo false.
 HEDGE_MODE = os.getenv("BYBIT_HEDGE_MODE", "false").lower() == "true"

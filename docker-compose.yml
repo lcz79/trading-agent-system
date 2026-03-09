@@ -112,10 +112,10 @@ services:
       - "8010:8000"
     environment:
       - PYTHONUNBUFFERED=1
-      - EVOLUTION_INTERVAL_HOURS=48
-      - MIN_TRADES_FOR_EVOLUTION=5
-      - BACKTEST_IMPROVEMENT_THRESHOLD=0.5
-      - MAX_STRATEGY_ARCHIVE=20
+      - REFLECTION_INTERVAL_HOURS=72
+      - MIN_TRADES_FOR_REFLECTION=10
+      - BACKTEST_DAYS=30
+      - FAST_OPEN_CONFLUENCE_THRESHOLD=65
     env_file: .env
     restart: always
     volumes:

@@ -1,14 +1,7 @@
-FROM python:3.9-slim
-
+FROM python:3.10-slim
 WORKDIR /app
-
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-
-COPY . .
-
-# IMPORTANTE: Espone la 8080
+RUN pip install --no-cache-dir fastapi uvicorn httpx
+COPY main_v2.py main.py
+COPY dashboard.html .
 EXPOSE 8080
-
-# IMPORTANTE: Avvia Streamlit specificando la porta 8080
-CMD ["streamlit", "run", "app.py", "--server.port=8080", "--server.address=0.0.0.0"]
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080"]
