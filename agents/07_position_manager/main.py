@@ -96,7 +96,7 @@ AI_DECISIONS_FILE = os.getenv("AI_DECISIONS_FILE", "/data/ai_decisions.json")
 TRAILING_STATE_FILE = os.getenv("TRAILING_STATE_FILE", "/data/trailing_state.json")
 # --- LEARNING AGENT ---
 LEARNING_AGENT_URL = os.getenv("LEARNING_AGENT_URL", "http://10_learning_agent:8000").strip()
-DEFAULT_SIZE_PCT = float(os.getenv("DEFAULT_SIZE_PCT", "0.15"))
+DEFAULT_SIZE_PCT = float(os.getenv("DEFAULT_SIZE_PCT", "0.06"))
 # --- DEBUG CONFIGURATION ---
 # Comma-separated list of symbols to show detailed debug logs (e.g., "BTCUSDT,ETHUSDT")
 DEBUG_SYMBOLS = [s.strip() for s in os.getenv("DEBUG_SYMBOLS", "BTCUSDT").split(",") if s.strip()]
@@ -1420,6 +1420,7 @@ def record_trade_for_learning(
     duration_minutes: int,
     market_conditions: Optional[dict] = None,
     intent_id: Optional[str] = None,
+    size_pct: Optional[float] = None,
 ):
     try:
         side_dir = normalize_position_side(side_raw) or "long"
@@ -1431,6 +1432,7 @@ def record_trade_for_learning(
             else:
                 pnl_raw = (entry_price - exit_price) / entry_price
         pnl_pct = pnl_raw * leverage * 100.0
+        effective_size_pct = size_pct if size_pct is not None else DEFAULT_SIZE_PCT
         record_closed_trade(
             symbol=asset,
             side=side_dir,
@@ -1438,7 +1440,7 @@ def record_trade_for_learning(
             exit_price=exit_price,
             pnl_pct=pnl_pct,
             leverage=leverage,
-            size_pct=DEFAULT_SIZE_PCT,
+            size_pct=effective_size_pct,
             duration_minutes=duration_minutes,
             market_conditions=market_conditions or {},
             intent_id=intent_id,
