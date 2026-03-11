@@ -215,6 +215,40 @@ class HyperLiquidTrader:
             print(f"❌ Eccezione durante piazzamento SL: {e}")
             return {"status": "error", "error": str(e)}
 
+    def _place_take_profit(self, symbol: str, is_buy_tp: bool, size: float, trigger_price: float):
+        """
+        Piazza un ordine Trigger Market (Take Profit) con reduce_only=True.
+        """
+        print(f"🎯 Piazzando TAKE PROFIT per {symbol} a ${trigger_price} (Size: {size})")
+
+        order_type = {
+            "trigger": {
+                "triggerPx": float(trigger_price),
+                "isMarket": True,
+                "tpsl": "tp"
+            }
+        }
+
+        try:
+            result = self.exchange.order(
+                name=symbol,
+                is_buy=is_buy_tp,
+                sz=size,
+                limit_px=float(trigger_price),
+                order_type=order_type,
+                reduce_only=True
+            )
+
+            if result["status"] == "ok":
+                print(f"✅ Take Profit piazzato: {result['response']['data']['statuses'][0]}")
+            else:
+                print(f"❌ Errore piazzamento Take Profit: {result}")
+            return result
+
+        except Exception as e:
+            print(f"❌ Eccezione durante piazzamento TP: {e}")
+            return {"status": "error", "error": str(e)}
+
     # ----------------------------------------------------------------------
     #                       ESECUZIONE SEGNALE COMPLETA
     # ----------------------------------------------------------------------
@@ -246,6 +280,11 @@ class HyperLiquidTrader:
         stop_loss_percent = order_json.get("stop_loss_percent", 0)/100
         sl_percent = float(stop_loss_percent)
         sl_price_explicit = order_json.get("stop_loss_price")
+
+        # Parametri Take Profit (Percentuale o Prezzo Fisso)
+        take_profit_percent = order_json.get("take_profit_percent", 0)/100
+        tp_percent = float(take_profit_percent)
+        tp_price_explicit = order_json.get("take_profit_price")
 
         # 2. Impostazione Leva
         leverage_result = self.set_leverage_for_symbol(symbol, leverage, is_cross=True)
@@ -341,7 +380,38 @@ class HyperLiquidTrader:
                 # Arricchisce la risposta con i dati dello SL
                 res["stop_loss_order"] = sl_res
                 res["stop_loss_price"] = final_sl_price
-        
+
+            # 6. Gestione Take Profit (safety net per crash/disconnessioni)
+            final_tp_price = None
+
+            # A) Priorità al prezzo esplicito
+            if tp_price_explicit:
+                final_tp_price = float(tp_price_explicit)
+
+            # B) Calcolo percentuale
+            elif tp_percent > 0:
+                print(f"🧮 Calcolo TP automatico: {tp_percent*100:.2f}% da {mark_px}")
+                if is_buy:  # Se sono Long, TP è sopra
+                    raw_tp = mark_px * (1 + tp_percent)
+                else:       # Se sono Short, TP è sotto
+                    raw_tp = mark_px * (1 - tp_percent)
+
+                final_tp_price = self._round_price(raw_tp)
+
+            # C) Invio ordine Trigger TP
+            if final_tp_price:
+                is_tp_buy = not is_buy
+
+                tp_res = self._place_take_profit(
+                    symbol=symbol,
+                    is_buy_tp=is_tp_buy,
+                    size=size_float,
+                    trigger_price=final_tp_price
+                )
+
+                res["take_profit_order"] = tp_res
+                res["take_profit_price"] = final_tp_price
+
         return res
 
     # ----------------------------------------------------------------------

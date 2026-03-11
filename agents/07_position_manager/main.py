@@ -1140,6 +1140,11 @@ def _save_hl_trail_state():
 
 _load_hl_trail_state()
 
+# Max time a position can stay open without hitting trailing (hours)
+HL_MAX_POSITION_AGE_HOURS = int(os.getenv("HL_MAX_POSITION_AGE_HOURS", "48"))
+# Max loss before force-closing (leveraged ROI %)
+HL_MAX_LOSS_PCT = float(os.getenv("HL_MAX_LOSS_PCT", "8.0"))
+
 def check_hl_trailing_stops():
     """
     Hyperliquid trailing stop implementation.
@@ -1150,7 +1155,11 @@ def check_hl_trailing_stops():
     Stage 3: ROI >= 5.0% leveraged -> trail at 1.2x ATR
     Stage 4: ROI >= 8.0% leveraged -> trail at 0.8x ATR
 
-    Also: break-even protection at ROI >= 1.0%
+    Also:
+    - Break-even protection at ROI >= 3.0%
+    - Stale position timeout (HL_MAX_POSITION_AGE_HOURS)
+    - Max loss protection (HL_MAX_LOSS_PCT)
+    - SL order verification (re-place if missing)
     """
     global _hl_trailing_state
 
@@ -1172,6 +1181,16 @@ def check_hl_trailing_stops():
         mids = hl_bot.info.all_mids()
     except Exception:
         return
+
+    # Get open orders to check for existing SLs
+    existing_sl_symbols = set()
+    try:
+        open_orders = hl_bot.info.open_orders(hl_bot.account_address)
+        for order in open_orders:
+            if order.get("reduceOnly", False):
+                existing_sl_symbols.add(order.get("coin", ""))
+    except Exception:
+        open_orders = []
 
     for pos in positions:
         try:
@@ -1201,6 +1220,76 @@ def check_hl_trailing_stops():
 
             roi_leveraged = roi_raw * leverage * 100  # as percentage
 
+            key = f"{symbol}_{side}"
+            state = _hl_trailing_state.get(key, {})
+
+            # Track when we first saw this position
+            if "first_seen" not in state:
+                state["first_seen"] = datetime.now().isoformat()
+                _hl_trailing_state[key] = state
+
+            # --- SAFETY CHECK 1: Max loss protection ---
+            if roi_leveraged <= -HL_MAX_LOSS_PCT:
+                print(f"   \U0001f6a8 HL MAX LOSS: {symbol} {side.upper()} ROI={roi_leveraged:.1f}% <= -{HL_MAX_LOSS_PCT}% -> CLOSING")
+                try:
+                    hl_bot.exchange.market_close(symbol)
+                    _hl_trailing_state.pop(key, None)
+                    record_closed_trade(
+                        symbol=symbol, side=side, entry_price=entry_price,
+                        exit_price=mark_price, pnl_pct=round(roi_raw * 100, 2),
+                        leverage=leverage, size_pct=0, duration_minutes=0,
+                        market_conditions={"exit_reason": "max_loss"}
+                    )
+                except Exception as e:
+                    print(f"   \u26a0\ufe0f HL max loss close failed: {e}")
+                continue
+
+            # --- SAFETY CHECK 2: Stale position timeout ---
+            try:
+                first_seen = datetime.fromisoformat(state.get("first_seen", ""))
+                age_hours = (datetime.now() - first_seen).total_seconds() / 3600
+                if age_hours > HL_MAX_POSITION_AGE_HOURS and roi_leveraged < 1.0:
+                    print(f"   \u23f0 HL STALE: {symbol} {side.upper()} age={age_hours:.0f}h ROI={roi_leveraged:.1f}% -> CLOSING")
+                    try:
+                        hl_bot.exchange.market_close(symbol)
+                        _hl_trailing_state.pop(key, None)
+                        record_closed_trade(
+                            symbol=symbol, side=side, entry_price=entry_price,
+                            exit_price=mark_price, pnl_pct=round(roi_raw * 100, 2),
+                            leverage=leverage, size_pct=0, duration_minutes=int(age_hours * 60),
+                            market_conditions={"exit_reason": "stale_timeout"}
+                        )
+                    except Exception as e:
+                        print(f"   \u26a0\ufe0f HL stale close failed: {e}")
+                    continue
+            except (ValueError, TypeError):
+                pass
+
+            # --- SAFETY CHECK 3: Verify SL exists on exchange ---
+            if symbol not in existing_sl_symbols and roi_leveraged < 1.5:
+                # No SL order on exchange and not in trailing yet - place emergency SL
+                if atr_val and atr_val > 0:
+                    emergency_sl_dist = (atr_val * 2.0) / entry_price
+                else:
+                    emergency_sl_dist = 0.03  # 3% fallback
+                emergency_sl_dist = min(emergency_sl_dist, 0.05)  # cap at 5%
+
+                if side == "long":
+                    emergency_sl = hl_bot._round_price(entry_price * (1 - emergency_sl_dist))
+                else:
+                    emergency_sl = hl_bot._round_price(entry_price * (1 + emergency_sl_dist))
+
+                # Only place if we haven't recently placed one
+                last_emergency = state.get("last_emergency_sl", 0)
+                if abs(emergency_sl - last_emergency) / entry_price > 0.001:
+                    try:
+                        is_buy_sl = (side == "short")
+                        hl_bot._place_stop_loss(symbol, is_buy_sl, size, emergency_sl)
+                        state["last_emergency_sl"] = emergency_sl
+                        print(f"   \U0001f6e1 HL Emergency SL placed: {symbol} {side.upper()} SL={emergency_sl:.4f} (no SL on exchange)")
+                    except Exception as e:
+                        print(f"   \u26a0\ufe0f HL emergency SL failed: {e}")
+
             # Get ATR for trailing distance
             atr_val = None
             try:
@@ -1210,13 +1299,10 @@ def check_hl_trailing_stops():
             except Exception:
                 pass
 
-            # Determine trailing stage and ATR multiplier
+            # --- TRAILING: only activate at ROI >= 1.5% ---
             if roi_leveraged < 1.5:
-                # Not profitable enough for trailing - but check if we need break-even
-                if roi_leveraged >= 1.5 and symbol in _hl_trailing_state:
-                    pass  # Will apply break-even below
-                else:
-                    continue
+                _hl_trailing_state[key] = state
+                continue
 
             # Multi-stage trailing
             if roi_leveraged >= 8.0:
@@ -1344,6 +1430,10 @@ def position_monitor_loop():
                 check_hl_trailing_stops()
             except Exception as e:
                 print(f"HL position monitor error: {e}")
+            try:
+                check_recent_closes_and_save_cooldown()
+            except Exception:
+                pass
 
         time.sleep(30)
 Thread(target=position_monitor_loop, daemon=True).start()
@@ -2869,13 +2959,24 @@ def open_position(order: OrderRequest):
             portion = max(0.0, min(1.0, portion))
             lev = float(order.leverage or 1.0)
             lev = max(1.0, min(10.0, lev))
+            # Use ATR-based SL/TP from orchestrator (sl_pct/tp_pct are fractions, e.g. 0.035)
+            sl_from_orch = float(order.sl_pct or 0)
+            tp_from_orch = float(order.tp_pct or 0)
+
+            # Convert fractions to percentages for execute_signal (e.g. 0.035 -> 3.5)
+            sl_pct_val = sl_from_orch * 100 if sl_from_orch > 0 else 2.0  # fallback 2%
+            tp_pct_val = tp_from_orch * 100 if tp_from_orch > 0 else 0    # no TP if not provided
+
+            print(f"🔧 HL ENTRY: {base} {requested_dir} lev={lev}x size={portion*100:.0f}% SL={sl_pct_val:.2f}% TP={tp_pct_val:.2f}%")
+
             sig = {
                 "operation": "open",
                 "symbol": base,
                 "direction": requested_dir,
                 "target_portion_of_balance": portion,
                 "leverage": lev,
-                "stop_loss_percent": 2,
+                "stop_loss_percent": sl_pct_val,
+                "take_profit_percent": tp_pct_val,
                 "reason": "PM open_position (HL)",
             }
             res = hl_bot.execute_signal(sig)

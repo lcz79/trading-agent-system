@@ -49,6 +49,113 @@ MAX_LEVERAGE = 4
 
 AI_DECISIONS_FILE = "/data/ai_decisions.json"
 
+# --- EQUITY SNAPSHOTS & MARKET REGIME ---
+EQUITY_SNAPSHOTS_FILE = "/data/equity_snapshots_v2.json"
+MARKET_REGIME_FILE = "/data/market_regime.json"
+_last_equity_snapshot = 0  # timestamp of last snapshot
+EQUITY_SNAPSHOT_INTERVAL = 3600  # save every hour
+
+def save_equity_snapshot(equity: float, margin_used: float, num_positions: int):
+    """Save hourly equity snapshot for dashboard chart."""
+    global _last_equity_snapshot
+    import time as _time
+    now = _time.time()
+    if now - _last_equity_snapshot < EQUITY_SNAPSHOT_INTERVAL:
+        return
+    _last_equity_snapshot = now
+    try:
+        snapshots = []
+        if os.path.exists(EQUITY_SNAPSHOTS_FILE):
+            with open(EQUITY_SNAPSHOTS_FILE) as f:
+                snapshots = json.load(f)
+        if not isinstance(snapshots, list):
+            snapshots = []
+        snapshots.append({
+            "timestamp": datetime.now().isoformat(),
+            "equity": round(equity, 2),
+            "margin_used": round(margin_used, 0),
+            "positions": num_positions,
+        })
+        # Keep last 30 days (~720 hourly snapshots)
+        snapshots = snapshots[-720:]
+        with open(EQUITY_SNAPSHOTS_FILE, "w") as f:
+            json.dump(snapshots, f)
+    except Exception as e:
+        print(f"Equity snapshot error: {e}")
+
+def update_market_regime(tech_data_map: dict):
+    """Update market regime based on BTC+ETH technical data."""
+    try:
+        btc = tech_data_map.get("BTCUSDT", {})
+        eth = tech_data_map.get("ETHUSDT", {})
+        if not btc and not eth:
+            return
+
+        btc_4h = btc.get("timeframes", {}).get("4h", {})
+        eth_4h = eth.get("timeframes", {}).get("4h", {})
+
+        # Simple regime detection
+        btc_trend = btc_4h.get("ema_trend", "")
+        btc_adx = float(btc_4h.get("adx", 0))
+        eth_trend = eth_4h.get("ema_trend", "")
+
+        bullish_signals = 0
+        bearish_signals = 0
+
+        if "bullish" in str(btc_trend).lower():
+            bullish_signals += 2
+        elif "bearish" in str(btc_trend).lower():
+            bearish_signals += 2
+
+        if "bullish" in str(eth_trend).lower():
+            bullish_signals += 1
+        elif "bearish" in str(eth_trend).lower():
+            bearish_signals += 1
+
+        if btc_adx > 25:
+            if bullish_signals > bearish_signals:
+                bullish_signals += 1
+            else:
+                bearish_signals += 1
+
+        if bullish_signals >= 3:
+            regime = "TRENDING_UP"
+            confidence = min(90, 50 + bullish_signals * 10)
+            prefer = "long"
+        elif bearish_signals >= 3:
+            regime = "TRENDING_DOWN"
+            confidence = min(90, 50 + bearish_signals * 10)
+            prefer = "short"
+        elif bullish_signals > bearish_signals:
+            regime = "RANGING_BULLISH"
+            confidence = 50
+            prefer = "long"
+        elif bearish_signals > bullish_signals:
+            regime = "RANGING_BEARISH"
+            confidence = 50
+            prefer = "short"
+        else:
+            regime = "RANGING"
+            confidence = 40
+            prefer = "none"
+
+        regime_data = {
+            "regime": regime,
+            "confidence": confidence,
+            "updated_at": datetime.now().isoformat(),
+            "adjustments": {
+                "threshold_modifier": 3.0 if "TRENDING" in regime else 0.0,
+                "sl_multiplier": 1.2 if "TRENDING" in regime else 1.0,
+                "tp_multiplier": 1.3 if "TRENDING" in regime else 1.0,
+                "size_multiplier": 1.2 if confidence >= 70 else 1.0,
+                "prefer_direction": prefer,
+            },
+        }
+        with open(MARKET_REGIME_FILE, "w") as f:
+            json.dump(regime_data, f, indent=2)
+    except Exception as e:
+        print(f"Market regime update error: {e}")
+
 # --- CORRELATION GUARD ---
 CORRELATED_PAIRS = {"BTCUSDT": "ETHUSDT", "ETHUSDT": "BTCUSDT"}
 
@@ -466,6 +573,12 @@ async def analysis_cycle():
 
         num_positions = len(active_symbols)
 
+        # Save hourly equity snapshot for dashboard
+        eq = float(portfolio.get("equity", portfolio.get("accountValue", 0)))
+        mu = float(portfolio.get("margin_used", portfolio.get("components", {}).get("margin_used", 0)))
+        if eq > 0:
+            save_equity_snapshot(eq, mu, num_positions)
+
         # Clear pending orders for symbols that are now confirmed open
         for s in active_symbols:
             clear_pending_order(s)
@@ -686,6 +799,9 @@ async def analysis_cycle():
                         "fib": fib
                     }
                     best_score = effective_score
+
+        # Update market regime from tech data
+        update_market_regime(tech_data_map)
 
         if not best_candidate:
             print(f"        No symbol meets confluence threshold ({effective_threshold})")
