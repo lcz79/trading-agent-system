@@ -1265,9 +1265,18 @@ def check_hl_trailing_stops():
             except (ValueError, TypeError):
                 pass
 
+            # Get ATR for trailing distance (needed by both emergency SL and trailing)
+            atr_val = None
+            try:
+                atr_result = get_atr_for_symbol(symbol)
+                if atr_result and atr_result[0]:
+                    atr_val = atr_result[0]
+            except Exception:
+                pass
+
             # --- SAFETY CHECK 3: Verify SL exists on exchange ---
             if symbol not in existing_sl_symbols and roi_leveraged < 1.5:
-                # No SL order on exchange and not in trailing yet - place emergency SL
+                # No SL/TP order on exchange - place emergency SL
                 if atr_val and atr_val > 0:
                     emergency_sl_dist = (atr_val * 2.0) / entry_price
                 else:
@@ -1289,15 +1298,6 @@ def check_hl_trailing_stops():
                         print(f"   \U0001f6e1 HL Emergency SL placed: {symbol} {side.upper()} SL={emergency_sl:.4f} (no SL on exchange)")
                     except Exception as e:
                         print(f"   \u26a0\ufe0f HL emergency SL failed: {e}")
-
-            # Get ATR for trailing distance
-            atr_val = None
-            try:
-                atr_result = get_atr_for_symbol(symbol)
-                if atr_result and atr_result[0]:
-                    atr_val = atr_result[0]
-            except Exception:
-                pass
 
             # --- TRAILING: only activate at ROI >= 1.5% ---
             if roi_leveraged < 1.5:

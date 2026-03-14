@@ -180,6 +180,22 @@ class HyperLiquidTrader:
     # ----------------------------------------------------------------------
     #                        ESECUZIONE SEGNALE AI
     # ----------------------------------------------------------------------
+    def cancel_reduce_only_orders(self, symbol: str):
+        """Cancel all existing reduce-only (SL/TP) orders for a symbol."""
+        try:
+            open_orders = self.info.open_orders(self.account_address)
+            cancelled = 0
+            for order in open_orders:
+                if order.get("coin") == symbol and order.get("reduceOnly", False):
+                    oid = order.get("oid")
+                    if oid:
+                        self.exchange.cancel(symbol, oid)
+                        cancelled += 1
+            if cancelled > 0:
+                print(f"🗑️ Cancelled {cancelled} existing SL/TP orders for {symbol}")
+        except Exception as e:
+            print(f"⚠️ Error cancelling orders for {symbol}: {e}")
+
     def _place_stop_loss(self, symbol: str, is_buy_sl: bool, size: float, trigger_price: float):
         """
         Piazza un ordine Trigger Market (Stop Loss) con reduce_only=True.
@@ -346,8 +362,13 @@ class HyperLiquidTrader:
             0.01 # Slippage tolerance 1%
         )
 
-        # 5. Gestione Stop Loss (Solo se l'ordine di apertura è OK)
+        # 5. Gestione Stop Loss + Take Profit (Solo se l'ordine di apertura è OK)
         if res["status"] == "ok":
+            # Cancel any pre-existing SL/TP for this symbol (prevents duplicates)
+            import time as _time
+            _time.sleep(0.3)
+            self.cancel_reduce_only_orders(symbol)
+
             final_sl_price = None
 
             # A) Priorità al prezzo esplicito

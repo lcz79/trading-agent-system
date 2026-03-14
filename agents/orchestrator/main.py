@@ -11,10 +11,11 @@ URLS = {
     "fib": "http://03_fibonacci_agent:8000",
 }
 SYMBOLS = [
-    "BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT",
-    "AVAXUSDT", "DOGEUSDT", "LINKUSDT", "ADAUSDT", "SUIUSDT", "PEPEUSDT",
+    "BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT",
+    "AVAXUSDT", "DOGEUSDT", "ADAUSDT", "SUIUSDT",
     "PAXGUSDT",
 ]
+# NOTE: XRPUSDT, LINKUSDT, PEPEUSDT removed - not available on HL testnet
 DISABLED_SYMBOLS = os.getenv("DISABLED_SYMBOLS", "").split(",")
 DISABLED_SYMBOLS = [s.strip() for s in DISABLED_SYMBOLS if s.strip()]
 
