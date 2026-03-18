@@ -21,7 +21,7 @@ from components.ai_reasoning import render_ai_reasoning
 import numpy as np
 
 # --- COSTANTI ---
-DEFAULT_INITIAL_CAPITAL = 1000  # Capital iniziale di default per calcoli ROI
+DEFAULT_INITIAL_CAPITAL = 134.80  # Capital iniziale di default per calcoli ROI
 TRADING_DAYS_PER_YEAR = 252     # Giorni di trading annuali per Sharpe Ratio
 
 # --- CONFIGURAZIONE ---

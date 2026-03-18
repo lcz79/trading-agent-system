@@ -94,10 +94,10 @@ services:
       - FORCE_LIMIT_ONLY=true
       - SNIPER_BUFFER_PCT=0.0008
       - LIMIT_ORDER_TTL_SEC=300
-      - ATR_SL_MULTIPLIER=2.0
+      - ATR_SL_MULTIPLIER=1.5
       - ATR_TP_MULTIPLIER=3.0
-      - MIN_SIZE_PCT=0.06
-      - MAX_SIZE_PCT=0.10
+      - MIN_SIZE_PCT=0.10
+      - MAX_SIZE_PCT=0.25
     env_file: .env
     restart: always
     volumes:

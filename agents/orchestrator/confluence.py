@@ -289,7 +289,12 @@ def score_volume(tech: dict) -> float:
         zscore_score = 3.0  # above average = some activity
 
     # Take the best of the two signals
-    return min(15.0, max(spike_score, zscore_score))
+    best = max(spike_score, zscore_score)
+    # Base score: if volume data exists at all, give minimum 4 points
+    # This prevents low-volume hours (weekends, Asia) from blocking all trades
+    if best == 0 and (vol_spike > 0 or vol_zscore is not None):
+        best = 4.0
+    return min(15.0, best)
 
 
 # ---------------------------------------------------------------------------

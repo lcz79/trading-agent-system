@@ -25,7 +25,7 @@ SIMULATED_FEE_PCT = float(os.getenv("SIMULATED_FEE_PCT", "0.07"))
 # Use RESET_STARTING_DATE from .env, fallback to DASHBOARD_START_DATE
 START_DATE = os.getenv("RESET_STARTING_DATE",
     os.getenv("DASHBOARD_START_DATE", "2026-01-28"))
-START_BALANCE = float(os.getenv("RESET_STARTING_BALANCE", "50.0"))
+START_BALANCE = float(os.getenv("RESET_STARTING_BALANCE", "134.80"))
 
 
 def _safe_get(url, timeout=5):

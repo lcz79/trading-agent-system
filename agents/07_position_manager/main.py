@@ -1306,16 +1306,16 @@ def check_hl_trailing_stops():
 
             # Multi-stage trailing
             if roi_leveraged >= 8.0:
-                atr_mult = 0.8
+                atr_mult = 0.5
                 stage = 4
             elif roi_leveraged >= 5.0:
-                atr_mult = 1.2
+                atr_mult = 0.8
                 stage = 3
             elif roi_leveraged >= 3.0:
-                atr_mult = 2.0
+                atr_mult = 1.0
                 stage = 2
             else:
-                atr_mult = 3.0
+                atr_mult = 1.5
                 stage = 1
 
             # Calculate trailing distance
@@ -1333,7 +1333,7 @@ def check_hl_trailing_stops():
                     trail_dist = 0.015  # 1.5%
 
             # Clamp trail distance
-            trail_dist = max(0.003, min(trail_dist, 0.025))  # 0.3% to 2.5%
+            trail_dist = max(0.003, min(trail_dist, 0.015))  # 0.3% to 1.5%
 
             # Track peak/trough
             key = f"{symbol}_{side}"
@@ -1344,8 +1344,8 @@ def check_hl_trailing_stops():
                 state["peak_price"] = peak
                 # SL = peak * (1 - trail_dist)
                 target_sl = peak * (1 - trail_dist)
-                # Break-even: if ROI >= 1%, SL at least at entry + 0.1%
-                if roi_leveraged >= 3.0:
+                # Break-even: if ROI >= 1.5%, SL at least at entry + 0.1%
+                if roi_leveraged >= 1.5:
                     breakeven_sl = entry_price * 1.001
                     target_sl = max(target_sl, breakeven_sl)
                 # Anti-regression
@@ -1356,17 +1356,21 @@ def check_hl_trailing_stops():
                 state["trough_price"] = trough
                 # SL = trough * (1 + trail_dist)
                 target_sl = trough * (1 + trail_dist)
-                # Break-even: if ROI >= 1%, SL at most at entry - 0.1%
-                if roi_leveraged >= 3.0:
+                # Break-even: if ROI >= 1.5%, SL at most at entry - 0.1%
+                if roi_leveraged >= 1.5:
                     breakeven_sl = entry_price * 0.999
                     target_sl = min(target_sl, breakeven_sl)
-                # Anti-regression
-                prev_sl = state.get("last_sl_trigger", float('inf'))
-                if prev_sl < float('inf'):
+                # Anti-regression (only if prev_sl is a real value)
+                prev_sl = state.get("last_sl_trigger", 0)
+                if prev_sl > 0:
                     target_sl = min(target_sl, prev_sl)
 
             # Round price for Hyperliquid
             target_sl = hl_bot._round_price(target_sl)
+            if target_sl <= 0:
+                print(f"   ⚠️ Trailing SL rounded to 0 for {symbol}, skipping")
+                _hl_trailing_state[key] = state
+                continue
 
             # Check if SL needs updating (significant change)
             if prev_sl and prev_sl > 0 and prev_sl < float('inf'):
@@ -1401,6 +1405,17 @@ def check_hl_trailing_stops():
 
         except Exception as pe:
             print(f"   \u26a0\ufe0f HL trailing error for position: {pe}")
+
+    # Cleanup stale state entries for positions that no longer exist
+    active_keys = set()
+    for pos in positions:
+        sym = pos.get("symbol", "")
+        side = str(pos.get("side", "")).lower()
+        active_keys.add(f"{sym}_{side}")
+    stale = [k for k in list(_hl_trailing_state.keys()) if k not in active_keys]
+    for k in stale:
+        del _hl_trailing_state[k]
+        print(f"   🧹 Cleaned stale trailing state: {k}")
 
     _save_hl_trail_state()
 
@@ -2592,7 +2607,7 @@ def get_balance():
                         margin_used += (ep * sz) / max(lev, 1.0)
                     except Exception:
                         pass
-                buffer = 10.0
+                buffer = 5.0
                 avail = max(0.0, eq - margin_used - buffer)
                 return {
                     "equity": eq,
@@ -2623,7 +2638,7 @@ def get_balance():
         available = to_float(u.get("free"), 0.0)
         
         # Buffer per sicurezza (evita margin call)
-        buffer = 10.0
+        buffer = 5.0
         
         # Caso normale: USDT.free è disponibile e valido
         if available > 0:

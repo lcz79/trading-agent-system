@@ -20,7 +20,7 @@ DISABLED_SYMBOLS = os.getenv("DISABLED_SYMBOLS", "").split(",")
 DISABLED_SYMBOLS = [s.strip() for s in DISABLED_SYMBOLS if s.strip()]
 
 # --- CONFIGURATION ---
-MAX_POSITIONS = 10
+MAX_POSITIONS = 4
 MAX_SAME_DIRECTION = 6
 CONFLUENCE_THRESHOLD = 65
 REVERSE_THRESHOLD = float(os.getenv("REVERSE_THRESHOLD", "2.0"))
@@ -165,7 +165,7 @@ CRASH_GUARD_5M_LONG_BLOCK_PCT = float(os.getenv("CRASH_GUARD_5M_LONG_BLOCK_PCT",
 CRASH_GUARD_5M_SHORT_BLOCK_PCT = float(os.getenv("CRASH_GUARD_5M_SHORT_BLOCK_PCT", "0.6"))
 
 # --- COOLDOWN ---
-COOLDOWN_SECONDS = int(os.getenv("COOLDOWN_SECONDS", "900"))  # 15 min
+COOLDOWN_SECONDS = int(os.getenv("COOLDOWN_SECONDS", "3600"))  # 15 min
 _cooldown_tracker = {}  # {(symbol, direction): timestamp}
 
 # --- PENDING ORDER TRACKER (prevents duplicate submissions) ---
@@ -491,7 +491,7 @@ async def request_wyckoff_analysis(c: httpx.AsyncClient, symbol: str,
 
         resp = await async_post_with_retry(
             c, f"{URLS['ai']}/analyze_wyckoff",
-            json_payload=payload, timeout=30.0
+            json_payload=payload, timeout=45.0
         )
 
         if resp.status_code == 200:
@@ -705,8 +705,10 @@ async def analysis_cycle():
 
         # Filter out symbols with open positions AND symbols with recent pending orders
         scan_list = []
+        # Normalize: PM returns 'ETH', orchestrator uses 'ETHUSDT'
+        active_normalized = set(active_symbols) | set(s + 'USDT' for s in active_symbols)
         for s in SYMBOLS:
-            if s in active_symbols:
+            if s in active_normalized or s.replace('USDT','') in active_symbols:
                 continue
             if has_pending_order(s):
                 print(f"        {s}: skipped (pending order, waiting for fill)")
@@ -804,6 +806,27 @@ async def analysis_cycle():
         # Update market regime from tech data
         update_market_regime(tech_data_map)
 
+        # REGIME FILTER: block trades against market regime
+        if best_candidate:
+            try:
+                import json as _json
+                with open('/data/market_regime.json') as _f:
+                    _regime = _json.load(_f)
+                regime_name = _regime.get('regime', '')
+                direction = best_candidate['direction']
+                if 'BEARISH' in regime_name and direction == 'long':
+                    conf = best_candidate['confluence']['total']
+                    if conf < 75:  # Only block if not very strong signal
+                        print(f"        REGIME_BLOCK: {best_candidate['symbol']} LONG blocked (regime={regime_name}, conf={conf:.1f} < 75)")
+                        best_candidate = None
+                elif 'BULLISH' in regime_name and direction == 'short':
+                    conf = best_candidate['confluence']['total']
+                    if conf < 75:
+                        print(f"        REGIME_BLOCK: {best_candidate['symbol']} SHORT blocked (regime={regime_name}, conf={conf:.1f} < 75)")
+                        best_candidate = None
+            except Exception:
+                pass
+
         if not best_candidate:
             print(f"        No symbol meets confluence threshold ({effective_threshold})")
             append_ai_decision_event({
@@ -860,13 +883,13 @@ async def analysis_cycle():
 
         elif llm_direction == "none" or llm_direction == "NONE":
             # LLM uncertain - proceed ONLY if confluence >= 75
-            if confluence['total'] < 75:
-                print(f"        BLOCKED: LLM uncertain, confluence {confluence['total']:.1f} < 75")
+            if confluence["total"] < 70:
+                print(f"        BLOCKED: LLM uncertain, confluence {confluence['total']:.1f} < 70")
                 append_ai_decision_event({
                     "type": "DIRECTION_DISAGREEMENT", "symbol": sym, "action": "HOLD",
                     "confluence_direction": direction, "wyckoff_direction": "NONE",
                     "confluence_score": confluence['total'], "market_phase": llm_phase,
-                    "rationale": f"LLM uncertain (phase={llm_phase}), confluence < 75"
+                    "rationale": f"LLM uncertain (phase={llm_phase}), confluence < 70"
                 })
                 return
             else:
