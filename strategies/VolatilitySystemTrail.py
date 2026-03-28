@@ -48,7 +48,7 @@ class VolatilitySystemTrail(IStrategy):
 
     minimal_roi = {"0": 100}
 
-    stoploss = -0.15
+    stoploss = -0.08
     use_custom_stoploss = False
 
     # Trailing stop: attiva dopo 15% profitto, trail a 5% sotto il picco
@@ -61,7 +61,7 @@ class VolatilitySystemTrail(IStrategy):
     position_adjustment_enable = True
     startup_candle_count = 50
 
-    atr_mult = DecimalParameter(1.5, 3.0, default=2.0, decimals=1, space='buy', optimize=True)
+    atr_mult = DecimalParameter(1.5, 3.0, default=1.5, decimals=1, space='buy', optimize=True)
     use_macro_filter = True
     max_same_direction = 3
 
