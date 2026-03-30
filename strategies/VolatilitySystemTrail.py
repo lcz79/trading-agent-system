@@ -51,10 +51,10 @@ class VolatilitySystemTrail(IStrategy):
     stoploss = -0.08
     use_custom_stoploss = False
 
-    # Trailing stop: attiva dopo 15% profitto, trail a 5% sotto il picco
+    # Trailing stop: attiva dopo 10% profitto, trail a 5% sotto il picco
     trailing_stop = True
     trailing_stop_positive = 0.05
-    trailing_stop_positive_offset = 0.15
+    trailing_stop_positive_offset = 0.10
     trailing_only_offset_is_reached = True
 
     ignore_roi_if_entry_signal = True
