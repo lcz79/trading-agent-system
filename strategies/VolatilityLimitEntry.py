@@ -1,22 +1,21 @@
 """
-VolatilityLimitEntry - ATR Breakout 3h con limit order su pullback
+VolatilityLimitEntry - ATR Breakout 3h con limit order su pullback (15min)
 
-Mantiene il segnale ATR3h (che funzionava in backtest con 67% winrate)
-ma invece di entrare a mercato sul breakout (tardi, prezzo già mosso),
-piazza un ordine limit al 50% del movimento — aspetta il pullback.
+Timeframe 15min: analisi ogni 15 minuti per cogliere opportunità intraday.
+Segnale direzione: ATR 3h (resample) + SMA200 macro filter.
+Conferma entry: RSI 15min per evitare segnali deboli/esauriti.
+Limit order: piazzato al 50% del breakout move, attende il pullback.
+Scade in 90 minuti se non riempito.
 
 Esempio:
-  - BTC a 100, breakout a 107 (+7% su 3h, > ATR)
-  - Invece di entrare a 107, piazza limit a 103.5 (50% del move)
-  - Se BTC torna a 103.5 → ordine riempito a prezzo migliore
-  - Se non torna entro 3 ore → ordine cancellato, skip del trade
+  - BTC a 100, breakout 3h a 107 (+7%, > ATR)
+  - RSI 15min non in ipercomprato → segnale valido
+  - Limit piazzato a 103.5 (50% del move)
+  - Se BTC torna a 103.5 → trade aperto a prezzo ottimale
+  - Se non torna in 90min → ordine cancellato, aspetta prossimo segnale
 
-Vantaggi:
-  - Entry price migliore (non insegue il picco)
-  - Filtro naturale: i falsi breakout tornano al livello e si entra,
-    i breakout forti NON tornano (skip) → evita entrate su trend già esaurito
-  - Exit: SOLO trailing stop (no exit signal che taglia i winner)
-  - Trailing: attivo da +8%, trail 4%
+Exit: SOLO trailing stop (niente exit signal che taglia i winner)
+Trailing: attivo da +8%, trail 4%
 """
 
 import numpy as np
@@ -56,7 +55,7 @@ def calc_atr(df: DataFrame, period: int = 14) -> pd.Series:
 class VolatilityLimitEntry(IStrategy):
     INTERFACE_VERSION = 3
 
-    timeframe = '1h'
+    timeframe = '15m'
     can_short = True
 
     order_types = {
@@ -66,8 +65,8 @@ class VolatilityLimitEntry(IStrategy):
         'stoploss_on_exchange': False
     }
 
-    # Ordine limit scade dopo 3 ore se non riempito
-    unfilledtimeout = {'entry': 180, 'exit': 60, 'unit': 'minutes'}
+    # Ordine limit scade dopo 90 minuti se non riempito (6 candele 15min)
+    unfilledtimeout = {'entry': 90, 'exit': 60, 'unit': 'minutes'}
 
     minimal_roi = {"0": 100}
 
@@ -82,27 +81,29 @@ class VolatilityLimitEntry(IStrategy):
 
     ignore_roi_if_entry_signal = True
     position_adjustment_enable = False
-    startup_candle_count = 50
+    # 800 candele 15min = ~8 giorni + 200 candele per SMA200 su 1h (= 800 candele 15min)
+    startup_candle_count = 850
 
     # Quanto risaliamo/scendiamo rispetto al breakout per piazzare il limit
-    # 0.5 = 50% del move (pullback a metà), 0.3 = 30%, 0.7 = 70%
     pullback_ratio = DecimalParameter(0.2, 0.7, default=0.5, decimals=1, space='buy', optimize=True)
     atr_mult = DecimalParameter(1.5, 3.0, default=1.5, decimals=1, space='buy', optimize=True)
+    # RSI: evita entry quando il momentum è già esaurito
+    rsi_limit_long = IntParameter(50, 75, default=65, space='buy', optimize=True)
+    rsi_limit_short = IntParameter(25, 50, default=35, space='buy', optimize=True)
 
     use_macro_filter = True
     max_same_direction = 3
 
     def populate_indicators(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
+        # Segnale direzione: resample a 3h dal 15min
         df_3h = resample_to_3h(dataframe)
         df_3h['atr'] = calc_atr(df_3h) * self.atr_mult.value
         df_3h['close_change'] = df_3h['close'].diff()
-        df_3h['prev_close'] = df_3h['close'].shift(1)  # close pre-breakout
 
         df_3h = df_3h.rename(columns={
             'atr': 'atr_3h',
             'close_change': 'close_change_3h',
-            'prev_close': 'prev_close_3h',
-        })[['date', 'atr_3h', 'close_change_3h', 'prev_close_3h']]
+        })[['date', 'atr_3h', 'close_change_3h']]
 
         dataframe = pd.merge_asof(
             dataframe.sort_values('date'),
@@ -111,13 +112,31 @@ class VolatilityLimitEntry(IStrategy):
             direction='backward'
         )
 
-        dataframe['sma200_1h'] = dataframe['close'].rolling(200).mean()
+        # SMA200 su base 1h — equivale a rolling(800) su 15min
+        dataframe['sma200_1h'] = dataframe['close'].rolling(800).mean()
+
+        # RSI 14 su 15min per confermare il momentum
+        delta = dataframe['close'].diff()
+        gain = delta.where(delta > 0, 0.0).ewm(alpha=1 / 14, min_periods=14).mean()
+        loss = (-delta.where(delta < 0, 0.0)).ewm(alpha=1 / 14, min_periods=14).mean()
+        rs = gain / loss
+        dataframe['rsi'] = 100 - (100 / (1 + rs))
 
         return dataframe
 
     def populate_entry_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
+        # Segnale ATR 3h: breakout direzionale
         long_signal = dataframe['close_change_3h'] > dataframe['atr_3h'].shift(1)
         short_signal = dataframe['close_change_3h'] * -1 > dataframe['atr_3h'].shift(1)
+
+        # Conferma RSI 15min: non entrare se il momentum è già esaurito
+        # Long: RSI non in ipercomprato (prezzo non ha già corso troppo)
+        # Short: RSI non in ipervenduto (prezzo non ha già caduto troppo)
+        rsi_ok_long = dataframe['rsi'] < self.rsi_limit_long.value
+        rsi_ok_short = dataframe['rsi'] > self.rsi_limit_short.value
+
+        long_signal = long_signal & rsi_ok_long
+        short_signal = short_signal & rsi_ok_short
 
         if self.use_macro_filter:
             long_signal = long_signal & (dataframe['close'] > dataframe['sma200_1h'])
