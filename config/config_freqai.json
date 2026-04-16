@@ -1,0 +1,104 @@
+{
+  "trading_mode": "futures",
+  "margin_mode": "isolated",
+  "max_open_trades": 4,
+  "stake_currency": "USDT",
+  "stake_amount": "unlimited",
+  "tradable_balance_ratio": 0.99,
+  "dry_run": true,
+  "dry_run_wallet": 1000,
+  "cancel_open_orders_on_exit": true,
+  "exchange": {
+    "name": "bybit",
+    "key": "",
+    "secret": "",
+    "ccxt_config": {
+      "enableRateLimit": true
+    },
+    "pair_whitelist": [
+      "BTC/USDT:USDT",
+      "ETH/USDT:USDT",
+      "SOL/USDT:USDT",
+      "DOGE/USDT:USDT",
+      "AVAX/USDT:USDT",
+      "ADA/USDT:USDT",
+      "SUI/USDT:USDT"
+    ],
+    "pair_blacklist": []
+  },
+  "entry_pricing": {
+    "price_side": "same",
+    "use_order_book": false
+  },
+  "exit_pricing": {
+    "price_side": "other",
+    "use_order_book": false
+  },
+  "order_types": {
+    "entry": "limit",
+    "exit": "market",
+    "stoploss": "market",
+    "stoploss_on_exchange": false
+  },
+  "pairlists": [
+    {
+      "method": "StaticPairList"
+    }
+  ],
+  "api_server": {
+    "enabled": false
+  },
+  "bot_name": "UltraAI",
+  "initial_state": "running",
+  "force_entry_enable": false,
+  "internals": {
+    "process_throttle_secs": 5
+  },
+  "trading_fees": 0.0006,
+  "freqai": {
+    "enabled": true,
+    "purge_old_models": 2,
+    "train_period_days": 60,
+    "backtest_period_days": 14,
+    "live_retrain_seecs": 7200,
+    "expiration_hours": 4,
+    "identifier": "ultra_ai_v1",
+    "fit_live_predictions_candles": 300,
+    "feature_parameters": {
+      "include_timeframes": [
+        "1h",
+        "4h"
+      ],
+      "include_corr_pairlist": [
+        "BTC/USDT:USDT",
+        "ETH/USDT:USDT"
+      ],
+      "label_period_candles": 24,
+      "include_shifted_candles": 3,
+      "indicator_periods_candles": [
+        10,
+        20,
+        50
+      ],
+      "DI_threshold": 1.0,
+      "weight_factor": 0.9,
+      "use_SVM_to_remove_outliers": true,
+      "noise_standard_deviation": 0.01
+    },
+    "data_split_parameters": {
+      "test_size": 0.15,
+      "shuffle": false
+    },
+    "model_training_parameters": {
+      "n_estimators": 500,
+      "learning_rate": 0.05,
+      "max_depth": 6,
+      "num_leaves": 64,
+      "min_child_samples": 30,
+      "feature_fraction": 0.8,
+      "bagging_fraction": 0.8,
+      "bagging_freq": 5,
+      "verbose": -1
+    }
+  }
+}
