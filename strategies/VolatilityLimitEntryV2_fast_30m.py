@@ -25,6 +25,8 @@ from typing import Optional
 from freqtrade.strategy import IStrategy, DecimalParameter, IntParameter
 from freqtrade.persistence import Trade
 from freqtrade.exchange import date_minus_candles
+import os
+import json as _json
 
 
 def resample_to_3h(df: DataFrame) -> DataFrame:
@@ -68,7 +70,7 @@ class VolatilityLimitEntryV2_fast_30m(IStrategy):
 
     minimal_roi = {"0": 100}
 
-    stoploss = -0.08
+    stoploss = -0.05
     use_custom_stoploss = False
 
     # Trailing: attivo da +8%, trail 4% sotto il picco
@@ -91,16 +93,141 @@ class VolatilityLimitEntryV2_fast_30m(IStrategy):
     use_macro_filter = True
     max_same_direction = 3
 
+    # DeepSeek Gate
+    use_deepseek = True
+    deepseek_min_confidence = 0.65
+    deepseek_signal_file = os.getenv("SIGNAL_FILE", "/freqtrade/user_data/deepseek_signals.json")
+    deepseek_max_age_minutes = 45
+
+    def _deepseek_allows_entry(self, pair: str, side: str) -> bool:
+        """
+        Legge il bias derivati calcolato da DeepSeek (funding rate + OI).
+        Blocca il trade se il mercato derivati segnala rischio nella direzione richiesta:
+          - LONG_RISK con conf >= threshold: blocca long (longs sovrappesati)
+          - SHORT_RISK con conf >= threshold: blocca short (shorts sovrappesati)
+        Non blocca mai su NEUTRAL o bias favorevole.
+        """
+        if not self.use_deepseek:
+            return True
+        try:
+            with open(self.deepseek_signal_file, "r") as f:
+                signals = _json.load(f)
+            sig = signals.get(pair, {})
+            if not sig:
+                return True
+            ts = sig.get("timestamp", "")
+            if ts:
+                from datetime import timezone
+                age_min = (datetime.now(timezone.utc) - datetime.fromisoformat(ts)).total_seconds() / 60
+                if age_min > self.deepseek_max_age_minutes:
+                    return True
+            bias = sig.get("bias", "NEUTRAL")
+            confidence = sig.get("confidence", 0.0)
+            # Blocca long se il mercato derivati segnala LONG_RISK (longs sovrappesati)
+            if side == "long" and bias == "LONG_RISK" and confidence >= self.deepseek_min_confidence:
+                return False
+            # Blocca short se il mercato derivati segnala SHORT_RISK (shorts sovrappesati)
+            if side == "short" and bias == "SHORT_RISK" and confidence >= self.deepseek_min_confidence:
+                return False
+            return True
+        except Exception:
+            return True
+
+    def _read_deepseek_signal(self, pair: str) -> dict:
+        """Legge il segnale DeepSeek dal file, ritorna {} se assente/scaduto/errore."""
+        try:
+            with open(self.deepseek_signal_file, "r") as f:
+                signals = _json.load(f)
+            sig = signals.get(pair, {})
+            if not sig:
+                return {}
+            ts = sig.get("timestamp", "")
+            if ts:
+                from datetime import timezone
+                age_min = (datetime.now(timezone.utc) - datetime.fromisoformat(ts)).total_seconds() / 60
+                if age_min > self.deepseek_max_age_minutes:
+                    return {}
+            return sig
+        except Exception:
+            return {}
+
+    def _conviction_score(self, pair: str, side: str, dataframe) -> float:
+        """
+        Conviction score 0.0-1.0 basato su tre segnali indipendenti:
+
+          1. ADX (forza del trend):
+             >= 20 → +0.25  (trend forte)
+             >= 15 → +0.15  (trend moderato)
+             >= 10 → +0.05  (trend debole)
+
+          2. ATRx (intensità del breakout = |close_change_3h| / atr_3h_raw):
+             >= 1.5 → +0.15  (breakout molto forte)
+             >= 1.0 → +0.10  (breakout forte)
+             >= 0.7 → +0.05  (breakout base)
+
+          3. DeepSeek derivati (conferma mercato):
+             LONG_OK/SHORT_OK conf>=0.70 → +0.35  (derivati confermano)
+             LONG_OK/SHORT_OK conf>=0.50 → +0.20  (derivati favorevoli)
+             NEUTRAL → +0.00
+             LONG_RISK/SHORT_RISK → -0.50  (derivati contro, penalizza forte)
+
+        Base: 0.25 → massimo teorico: 1.0
+        """
+        score = 0.25  # base
+
+        if not dataframe.empty:
+            last = dataframe.iloc[-1]
+
+            # ADX
+            adx = float(last.get('adx_4h', 0) or 0)
+            if adx >= 20:
+                score += 0.25
+            elif adx >= 15:
+                score += 0.15
+            elif adx >= 10:
+                score += 0.05
+
+            # ATRx: breakout strength relativo all'ATR grezzo (prima del moltiplicatore)
+            cc = abs(float(last.get('close_change_3h', 0) or 0))
+            atr_raw = float(last.get('atr_3h_raw', 0) or 0)
+            if atr_raw > 0:
+                atrx = cc / atr_raw
+                if atrx >= 1.5:
+                    score += 0.15
+                elif atrx >= 1.0:
+                    score += 0.10
+                elif atrx >= 0.7:
+                    score += 0.05
+
+        # DeepSeek derivati
+        if self.use_deepseek:
+            sig = self._read_deepseek_signal(pair)
+            if sig:
+                bias = sig.get("bias", "NEUTRAL")
+                conf = float(sig.get("confidence", 0.0))
+                confirms = (side == "long" and bias == "LONG_OK") or                            (side == "short" and bias == "SHORT_OK")
+                contradicts = (side == "long" and bias == "LONG_RISK") or                               (side == "short" and bias == "SHORT_RISK")
+                if confirms and conf >= 0.70:
+                    score += 0.35
+                elif confirms and conf >= 0.50:
+                    score += 0.20
+                elif contradicts:
+                    score -= 0.50  # penalità forte (già bloccato in confirm_trade_entry, ma riduce size comunque)
+
+        return max(0.0, min(1.0, score))
+
     def populate_indicators(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
         # Segnale direzione: resample a 3h dal 15min
         df_3h = resample_to_3h(dataframe)
-        df_3h['atr'] = calc_atr(df_3h) * self.atr_mult.value
+        df_3h['atr_raw'] = calc_atr(df_3h)
+        df_3h['atr'] = df_3h['atr_raw'] * self.atr_mult.value
         df_3h['close_change'] = df_3h['close'].diff()
 
         df_3h = df_3h.rename(columns={
             'atr': 'atr_3h',
+            'atr_raw': 'atr_3h_raw',
             'close_change': 'close_change_3h',
-        })[['date', 'atr_3h', 'close_change_3h']]
+        })[['date', 'atr_3h', 'atr_3h_raw', 'close_change_3h']]
 
         dataframe = pd.merge_asof(
             dataframe.sort_values('date'),
@@ -220,13 +347,51 @@ class VolatilityLimitEntryV2_fast_30m(IStrategy):
         same_dir_count = sum(1 for t in open_trades if t.is_short == is_short)
         if same_dir_count >= self.max_same_direction:
             return False
+        if not self._deepseek_allows_entry(pair, side):
+            return False
         return True
 
     def custom_stake_amount(self, pair: str, current_time: datetime, current_rate: float,
                              proposed_stake: float, min_stake: Optional[float],
                              max_stake: float, leverage: float, entry_tag: Optional[str],
                              side: str, **kwargs) -> float:
-        return max_stake / self.config.get('max_open_trades', 4) * 0.5
+        """
+        Position sizing dinamico basato su conviction score (0.0-1.0).
+
+        Tier di size:
+          score >= 0.75 → 150% base  (breakout forte + DeepSeek conferma)
+          score >= 0.55 → 100% base  (segnale buono, derivati ok)
+          score >= 0.35 →  60% base  (segnale debole, incertezza)
+          score <  0.35 →  30% base  (appena sopra soglia, rischio alto)
+
+        Base = max_stake / max_open_trades (distribuzione equa del capitale).
+        """
+        n_trades = self.config.get('max_open_trades', 4)
+        base_stake = max_stake / n_trades
+
+        dataframe, _ = self.dp.get_analyzed_dataframe(pair, self.timeframe)
+        score = self._conviction_score(pair, side, dataframe)
+
+        if score >= 0.75:
+            multiplier = 1.5
+            tier = "ALTA"
+        elif score >= 0.55:
+            multiplier = 1.0
+            tier = "MEDIA"
+        elif score >= 0.35:
+            multiplier = 0.6
+            tier = "BASSA"
+        else:
+            multiplier = 0.3
+            tier = "MINIMA"
+
+        stake = base_stake * multiplier
+        import logging
+        logging.getLogger(__name__).info(
+            f"[SIZING] {pair} {side.upper()} | score={score:.2f} tier={tier} "
+            f"| stake={stake:.2f} (x{multiplier} su base {base_stake:.2f})"
+        )
+        return max(min_stake or 0, min(stake, max_stake))
 
     def leverage(self, pair: str, current_time: datetime, current_rate: float,
                  proposed_leverage: float, max_leverage: float,
