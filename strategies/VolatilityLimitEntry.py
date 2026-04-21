@@ -55,7 +55,7 @@ def calc_atr(df: DataFrame, period: int = 14) -> pd.Series:
 class VolatilityLimitEntry(IStrategy):
     INTERFACE_VERSION = 3
 
-    timeframe = '15m'
+    timeframe = '1h'
     can_short = True
 
     order_types = {
@@ -65,8 +65,8 @@ class VolatilityLimitEntry(IStrategy):
         'stoploss_on_exchange': False
     }
 
-    # Ordine limit scade dopo 90 minuti se non riempito (6 candele 15min)
-    unfilledtimeout = {'entry': 90, 'exit': 60, 'unit': 'minutes'}
+    # Ordine limit scade dopo 3 ore se non riempito
+    unfilledtimeout = {'entry': 180, 'exit': 60, 'unit': 'minutes'}
 
     minimal_roi = {"0": 100}
 
@@ -81,8 +81,7 @@ class VolatilityLimitEntry(IStrategy):
 
     ignore_roi_if_entry_signal = True
     position_adjustment_enable = False
-    # 800 candele 15min = ~8 giorni + 200 candele per SMA200 su 1h (= 800 candele 15min)
-    startup_candle_count = 850
+    startup_candle_count = 210
 
     # Quanto risaliamo/scendiamo rispetto al breakout per piazzare il limit
     pullback_ratio = DecimalParameter(0.2, 0.7, default=0.5, decimals=1, space='buy', optimize=True)
@@ -112,8 +111,7 @@ class VolatilityLimitEntry(IStrategy):
             direction='backward'
         )
 
-        # SMA200 su base 1h — equivale a rolling(800) su 15min
-        dataframe['sma200_1h'] = dataframe['close'].rolling(800).mean()
+        dataframe['sma200_1h'] = dataframe['close'].rolling(200).mean()
 
         # RSI 14 su 15min per confermare il momentum
         delta = dataframe['close'].diff()

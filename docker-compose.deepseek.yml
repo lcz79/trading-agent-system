@@ -1,0 +1,16 @@
+services:
+  deepseek-producer:
+    build: ./deepseek_producer
+    container_name: deepseek_producer
+    restart: unless-stopped
+    environment:
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
+      - SIGNAL_FILE=/signals/deepseek_signals.json
+      - INTERVAL_SECONDS=1800
+    volumes:
+      - /home/luca/freqtrade/user_data:/signals:rw
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
