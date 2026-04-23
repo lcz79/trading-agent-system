@@ -1,0 +1,93 @@
+{
+  "trading_mode": "futures",
+  "margin_mode": "cross",
+  "max_open_trades": 6,
+  "stake_currency": "USDC",
+  "stake_amount": "unlimited",
+  "tradable_balance_ratio": 0.95,
+  "dry_run": false,
+  "dry_run_wallet": 0,
+  "cancel_open_orders_on_exit": true,
+  "exchange": {
+    "name": "hyperliquid",
+    "key": "0x4ca3b85368e4bd8e28f700f1629f79293b95e66c81dbd5a56f12377c6d440463",
+    "secret": "0x4ca3b85368e4bd8e28f700f1629f79293b95e66c81dbd5a56f12377c6d440463",
+    "password": "",
+    "ccxt_config": {
+      "walletAddress": "0xaB6197BA15EE4cEd03F5A9DD744a70113cD458eB",
+      "options": {
+        "defaultType": "swap"
+      },
+      "privateKey": "0x4ca3b85368e4bd8e28f700f1629f79293b95e66c81dbd5a56f12377c6d440463"
+    },
+    "pair_whitelist": [
+      "BTC/USDC:USDC",
+      "ETH/USDC:USDC",
+      "SOL/USDC:USDC",
+      "BNB/USDC:USDC",
+      "XRP/USDC:USDC",
+      "DOGE/USDC:USDC",
+      "AVAX/USDC:USDC",
+      "ADA/USDC:USDC",
+      "SUI/USDC:USDC",
+      "LINK/USDC:USDC",
+      "DOT/USDC:USDC",
+      "LTC/USDC:USDC",
+      "NEAR/USDC:USDC",
+      "ARB/USDC:USDC",
+      "OP/USDC:USDC",
+      "INJ/USDC:USDC",
+      "WIF/USDC:USDC",
+      "TIA/USDC:USDC",
+      "AAVE/USDC:USDC",
+      "ATOM/USDC:USDC",
+      "LDO/USDC:USDC",
+      "BCH/USDC:USDC"
+    ],
+    "pair_blacklist": []
+  },
+  "entry_pricing": {
+    "price_side": "other",
+    "use_order_book": true,
+    "order_book_top": 1
+  },
+  "exit_pricing": {
+    "price_side": "other",
+    "use_order_book": true,
+    "order_book_top": 1
+  },
+  "order_types": {
+    "entry": "market",
+    "exit": "market",
+    "stoploss": "market",
+    "stoploss_on_exchange": false
+  },
+  "pairlists": [
+    {
+      "method": "StaticPairList"
+    }
+  ],
+  "api_server": {
+    "enabled": true,
+    "listen_ip_address": "0.0.0.0",
+    "listen_port": 8080,
+    "verbosity": "error",
+    "enable_openapi": true,
+    "jwt_secret_key": "mitragliere_ft_2026",
+    "CORS_origins": [
+      "*"
+    ],
+    "username": "mitragliere",
+    "password": "trading2026"
+  },
+  "bot_name": "Mitragliere-FT",
+  "initial_state": "running",
+  "force_entry_enable": true,
+  "internals": {
+    "process_throttle_secs": 30
+  },
+  "trading_fees": {
+    "entry": 0.000432,
+    "exit": 0.000432
+  }
+}

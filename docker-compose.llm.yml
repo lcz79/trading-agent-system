@@ -1,0 +1,12 @@
+services:
+  llm_producer:
+    build: ./llm_producer
+    container_name: llm_producer
+    restart: unless-stopped
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - SIGNAL_FILE=/freqtrade/user_data/llm_signals.json
+      - INTERVAL_SECONDS=3600
+    volumes:
+      # Condivide la cartella user_data con il container freqtrade
+      - /home/luca/freqtrade/user_data:/freqtrade/user_data

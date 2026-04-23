@@ -59,6 +59,11 @@ PAIRS = [
     'INJ/USDC:USDC',
     'WIF/USDC:USDC',
     'TIA/USDC:USDC',
+    # Aggiunte dopo backtest: WR 63-67%, decorrelate da BTC in range
+    'AAVE/USDC:USDC',
+    'ATOM/USDC:USDC',
+    'LDO/USDC:USDC',
+    'BCH/USDC:USDC',
 ]
 
 SIGNAL_FILE = os.getenv('SIGNAL_FILE', '/freqtrade/user_data/deepseek_signals.json')
